@@ -1,4 +1,4 @@
-from ..Hourglass.Hourglass import Hourglass
+from ..Hourglass.Hourglass import PoseNet
 from ..MessagePassingNetwork.VanillaMPN import VanillaMPN
 from Utils.ConstructGraph import *
 
@@ -6,12 +6,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-default_config = {"backbone": Hourglass,
+default_config = {"backbone": PoseNet,
                   "backbone_config": {"nstack": 4,
-                                      "input_dim": 256,
-                                      "output_size": 68},
+                                      "inp_dim": 256,
+                                      "oup_dim": 68},
                   "message_passing": VanillaMPN,
-                  "message_passing_config": {
+                  "message_passing_config": {"steps": 2,
+                                             "node_feature_dim": 128,
+                                             "edge_feature_dim": 128,
 
                   },
                   "graph_constructor": NaiveGraphConstructor
@@ -32,20 +34,27 @@ class PoseEstimationBaseline(nn.Module):
         self.pool = nn.MaxPool2d(3, 1, 1)
 
     def forward(self, imgs: torch.Tensor, keypoints_gt=None) -> torch.tensor:
-        score_map, features = self.backbone(imgs)
+        scoremap, features, early_features = self.backbone(imgs)
+        scoremap = scoremap[:, -1, :17]
 
-        features = self.feature_gather(score_map)
+        features = self.feature_gather(features)
 
-        graph_consturctor = self.graph_constructor(score_map, features, keypoints_gt)
+        graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt)
 
-        x, edge_attr, edge_index, edge_labels, joint_det = graph_consturctor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, joint_det = graph_constructor.construct_graph()
 
-        pred = self.mpn(x, edge_attr, edge_index)
+        pred = self.mpn(x, edge_attr, edge_index).squeeze()
+        if not self.with_logits:
+            pred = F.sigmoid(pred)
 
-        return pred
+        return pred, joint_det, edge_index, edge_labels
 
     def loss(self, output, targets) -> torch.Tensor:
         if self.with_logits:
             return F.binary_cross_entropy_with_logits(output, targets)
         else:
             return F.binary_cross_entropy(output, targets)
+
+    def freeze_backbone(self):
+        for param in self.backbone.parameters():
+            param.requires_grad = False

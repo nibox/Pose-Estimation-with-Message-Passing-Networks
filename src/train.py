@@ -1,11 +1,9 @@
 import torch
 from torch.utils.data import DataLoader
-from pycocotools.coco import COCO
 import Models.Hourglass.Hourglass as hourglass
 from CocoKeypoints import CocoKeypoints
 import numpy as np
-import matplotlib.pyplot as plt
-import os
+import Models.PoseEstimation.PoseEstimation as pose
 
 
 def create_train_validation_split(data_root, batch_size):
@@ -15,17 +13,22 @@ def create_train_validation_split(data_root, batch_size):
     return DataLoader(train_set, batch_size=batch_size, shuffle=True), None
 
 
-def load_model(path, device, **kwargs):
+def load_model(path, device, pretrained_path=None):
 
+    assert not (path is not None and pretrained_path is not None)
     def rename_key(key):
         # assume structure is model.module.REAL_NAME
         return ".".join(key.split(".")[2:])
 
-    model = hourglass.PoseNet(kwargs["nstack"], kwargs["input_dim"], kwargs["output_size"])
-    state_dict = torch.load(path, map_location=device)
-    # rename weights in state dict
-    state_dict_new = {rename_key(k): v for k, v in state_dict["state_dict"].items()}
-    model.load_state_dict(state_dict_new)
+    #model = hourglass.PoseNet(kwargs["nstack"], kwargs["input_dim"], kwargs["output_size"])
+    model = pose.PoseEstimationBaseline(pose.default_config)
+    if path is not None:
+        state_dict = torch.load(path, map_location=device)
+        model.load_state_dict(state_dict)
+    elif pretrained_path is not None:
+        state_dict = torch.load(pretrained_path, map_location=device)
+        state_dict_new = {rename_key(k): v for k, v in state_dict["state_dict"].items()}
+        model.backbone.load_state_dict(state_dict_new)
 
     return model
 
@@ -37,15 +40,20 @@ def main():
     torch.manual_seed(seed)
 
     dataset_path = "../../storage/user/kistern/coco"
-    model_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
+    pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
+    model_path = None
+
 
     # hyperparameters
     learn_rate = 3e-5
     num_epochs = 10
     batch_size = 1
 
-    model = load_model(model_path, device, **hourglass.default_config)
+    print("Load model")
+    model = load_model(model_path, device, pretrained_path=pretrained_path)
     model.to(device)
+    model.freeze_backbone()
+    print("Load dataset")
     train_loader, valid_loader = create_train_validation_split(dataset_path, batch_size=batch_size)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
@@ -56,15 +64,24 @@ def main():
 
             # split batch
             imgs, masks, keypoints = batch
+            imgs = imgs.to(device)
+            masks = masks.to(device)
+            keypoints = keypoints.to(device)
+            pred, joint_det, edge_index, edge_labels = model(imgs, keypoints)
 
-            scoremap, features, early_features = model(imgs.to(device))
-            torch.save(early_features.detach().cpu(), "early_features.pt")
+            loss = model.loss(pred, edge_labels)
+            loss.backward()
+            optimizer.step()
+
+
+            print(f"Iter: {iter}, loss:{loss.item()}")
+            # scoremap, features, early_features = model(imgs.to(device))
+            # torch.save(early_features.detach().cpu(), "early_features.pt")
             """torch.save(imgs.detach().cpu(), "imgs.pt")
             torch.save(masks.detach().cpu(), "masks.pt")
             torch.save(keypoints.detach().cpu(), "keypoints.pt")
             torch.save(scoremap.detach().cpu(), "score.pt")
             torch.save(features.detach().cpu(), "features.pt")"""
-            break
 
             # forward pass
 

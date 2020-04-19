@@ -27,12 +27,12 @@ class NaiveGraphConstructor:
 
         # construct node features
         x = joint_features.T
-        #x_positions = torch.stack([joint_x, joint_y], 1)
 
         # construct joint_det graph (fully connected)
         # edge_index, _ = gutils.dense_to_sparse(torch.ones([num_joints_det, num_joints_det], dtype=torch.long))
         # todo using k_nn and setting distances between joints of certain type on can create the different graphs
-        edge_index = torch_geometric.nn.knn_graph(joint_det[:, :2], 50)
+        temp = joint_det[:, :2].float()
+        edge_index = torch_geometric.nn.knn_graph(temp, 50)
         edge_index = gutils.to_undirected(edge_index)
         edge_index, _ = gutils.remove_self_loops(edge_index)
 
@@ -48,6 +48,18 @@ class NaiveGraphConstructor:
 
             # joint_map = non_maximum_suppression(self.scoremaps[batch], threshold=0.007)
             # print(f"gt kp: {num_joints_gt}, d kp: {num_joints_det}")
+
+            ###############cheating#################
+            # extend joint_det with joints_gt in order to have a perfect matching at train time
+            # !!! be careufull to use it at test time!!!
+            # todo move in function
+            person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
+            tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].long()
+            joints_gt_position = torch.cat([tmp, joint_idx_gt.unsqueeze(1)], 1)
+            unique_elements = torch.eq(joints_gt_position[:, :2].unsqueeze(1), joint_det[:, :2])
+            unique_elements = unique_elements[:, :, 0] & unique_elements[:, :, 1]
+            unique_elements = unique_elements.sum(dim=0)
+            joint_det = torch.cat([joint_det[unique_elements == 0], joints_gt_position], 0)
 
             x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch])
 
@@ -69,13 +81,13 @@ class NaiveGraphConstructor:
         num_joints_gt = len(person_idx_gt)
 
         joints_position_gt = joints_gt[:, :, :2]
-        joints_position_gt = joints_position_gt.view(-1, 1, 2)
+        joints_position_gt = joints_position_gt.view(-1, 1, 2).long().float()  # !!! cast to long !!! and then to float
         distances = torch.norm(joint_det[:, :2] - joints_position_gt, dim=2)
         distances = distances.view(30, 17, num_joints_det)  # todo include ref to max number of people
         # set the distances of joint pairse of different types to high cost s.t. they are not matched
         for jt in range(17):
             distances[:, jt, joint_det[:, 2] != jt] = 1000000.0
-        cost_mat = distances[person_idx_gt, joint_idx_gt].detach().numpy()
+        cost_mat = distances[person_idx_gt, joint_idx_gt].detach().cpu().numpy()
         sol = linear_sum_assignment(cost_mat)
         cost = np.sum(cost_mat[sol[0], sol[1]])
         print(f"Assignment cost: {cost}")
@@ -104,7 +116,7 @@ class NaiveGraphConstructor:
         person_2 = person_idx_ext_2[node_to_gt[edge_index[1]]]
         edge_labels = torch.where(torch.eq(person_1, person_2), torch.ones(num_edges), torch.zeros(num_edges))
 
-        return edge_labels
+        return edge_labels.to(joint_det.device)
 
 
 def joint_det_from_scoremap(scoremap, threshold=0.007):

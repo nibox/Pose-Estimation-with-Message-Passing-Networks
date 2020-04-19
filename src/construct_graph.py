@@ -108,83 +108,6 @@ def draw_poses(img: [torch.tensor, np.array], persons, fname=None):
 
 
 def main():
-    """"# evil_joint_position = keypoints[0, person_idx_gt, joint_idx_gt, :2][19]
-    # np_score = scoremap[joint_idx_gt[19]].detach().numpy()
-    # this image has 6 persons, but selecting top 30 makes more sense because then the number of joint per image is same
-    batch = 0
-    imgs, masks, keypoints = torch.load("imgs.pt"), torch.load("masks.pt"), torch.load("keypoints.pt")
-    scoremap, features = torch.load("score.pt"), torch.load("features.pt")
-    scoremap = scoremap[0, -1, :17]
-
-    feature_gather = nn.Conv2d(256, 128, 3, 1, 1, bias=True)
-    features = feature_gather(features)
-
-    person_idx_gt, joint_idx_gt = keypoints[batch, :, :, 2].nonzero(as_tuple=True)
-    num_joints_gt = len(person_idx_gt)
-
-    joint_map = non_maximum_suppression(scoremap, threshold=0.007)
-    joint_idx_det, joint_y, joint_x = joint_map.nonzero(as_tuple=True)
-    num_joints_det = len(joint_idx_det)
-    print(f"gt kp: {num_joints_gt}, d kp: {num_joints_det}")
-
-    # match joint_gt to joint_det
-    # calculate distances between joint_det and joint_gt
-    # these distances for a cost matrix for the matching between joint_gt and joint_det
-    keypoints = keypoints[batch, :, :, :2]
-    joint_positions_det = torch.stack([joint_x, joint_y], 1)
-    keypoints = keypoints.view(-1, 1, 2)
-    distances = torch.norm(joint_positions_det - keypoints, dim=2)
-    distances = distances.view(30, 17, num_joints_det)
-    # set the distances of joint pairse of different types to high cost s.t. they are not matched
-    for jt in range(17):
-        distances[:, jt, joint_idx_det != jt] = 1000000.0
-
-    cost_mat = distances[person_idx_gt, joint_idx_gt].detach().numpy()
-    sol = linear_sum_assignment(cost_mat)
-    cost = np.sum(cost_mat[sol[0], sol[1]])
-    print(f"Assignment cost: {cost}")
-    # sol maps nodes to gt joints/  gt joints to nodes and connectivity maps between gt joints
-    # create mapping joint_det -> joint_gt
-    # because not all joint_det have a corresponding partner all other joints_dets are mapped to 0
-    # this means the position of joint_gt given joint_idx_det is node_to_gt[joint_idx_det] - 1
-    node_to_gt = torch.zeros(num_joints_det, dtype=torch.int) - 1
-    node_to_gt[sol[1]] = torch.arange(0, num_joints_gt, dtype=torch.int)
-    node_to_gt = node_to_gt.long() + 1
-
-
-    # joint_locations tuple (joint type, height, width)
-    # extract joint features from feature map
-    joint_features = features[0, :, joint_y, joint_x]
-
-    # construct node features
-    x = joint_features.T
-    # construct inital edge_features
-    edge_attr_y = joint_y.unsqueeze(1) - joint_y
-    edge_attr_x = joint_x.unsqueeze(1) - joint_x
-    edge_attr = torch.stack([edge_attr_x, edge_attr_y], 2).view(-1, 2).float()
-
-    # construct joint_det graph (fully connected)
-    edge_index, _ = gutils.dense_to_sparse(torch.ones([num_joints_det, num_joints_det], dtype=torch.long))
-    edge_index, _ = gutils.remove_self_loops(edge_index)
-    edge_index = gutils.to_undirected(edge_index)
-
-    # construct edge labels
-    # idea: an edge has label 1 if source and destination node are assigned to joint_gt of the same person
-    # this results in an fully connected pose graph per person
-    num_edges = num_joints_det * num_joints_det - num_joints_det
-    # person_idx_ext_(1/2) map joint_gt_idx to the respective person (node_to_gt maps to joint_gt_idx + 1 and
-    # because person_idx_ext_() is shifted one to the right it evens out) node_to_gt maps joint_det without match to 0
-    # which gets mapped by person_idx_ext_() to -1/-2 that means that comparing the persons, each joint_det
-    # is mapped to, results in no edge for joint_dets without match since -1 != -2 and an edge for joint_dets
-    # of same person
-    person_idx_ext = torch.zeros(len(person_idx_gt) + 1) - 1
-    person_idx_ext[1:] = person_idx_gt
-    person_idx_ext_2 = torch.zeros(len(person_idx_gt) + 1) - 2
-    person_idx_ext_2[1:] = person_idx_gt
-    person_1 = person_idx_ext[node_to_gt[edge_index[0]]]
-    person_2 = person_idx_ext_2[node_to_gt[edge_index[1]]]
-    edge_label = torch.where(torch.eq(person_1, person_2), torch.ones(num_edges), torch.zeros(num_edges))
-    """
 
     # todo use crowd mask
     imgs, masks, keypoints = torch.load("imgs.pt"), torch.load("masks.pt"), torch.load("keypoints.pt")
@@ -197,7 +120,7 @@ def main():
     features = feature_gather(features)
     t = features.cpu().numpy()
 
-    constr = NaiveGraphConstructor(scoremap, features, keypoints)
+    constr = NaiveGraphConstructor(scoremap.cuda(), features.cuda(), keypoints.cuda())
     x, edge_attr, edge_index, edge_labels, joint_det = constr.construct_graph()
 
     #################################

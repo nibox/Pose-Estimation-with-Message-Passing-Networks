@@ -111,7 +111,7 @@ class VanillaMPN(torch.nn.Module):
         self.edge_embedding = nn.Sequential(nn.Linear(2, 32),
                                             non_linearity,
                                             nn.Linear(32, edge_feature_dim))
-        self.node_embedding = nn.Sequential(nn.Linear(256, 128),
+        self.node_embedding = nn.Sequential(nn.Linear(128, 128),
                                             non_linearity,
                                             nn.Linear(128, node_feature_dim))
 
