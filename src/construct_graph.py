@@ -146,7 +146,7 @@ def main():
 
     #######################
 
-    optimizer = torch.optim.Adam(model.parameters(), betas=(0.9, 0.999), lr=3e-5)
+    optimizer = torch.optim.Adam(model.parameters(), betas=(0.9, 0.999), lr=3e-4)
     loss = nn.BCEWithLogitsLoss()
     for i in range(10000):
 
@@ -163,7 +163,7 @@ def main():
         optimizer.step()
         result = edge.cpu().sigmoid().squeeze()
         result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
-        accuracy = gutils.accuracy(result, edge_labels)
+        accuracy = gutils.accuracy(result, edge_labels.cpu())
 
         if i % 10 == 0:
             print(f"Iter: {i} loss {loss.item():6f} "

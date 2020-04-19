@@ -13,6 +13,7 @@ class NaiveGraphConstructor:
         self.features = features
         self.joints_gt = joints_gt
         self.batch_size = scoremaps.shape[0]
+        self.device = scoremaps.device
 
     def _construct_mpn_graph(self, joint_det, features):
         # joint_locations tuple (joint type, height, width)
@@ -23,6 +24,7 @@ class NaiveGraphConstructor:
 
         joint_x = joint_det[:, 0]
         joint_y = joint_det[:, 1]
+        joint_type = joint_det[:, 2]
         joint_features = features[:, joint_y, joint_x]
 
         # construct node features
@@ -31,15 +33,29 @@ class NaiveGraphConstructor:
         # construct joint_det graph (fully connected)
         # edge_index, _ = gutils.dense_to_sparse(torch.ones([num_joints_det, num_joints_det], dtype=torch.long))
         # todo using k_nn and setting distances between joints of certain type on can create the different graphs
+        # todo remove connections between same type
         temp = joint_det[:, :2].float()
         edge_index = torch_geometric.nn.knn_graph(temp, 50)
         edge_index = gutils.to_undirected(edge_index)
         edge_index, _ = gutils.remove_self_loops(edge_index)
 
-        # construct inital edge_features
+        # construct edge labels (each connection type is one label
+        labels = torch.arange(0, 17 * 17, dtype=torch.long, device=self.device).view(17, 17)
+        connection_type = labels[joint_type[edge_index[0]], joint_type[edge_index[1]]]
+         # remove connections between same type
+        same_type_connection_types = torch.arange(0, 17*17, 18, dtype=torch.long, device=self.device)
+        assert same_type_connection_types.shape[0] == 17
+        same_type_connections = torch.eq(connection_type.unsqueeze(1), same_type_connection_types).sum(dim=1)
+        edge_index = edge_index.T
+        edge_index = edge_index[same_type_connections == 0].T
+        connection_type = connection_type[same_type_connections == 0]
+        connection_label = torch.nn.functional.one_hot(connection_type, num_classes=17*17)
+
         edge_attr_y = joint_y[edge_index[1]] - joint_y[edge_index[0]]
         edge_attr_x = joint_x[edge_index[1]] - joint_x[edge_index[0]]
-        edge_attr = torch.stack([edge_attr_x, edge_attr_y], 1).view(-1, 2).float()
+
+        edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1), connection_label], dim=1).float()
+
         return x, edge_attr, edge_index
 
     def construct_graph(self):
