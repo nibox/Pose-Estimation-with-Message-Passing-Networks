@@ -57,7 +57,7 @@ def main():
 
     # hyperparameters
     learn_rate = 3e-5
-    num_epochs = 10
+    num_epochs = 9
     batch_size = 16
 
     print("Load model")
@@ -96,7 +96,7 @@ def main():
                   f"Recall: {recall(result, edge_labels, 2)} "
                   f"Accuracy: {accuracy(result, edge_labels)}")
 
-            writer.add_scalar("Loss/train", loss.item(), iter)
+            writer.add_scalar("Loss/train", loss.item(), iter + epoch * len(train_loader))
         model.eval()
 
         print("#### BEGIN VALIDATION ####")
