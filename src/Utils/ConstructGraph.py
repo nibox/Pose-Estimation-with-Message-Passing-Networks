@@ -106,7 +106,6 @@ class NaiveGraphConstructor:
         cost_mat = distances[person_idx_gt, joint_idx_gt].detach().cpu().numpy()
         sol = linear_sum_assignment(cost_mat)
         cost = np.sum(cost_mat[sol[0], sol[1]])
-        print(f"Assignment cost: {cost}")
 
         # construct edge labels
         # idea: an edge has label 1 if source and destination node are assigned to joint_gt of the same person

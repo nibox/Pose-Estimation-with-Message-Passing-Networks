@@ -110,9 +110,9 @@ def draw_poses(img: [torch.tensor, np.array], persons, fname=None):
 def main():
 
     # todo use crowd mask
-    imgs, masks, keypoints = torch.load("imgs.pt"), torch.load("masks.pt"), torch.load("keypoints.pt")
-    scoremap, features, early_features = torch.load("score.pt"), torch.load("features.pt"), torch.load(
-        "early_features.pt")
+    imgs, masks, keypoints = torch.load("test_output/imgs.pt"), torch.load("test_output/masks.pt"), torch.load("test_output/keypoints.pt")
+    scoremap, features, early_features = torch.load("test_output/score.pt"), torch.load("test_output/features.pt"), torch.load(
+        "test_output/early_features.pt")
     scoremap = scoremap[:, -1, :17]
 
     # feature_gather = nn.Conv2d(256, 128, 3, 1, 1, bias=True)
@@ -139,14 +139,22 @@ def main():
 
     #################################
     # model = MPN(128, 2)
-    model = VanillaMPN(3, 64, 64).cuda()
+    config = {"steps": 4,
+              "node_input_dim": 256,
+              "edge_input_dim": 2 + 17*17,
+              "node_feature_dim": 128,
+              "edge_feature_dim": 128,
+              "node_hidden_dim": 256,
+              "edge_hidden_dim": 512}
+    model = VanillaMPN(**config).cuda()
     print(f"trainable parameters: {count_parameters(model)}")
 
     data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr, edge_labels=edge_labels)
 
     #######################
 
-    optimizer = torch.optim.Adam(model.parameters(), betas=(0.9, 0.999), lr=3e-4)
+    optimizer = torch.optim.Adam(model.parameters(), betas=(0.9, 0.999), lr=3e-5)
+    # lr_scheduler = torch.optim.lr_scheduler.StepLR()
     loss = nn.BCEWithLogitsLoss()
     for i in range(10000):
 
@@ -174,9 +182,9 @@ def main():
             break
     print(f"Iter: {i} loss {loss.item()} "
           f"accuracy: {accuracy}, "
-          f"precision: {gutils.precision(result, edge_labels, 1)} "
-          f"recall: {gutils.recall(result, edge_labels, 1)} "
-          f"minimal_acc: {gutils.accuracy(torch.zeros_like(edge_labels), edge_labels)}")
+          f"precision: {gutils.precision(result, edge_labels.cpu(), 1)} "
+          f"recall: {gutils.recall(result, edge_labels.cpu(), 1)} "
+          f"minimal_acc: {gutils.accuracy(torch.zeros_like(edge_labels.cpu()), edge_labels.cpu())}")
 
 
 def count_parameters(model):

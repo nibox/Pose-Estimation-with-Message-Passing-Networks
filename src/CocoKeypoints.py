@@ -5,7 +5,9 @@ import numpy as np
 from torch.utils.data import Dataset
 from PIL import Image
 import cv2
+import pickle
 import matplotlib.pyplot as plt
+import os
 
 
 def get_transform(center, scale, res, rot=0):
@@ -44,13 +46,13 @@ def kpt_affine(kpt, mat):
 
 class CocoKeypoints(Dataset):
 
-    def __init__(self, path, mini=False, input_size=512, output_size=128, **kwargs):
-        np.random.seed(kwargs["seed"])
-        torch.manual_seed(kwargs["seed"])
+    def __init__(self, path, mini=False, input_size=512, output_size=128, mode="train", seed=0, filter_empty=True):
+        np.random.seed(seed)
+        torch.manual_seed(seed)
 
         self.root_path = path
         # todo deal with different setups and with the different splits
-        ann_path = f"{self.root_path}/annotations/person_keypoints_{kwargs['mode']}2014.json"
+        ann_path = f"{self.root_path}/annotations/person_keypoints_{mode}2014.json"
         self.coco = COCO(ann_path)
         self.input_size = input_size
         self.output_size = output_size
@@ -58,12 +60,33 @@ class CocoKeypoints(Dataset):
 
         self.cat_ids = self.coco.getCatIds(catNms=["person"])
         self.img_ids = self.coco.getImgIds(catIds=self.cat_ids)
+        if filter_empty:
+            cached = os.path.exists("usable_ids.p")
+            if cached:
+                self.img_ids = pickle.load(open("usable_ids.p", "rb"))
+            else:
+                empty_ids = []
+                usable_ids = []
+                for id in self.img_ids:
+                    ann_ids = self.coco.getAnnIds(imgIds=id)  # keypoints, bbox, sem mask?
+                    ann = self.coco.loadAnns(ids=ann_ids)
+                    not_empty = False
+                    for i in range(len(ann)):
+                        keypoints = np.array(ann[i]["keypoints"]).reshape([-1, 3])
+                        not_empty = not_empty or np.sum(keypoints[:, 2]) >= 1
+
+                    if not_empty:
+                        usable_ids.append(id)
+                    else:
+                        empty_ids.append(id)
+                self.img_ids = usable_ids
+                pickle.dump(self.img_ids, open("usable_ids.p", "wb"))
+
         if mini:
             self.img_ids = np.random.choice(self.img_ids, 4000)
 
     def __getitem__(self, idx):
         img_id = int(self.img_ids[idx])  # img_ids is array of numpy.int32
-        print(img_id)
         ann_ids = self.coco.getAnnIds(imgIds=img_id)  # keypoints, bbox, sem mask?
         img_info = self.coco.loadImgs(img_id)[0]
         ann = self.coco.loadAnns(ids=ann_ids)

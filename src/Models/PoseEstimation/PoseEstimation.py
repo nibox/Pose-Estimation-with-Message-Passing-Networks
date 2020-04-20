@@ -11,18 +11,21 @@ default_config = {"backbone": PoseNet,
                                       "inp_dim": 256,
                                       "oup_dim": 68},
                   "message_passing": VanillaMPN,
-                  "message_passing_config": {"steps": 2,
+                  "message_passing_config": {"steps": 4,
+                                             "node_input_dim": 128,
+                                             "edge_input_dim": 2 + 17 * 17,
                                              "node_feature_dim": 128,
                                              "edge_feature_dim": 128,
-
-                  },
+                                             "node_hidden_dim": 256,
+                                             "edge_hidden_dim": 512
+                                             },
                   "graph_constructor": NaiveGraphConstructor
                   }
 
 
 class PoseEstimationBaseline(nn.Module):
 
-    def __init__(self, config, with_logits=False):
+    def __init__(self, config, with_logits=True):
         super().__init__()
         self.backbone = config["backbone"](**config["backbone_config"])
         self.mpn = config["message_passing"](**config["message_passing_config"])
@@ -45,13 +48,13 @@ class PoseEstimationBaseline(nn.Module):
 
         pred = self.mpn(x, edge_attr, edge_index).squeeze()
         if not self.with_logits:
-            pred = F.sigmoid(pred)
+            pred = torch.sigmoid(pred)
 
         return pred, joint_det, edge_index, edge_labels
 
-    def loss(self, output, targets) -> torch.Tensor:
+    def loss(self, output, targets, pos_weight=None) -> torch.Tensor:
         if self.with_logits:
-            return F.binary_cross_entropy_with_logits(output, targets)
+            return F.binary_cross_entropy_with_logits(output, targets, pos_weight=pos_weight)
         else:
             return F.binary_cross_entropy(output, targets)
 
