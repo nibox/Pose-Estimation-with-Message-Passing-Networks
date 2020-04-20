@@ -81,7 +81,10 @@ def main():
             keypoints = keypoints.to(device)
             pred, joint_det, edge_index, edge_labels = model(imgs, keypoints)
 
-            pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
+            if len(edge_labels[edge_labels==1]) != 0:
+                pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
+            else:
+                pos_weight = torch.tensor(1.0)
             loss = model.loss(pred, edge_labels, pos_weight=pos_weight)
             loss.backward()
             optimizer.step()
@@ -105,7 +108,10 @@ def main():
                 keypoints = keypoints.to(device)
                 pred, joint_det, edge_index, edge_labels = model(imgs, keypoints)
 
-                pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
+                if len(edge_labels[edge_labels == 1]) != 0:
+                    pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
+                else:
+                    pos_weight = torch.tensor(1.0)
                 loss = model.loss(pred, edge_labels, pos_weight=pos_weight)
                 result = pred.sigmoid().squeeze()
                 result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
