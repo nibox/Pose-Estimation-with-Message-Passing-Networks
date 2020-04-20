@@ -6,7 +6,6 @@ from torch.utils.data import Dataset
 from PIL import Image
 import cv2
 import pickle
-import matplotlib.pyplot as plt
 import os
 
 
@@ -61,7 +60,7 @@ class CocoKeypoints(Dataset):
         self.cat_ids = self.coco.getCatIds(catNms=["person"])
         self.img_ids = self.coco.getImgIds(catIds=self.cat_ids)
         if filter_empty:
-            cached = os.path.exists("usable_ids.p")
+            cached = os.path.exists("usable_ids.p") and True
             if cached:
                 self.img_ids = pickle.load(open("usable_ids.p", "rb"))
             else:
@@ -145,21 +144,13 @@ class CocoKeypoints(Dataset):
         return len(self.img_ids)
 
 
-def ann_to_scoremap(ann, height, width):
-    # todo preprocessing before score map creation (
-    #
-    pass
-
-
 def pack_keypoints_for_batch(keypoints: np.array, max_num_people):
     out = np.zeros([max_num_people, 17, 3])
     out[:len(keypoints)] = keypoints
     return out
 
 
-
 if __name__ == "__main__":
     dataset_path = "../../storage/user/kistern/coco"
     dataset = CocoKeypoints(dataset_path, seed=0, mode="train")
 
-    dataset[0]

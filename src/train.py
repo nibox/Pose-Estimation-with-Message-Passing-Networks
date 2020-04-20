@@ -58,7 +58,7 @@ def main():
     # hyperparameters
     learn_rate = 3e-5
     num_epochs = 10
-    batch_size = 1
+    batch_size = 16
 
     print("Load model")
     model = load_model(model_path, device, pretrained_path=pretrained_path)
@@ -96,9 +96,12 @@ def main():
                   f"Recall: {recall(result, edge_labels, 2)} "
                   f"Accuracy: {accuracy(result, edge_labels)}")
 
-            writer.add_scalar("Loss/train", loss.item())
+            writer.add_scalar("Loss/train", loss.item(), iter)
         model.eval()
 
+        print("#### BEGIN VALIDATION ####")
+        valid_loss = []
+        valid_acc = []
         with torch.no_grad():
             for iter, batch in enumerate(valid_loader):
                 # split batch
@@ -116,12 +119,13 @@ def main():
                 result = pred.sigmoid().squeeze()
                 result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
 
-                print(f"Iter: {iter}, loss:{loss.item():6f}, "
-                      f"Precision : {precision(result, edge_labels, 2).item()} "
-                      f"Recall: {recall(result, edge_labels, 2).item()} "
-                      f"Accuracy: {accuracy(result, edge_labels)}")
+                valid_loss.append(loss.item())
+                valid_acc.append(accuracy(result, edge_labels))
+        print(f"Epoch: {epoch}, loss:{np.mean(valid_loss):6f}, "
+              f"Accuracy: {np.mean(valid_acc)}")
 
-                writer.add_scalar("Loss/valid", loss.item())
+        writer.add_scalar("Loss/valid", np.mean(valid_loss), epoch)
+        writer.add_scalar("Metric/valid_acc", np.mean(valid_acc), epoch)
         torch.save({"epoch": epoch,
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict()

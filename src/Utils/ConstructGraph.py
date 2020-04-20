@@ -8,12 +8,13 @@ from Utils.Utils import *
 
 class NaiveGraphConstructor:
 
-    def __init__(self, scoremaps, features, joints_gt):
+    def __init__(self, scoremaps, features, joints_gt, mode):
         self.scoremaps = scoremaps
         self.features = features
         self.joints_gt = joints_gt
         self.batch_size = scoremaps.shape[0]
         self.device = scoremaps.device
+        self.mode = mode
 
     def _construct_mpn_graph(self, joint_det, features):
         # joint_locations tuple (joint type, height, width)
@@ -34,7 +35,7 @@ class NaiveGraphConstructor:
         # edge_index, _ = gutils.dense_to_sparse(torch.ones([num_joints_det, num_joints_det], dtype=torch.long))
         # todo using k_nn and setting distances between joints of certain type on can create the different graphs
         # todo remove connections between same type
-        temp = joint_det[:, :2].float()
+        temp = joint_det[:, :2].float()  # nn.knn_graph (cuda) can't handle int64 tensors
         edge_index = torch_geometric.nn.knn_graph(temp, 50)
         edge_index = gutils.to_undirected(edge_index)
         edge_index, _ = gutils.remove_self_loops(edge_index)
@@ -59,6 +60,8 @@ class NaiveGraphConstructor:
         return x, edge_attr, edge_index
 
     def construct_graph(self):
+        x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list = [], [], [], [], []
+        num_node_list = [0]
         for batch in range(self.batch_size):
             joint_det = joint_det_from_scoremap(self.scoremaps[batch], threshold=0.007)
 
@@ -69,13 +72,14 @@ class NaiveGraphConstructor:
             # extend joint_det with joints_gt in order to have a perfect matching at train time
             # !!! be careufull to use it at test time!!!
             # todo move in function
-            person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
-            tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].long()
-            joints_gt_position = torch.cat([tmp, joint_idx_gt.unsqueeze(1)], 1)
-            unique_elements = torch.eq(joints_gt_position[:, :2].unsqueeze(1), joint_det[:, :2])
-            unique_elements = unique_elements[:, :, 0] & unique_elements[:, :, 1]
-            unique_elements = unique_elements.sum(dim=0)
-            joint_det = torch.cat([joint_det[unique_elements == 0], joints_gt_position], 0)
+            if self.mode == "train":
+                person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
+                tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].long()
+                joints_gt_position = torch.cat([tmp, joint_idx_gt.unsqueeze(1)], 1)
+                unique_elements = torch.eq(joints_gt_position[:, :2].unsqueeze(1), joint_det[:, :2])
+                unique_elements = unique_elements[:, :, 0] & unique_elements[:, :, 1]
+                unique_elements = unique_elements.sum(dim=0)
+                joint_det = torch.cat([joint_det[unique_elements == 0], joints_gt_position], 0)
 
             x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch])
 
@@ -83,8 +87,22 @@ class NaiveGraphConstructor:
             edge_labels = None
             if self.joints_gt is not None:
                 edge_labels = NaiveGraphConstructor._construct_edge_labels(joint_det, self.joints_gt[batch], edge_index)
+            x_list.append(x)
+            num_node_list.append(x.shape[0] + num_node_list[-1])
+            edge_attr_list.append(edge_attr)
+            edge_index_list.append(edge_index)
+            edge_labels_list.append(edge_labels)
+            joint_det_list.append(joint_det)
+        # update edge_indices for batching
+        for i in range(1, len(x_list)):
+            edge_index_list[i] += num_node_list[i]
+        x_list = torch.cat(x_list, 0)
+        edge_attr_list = torch.cat(edge_attr_list, 0)
+        edge_index_list = torch.cat(edge_index_list, 1)
+        edge_labels_list = torch.cat(edge_labels_list, 0)
+        joint_det_list = torch.cat(joint_det_list, 0)
 
-            return x, edge_attr, edge_index, edge_labels, joint_det
+        return x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list
 
     @staticmethod
     def _construct_edge_labels(joint_det, joints_gt, edge_index):
