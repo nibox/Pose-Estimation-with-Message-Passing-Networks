@@ -13,6 +13,28 @@ from Utils.dataset_utils import Graph
 from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
 
 
+def reverse_affine_map(keypoints, img_size_orig):
+    """
+    Reverses the transformation resulting from the input argument (using get_transform). Used to map output keypoints to
+    original space in order to evaluate them.
+    :param center:
+    :param scale:
+    :param res:
+    :return:
+    """
+    gt_width = img_size_orig[0]
+    gt_height = img_size_orig[1]
+    scale = max(gt_height, gt_width) / 200
+    mat = get_transform((gt_width / 2, gt_height / 2), scale, (128, 128))
+    inv_mat = np.linalg.inv(mat)[:2]  # might this lead to numerical errors?
+    inv_mat = np.zeros([3, 3], dtype=np.float)
+    inv_mat[0, 0], inv_mat[1, 1] = 1 / mat[0, 0], 1 / mat[1, 1]
+    inv_mat[0, 2], inv_mat[1, 2] = -mat[0, 2] / mat[0, 0], -mat[1, 2] / mat[1, 1]
+    inv_mat = inv_mat[:2]
+    keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], inv_mat)
+    return keypoints
+
+
 def create_train_validation_split(data_root, batch_size, mini=False):
     # todo connect the preprosseing with the model selection (input size etc)
     # todo add validation
@@ -81,7 +103,7 @@ def main():
     modus = "train" if mini else "valid"  # decides which validation set to use. "valid" means the coco2014 validation
 
     dataset_path = "../../storage/user/kistern/coco"
-    model_path = "../log/PoseEstimationBaseline/tmp/pose_estimation.pth"
+    model_path = "../log/PoseEstimationBaseline/2/pose_estimation.pth"
     # set is used, "train" means validation set corresponding to the mini train set is used )
     if modus == "train":
         train_ids, valid_ids = pickle.load(open("mini_train_valid_split.p", "rb"))
@@ -96,6 +118,7 @@ def main():
     anns = []
     with torch.no_grad():
         for i in range(10):
+            print(f"ITERATION {i}")
             imgs, masks, keypoints = eval_set[i]
             imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
             # masks = masks.to(device)
@@ -104,8 +127,10 @@ def main():
             keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
             pred, joint_det, edge_index, edge_labels = model(imgs, keypoints, with_logits=False)
 
-            pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
-            test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_labels)
+            print(f"num_edges: {pred.shape[0]}")
+            print(f"{i} num_detect {joint_det.shape[0]}")
+            #pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
+            test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
             sol = cluster_graph(test_graph, "MUT", complete=False)
             sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
             persons_pred = graph_cluster_to_persons(joint_det, sparse_sol)  # might crash
@@ -113,14 +138,17 @@ def main():
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
             gt_height = img_info["height"]
             gt_width = img_info["width"]
-            scale = gt_height * 200 if gt_height > gt_width else gt_width * 200
-            mat = get_transform((64, 64), scale, (gt_width, gt_height))[:2]
+            scale = max(gt_height, gt_width) / 200
+            mat = get_transform((gt_width / 2, gt_height / 2), scale, (128, 128))
+            inv_mat = np.linalg.inv(mat)[:2]  # might this lead to numerical errors?
             tmp = np.ascontiguousarray(np.copy(persons_pred[:, :, :2]))
-            persons_pred[:, :, :2] = kpt_affine(tmp, mat)
+            persons_pred[:, :, :2] = kpt_affine(tmp, inv_mat)
 
             ann = gen_ann_format(persons_pred, eval_set.img_ids[i])
             anns.append(ann)
-    coco_eval(eval_set.coco, anns, eval_set.img_ids[:10].astype(np.int))
+    # for i in range(10):
+    #    coco_eval(eval_set.coco, [anns[i]], eval_set.img_ids[i].astype(np.int))
+        coco_eval(eval_set.coco, anns, eval_set.img_ids[:10].astype(np.int))
 
 
 if __name__ == "__main__":

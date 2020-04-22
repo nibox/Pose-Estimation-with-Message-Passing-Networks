@@ -74,7 +74,7 @@ class NaiveGraphConstructor:
             # todo move in function
             if self.mode == "train":
                 person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
-                tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].long()
+                tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long()
                 joints_gt_position = torch.cat([tmp, joint_idx_gt.unsqueeze(1)], 1)
                 unique_elements = torch.eq(joints_gt_position[:, :2].unsqueeze(1), joint_det[:, :2])
                 unique_elements = unique_elements[:, :, 0] & unique_elements[:, :, 1]
@@ -115,7 +115,7 @@ class NaiveGraphConstructor:
         num_joints_gt = len(person_idx_gt)
 
         joints_position_gt = joints_gt[:, :, :2]
-        joints_position_gt = joints_position_gt.view(-1, 1, 2).long().float()  # !!! cast to long !!! and then to float
+        joints_position_gt = joints_position_gt.view(-1, 1, 2).round().float()  # !!! cast to long !!! and then to float
         distances = torch.norm(joint_det[:, :2] - joints_position_gt, dim=2)
         distances = distances.view(30, 17, num_joints_det)  # todo include ref to max number of people
         # set the distances of joint pairse of different types to high cost s.t. they are not matched
@@ -168,7 +168,7 @@ def graph_cluster_to_persons(joints, joint_connections):
     joints, joint_connections = to_numpy(joints), to_numpy(joint_connections)
     from scipy.sparse import csr_matrix
     from scipy.sparse.csgraph import connected_components
-    # consturct dense adj matrix
+    # construct dense adj matrix
     num_nodes = len(joints)
     adj_matrix = np.zeros([num_nodes, num_nodes])
     adj_matrix[joint_connections[0], joint_connections[1]] = 1
@@ -180,7 +180,7 @@ def graph_cluster_to_persons(joints, joint_connections):
         person_joints = joints[person_labels == i]
         person_joint_types = person_joints[:, 2]
         if len(person_joints) > 17:
-            print("Mutant detected!!")
+            print(f"Mutant detected!! It has {len(person_joints)} joints!!")
 
         if len(person_joints) > 1:  # isolated joints also form a cluster -> ignore them
             # rearrange person joints

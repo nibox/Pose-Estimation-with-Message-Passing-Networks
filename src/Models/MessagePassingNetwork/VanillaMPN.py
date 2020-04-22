@@ -18,7 +18,7 @@ class MPN(MessagePassing):
 
         x_i, x_j = x[i], x[j]
         e_ij = edge_attr
-        edge_attr = self.mlp_edge(torch.cat([x_j, x_i, e_ij], dim=1))  # todo ask if edge features are permutation inv
+        edge_attr = self.mlp_edge(torch.cat([x_j, x_i, e_ij], dim=1))
 
         # edge_index, _ = add_self_loops(edge_index, num_nodes=x.size(0))
 

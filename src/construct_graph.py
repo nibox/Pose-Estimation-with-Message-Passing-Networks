@@ -138,15 +138,15 @@ def main():
     #alternative_sol = edge_index[:, edge_labels == 1]
 
     persons_det = graph_cluster_to_persons(joint_det, sparse_sol)
-    draw_detection(imgs[0], joint_det, keypoints[0], "img.png")
-    draw_poses(imgs[0], persons_det, "img_poses.png")
+    #draw_detection(imgs[0], joint_det, keypoints[0], "img.png")
+    #draw_poses(imgs[0], persons_det, "img_poses.png")
     keypoints = keypoints.cpu().numpy()
-    draw_poses(imgs[0], keypoints[0], "img_poses_gt.png")
+    # draw_poses(imgs[0], keypoints[0], "img_poses_gt.png")
 
 
     #################################
     # model = MPN(128, 2)
-    config = {"steps": 8,
+    config = {"steps": 4,
               "node_input_dim": 256,
               "edge_input_dim": 2 + 17*17,
               "node_feature_dim": 128,

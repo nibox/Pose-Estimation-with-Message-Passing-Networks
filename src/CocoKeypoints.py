@@ -67,9 +67,15 @@ class CocoKeypoints(Dataset):
             img = np.array(Image.open(f).convert("RGB"))
 
         # load keypoints
-        keypoints = np.zeros([num_people, 17, 3])  # 17 joints with xy position and visibility flag
+        keypoints_np = np.zeros([num_people, 17, 3])  # 17 joints with xy position and visibility flag
+        keypoints_list = []
         for i in range(num_people):
-            keypoints[i] = np.array(ann[i]["keypoints"]).reshape([-1, 3])
+            keypoints_np[i] = np.array(ann[i]["keypoints"]).reshape([-1, 3])
+            t = np.sum(np.array(ann[i]["keypoints"]).reshape([-1, 3]), axis=0)
+            if np.sum(np.array(ann[i]["keypoints"]).reshape([-1, 3]), axis=0)[2] > 0:
+                keypoints_list.append(np.array(ann[i]["keypoints"]).reshape([-1, 3]))
+
+        keypoints = np.array(keypoints_list).astype(np.float)
         # in the code keypoints2 is created (seems to include only persons with atleast one visible keypoint)
         # not sure if it is necessary
 

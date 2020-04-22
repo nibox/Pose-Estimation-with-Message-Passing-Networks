@@ -24,47 +24,64 @@ def create_train_validation_split(data_root, batch_size, mini=False):
             train = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=train_ids)
             valid = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=valid_ids)
 
-        return DataLoader(train, batch_size=batch_size, shuffle=True), DataLoader(valid, batch_size=batch_size)
+        return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True), \
+               DataLoader(valid, batch_size=batch_size, num_workers=4, pin_memory=True)
     else:
         raise NotImplementedError
 
 
+def load_checkpoint(path, model_class, model_config, device):
+    model = load_model(path, model_class, model_config, device)
+    model.to(device)
+    model.freeze_backbone()
+
+    state_dict = torch.load(path)
+
+    optimizer = torch.optim.Adam(model.parameters())
+    optimizer.load_state_dict(state_dict["optimizer_state_dict"])
+    return model, optimizer, state_dict["epoch"]
 
 
 def main():
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
     seed = 0
     np.random.seed(seed)
     torch.manual_seed(seed)
 
     dataset_path = "../../storage/user/kistern/coco"
     pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
-    model_path = None
+    model_path = "../log/PoseEstimationBaseline/2/pose_estimation.pth"
 
     log_dir = "../log/PoseEstimationBaseline/2"
     model_save_path = f"{log_dir}/pose_estimation.pth"
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
 
-
     # hyperparameters
     learn_rate = 3e-5
-    num_epochs = 30
+    num_epochs = 50
     batch_size = 16  # pretty much largest possible batch size
-
+    ##########################################################
     print("Load model")
-    model = load_model(model_path, pose.PoseEstimationBaseline, pose.default_config, device, pretrained_path=pretrained_path)
-    model.to(device)
-    model.freeze_backbone()
+    if model_path is not None:
+        model, optimizer, start_epoch = load_checkpoint(model_path,
+                                                        pose.PoseEstimationBaseline, pose.default_config, device)
+        start_epoch += 1
+    else:
+        model = load_model(model_path, pose.PoseEstimationBaseline, pose.default_config, device,
+                           pretrained_path=pretrained_path)
+        model.to(device)
+        model.freeze_backbone()
+        optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
+        start_epoch = 0
     print("Load dataset")
     train_loader, valid_loader = create_train_validation_split(dataset_path, batch_size=batch_size, mini=True)
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
-    print(len(train_loader))
     print("#####Begin Training#####")
+    epoch_len = len(train_loader)
     for epoch in range(num_epochs):
         model.train()
-        for iter, batch in enumerate(train_loader):
+        for i, batch in enumerate(train_loader):
+            iter = i + (epoch_len * (start_epoch + epoch))
             optimizer.zero_grad()
             # split batch
             imgs, masks, keypoints = batch
@@ -73,7 +90,7 @@ def main():
             keypoints = keypoints.to(device)
             pred, joint_det, edge_index, edge_labels = model(imgs, keypoints)
 
-            if len(edge_labels[edge_labels==1]) != 0:
+            if len(edge_labels[edge_labels == 1]) != 0:
                 pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
             else:
                 pos_weight = torch.tensor(1.0)
@@ -89,8 +106,8 @@ def main():
                   f"Accuracy: {accuracy(result, edge_labels):5f} "
                   f"F1 score: {f1_score(result, edge_labels, 2)[1]:5f}")
 
-            writer.add_scalar("Loss/train", loss.item(), iter + epoch * len(train_loader))
-            writer.add_scalar("Metric/train_f1:", f1_score(result, edge_labels, 2)[1], iter + epoch * len(train_loader))
+            writer.add_scalar("Loss/train", loss.item(), iter)
+            writer.add_scalar("Metric/train_f1:", f1_score(result, edge_labels, 2)[1], iter)
         model.eval()
 
         print("#### BEGIN VALIDATION ####")
@@ -98,7 +115,7 @@ def main():
         valid_acc = []
         valid_f1 = []
         with torch.no_grad():
-            for iter, batch in enumerate(valid_loader):
+            for batch in valid_loader:
                 # split batch
                 imgs, masks, keypoints = batch
                 imgs = imgs.to(device)
@@ -117,13 +134,13 @@ def main():
                 valid_loss.append(loss.item())
                 valid_acc.append(accuracy(result, edge_labels))
                 valid_f1.append(f1_score(result, edge_labels, 2)[1])
-        print(f"Epoch: {epoch}, loss:{np.mean(valid_loss):6f}, "
+        print(f"Epoch: {epoch + start_epoch}, loss:{np.mean(valid_loss):6f}, "
               f"Accuracy: {np.mean(valid_acc)}")
 
-        writer.add_scalar("Loss/valid", np.mean(valid_loss), epoch)
-        writer.add_scalar("Metric/valid_acc", np.mean(valid_acc), epoch)
-        writer.add_scalar("Metric/valid_f1:", np.mean(valid_f1), epoch)
-        torch.save({"epoch": epoch,
+        writer.add_scalar("Loss/valid", np.mean(valid_loss), epoch + start_epoch)
+        writer.add_scalar("Metric/valid_acc", np.mean(valid_acc), epoch + start_epoch)
+        writer.add_scalar("Metric/valid_f1:", np.mean(valid_f1), epoch + start_epoch)
+        torch.save({"epoch": epoch + start_epoch,
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict()
                     }, model_save_path)
