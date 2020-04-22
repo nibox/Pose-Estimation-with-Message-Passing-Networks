@@ -8,44 +8,11 @@ import cv2
 import pickle
 import os
 
-
-def get_transform(center, scale, res, rot=0):
-    # Generate transformation matrix
-    h = 200 * scale
-    t = np.zeros((3, 3))
-    t[0, 0] = float(res[1]) / h
-    t[1, 1] = float(res[0]) / h
-    t[0, 2] = res[1] * (-float(center[0]) / h + .5)
-    t[1, 2] = res[0] * (-float(center[1]) / h + .5)
-    t[2, 2] = 1
-    if not rot == 0:
-        rot = -rot  # To match direction of rotation from cropping
-        rot_mat = np.zeros((3, 3))
-        rot_rad = rot * np.pi / 180
-        sn, cs = np.sin(rot_rad), np.cos(rot_rad)
-        rot_mat[0, :2] = [cs, -sn]
-        rot_mat[1, :2] = [sn, cs]
-        rot_mat[2, 2] = 1
-        # Need to rotate around center
-        t_mat = np.eye(3)
-        t_mat[0, 2] = -res[1] / 2
-        t_mat[1, 2] = -res[0] / 2
-        t_inv = t_mat.copy()
-        t_inv[:2, 2] *= -1
-        t = np.dot(t_inv, np.dot(rot_mat, np.dot(t_mat, t)))
-    return t
-
-
-def kpt_affine(kpt, mat):
-    kpt = np.array(kpt)
-    shape = kpt.shape
-    kpt = kpt.reshape(-1, 2)
-    return np.dot(np.concatenate((kpt, kpt[:, 0:1] * 0 + 1), axis=1), mat.T).reshape(shape)
-
+from Utils.Utils import kpt_affine, get_transform
 
 class CocoKeypoints(Dataset):
 
-    def __init__(self, path, mini=False, input_size=512, output_size=128, mode="train", seed=0, filter_empty=True):
+    def __init__(self, path, mini=False, input_size=512, output_size=128, mode="train", seed=0, filter_empty=True, img_ids=None):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
@@ -58,8 +25,8 @@ class CocoKeypoints(Dataset):
         self.max_num_people = 30  # from github code
 
         self.cat_ids = self.coco.getCatIds(catNms=["person"])
-        self.img_ids = self.coco.getImgIds(catIds=self.cat_ids)
-        if filter_empty:
+        self.img_ids = img_ids if img_ids is not None else self.coco.getImgIds(catIds=self.cat_ids)
+        if filter_empty and img_ids is None:
             cached = os.path.exists("usable_ids.p") and True
             if cached:
                 self.img_ids = pickle.load(open("usable_ids.p", "rb"))
@@ -81,7 +48,7 @@ class CocoKeypoints(Dataset):
                 self.img_ids = usable_ids
                 pickle.dump(self.img_ids, open("usable_ids.p", "wb"))
 
-        if mini:
+        if mini and img_ids is None:
             self.img_ids = np.random.choice(self.img_ids, 4000)
 
     def __getitem__(self, idx):

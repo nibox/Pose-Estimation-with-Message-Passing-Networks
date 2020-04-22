@@ -36,7 +36,7 @@ class PoseEstimationBaseline(nn.Module):
 
         self.pool = nn.MaxPool2d(3, 1, 1)
 
-    def forward(self, imgs: torch.Tensor, keypoints_gt=None) -> torch.tensor:
+    def forward(self, imgs: torch.Tensor, keypoints_gt=None, with_logits=True) -> torch.tensor:
         scoremap, features, early_features = self.backbone(imgs)
         scoremap = scoremap[:, -1, :17]
 
@@ -48,13 +48,13 @@ class PoseEstimationBaseline(nn.Module):
         x, edge_attr, edge_index, edge_labels, joint_det = graph_constructor.construct_graph()
 
         pred = self.mpn(x, edge_attr, edge_index).squeeze()
-        if not self.with_logits:
+        if not with_logits:
             pred = torch.sigmoid(pred)
 
         return pred, joint_det, edge_index, edge_labels
 
-    def loss(self, output, targets, pos_weight=None) -> torch.Tensor:
-        if self.with_logits:
+    def loss(self, output, targets, with_logits=True, pos_weight=None) -> torch.Tensor:
+        if with_logits:
             return F.binary_cross_entropy_with_logits(output, targets, pos_weight=pos_weight)
         else:
             return F.binary_cross_entropy(output, targets)

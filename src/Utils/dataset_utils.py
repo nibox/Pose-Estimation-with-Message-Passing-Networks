@@ -39,7 +39,7 @@ class Graph(Data):
                            'node_labels', # Node binary values
                            'edge_labels'] # Edge binary values
         for attr_name in data_attr_names:
-            if hasattr(self, attr_name):
+            if hasattr(self, attr_name) and getattr(self, attr_name) is not None:
                 old_attr_val = getattr(self, attr_name)
                 setattr(self, attr_name, attr_change_fun(old_attr_val))
 

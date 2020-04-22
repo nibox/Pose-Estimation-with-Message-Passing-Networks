@@ -120,7 +120,14 @@ def main():
     features = feature_gather(features)
     t = features.cpu().numpy()
 
-    constr = NaiveGraphConstructor(scoremap.cuda(), features.cuda(), keypoints.cuda())
+    # test batching
+    scoremap_batch = torch.cat(16 * [scoremap], 0)
+    features_batch = torch.cat(16 * [features], 0)
+    keypoints_batch = torch.cat(16 * [keypoints], 0)
+    constr_batch = NaiveGraphConstructor(scoremap_batch.cuda(), features_batch.cuda(), keypoints_batch.cuda(), mode="train")
+    x, edge_attr, edge_index, edge_labels, joint_det = constr_batch.construct_graph()
+
+    constr = NaiveGraphConstructor(scoremap.cuda(), features.cuda(), keypoints.cuda(), mode="train")
     x, edge_attr, edge_index, edge_labels, joint_det = constr.construct_graph()
 
     #################################
@@ -139,7 +146,7 @@ def main():
 
     #################################
     # model = MPN(128, 2)
-    config = {"steps": 4,
+    config = {"steps": 8,
               "node_input_dim": 256,
               "edge_input_dim": 2 + 17*17,
               "node_feature_dim": 128,
@@ -155,7 +162,6 @@ def main():
 
     optimizer = torch.optim.Adam(model.parameters(), betas=(0.9, 0.999), lr=3e-5)
     # lr_scheduler = torch.optim.lr_scheduler.StepLR()
-    loss = nn.BCEWithLogitsLoss()
     for i in range(10000):
 
         optimizer.zero_grad()
