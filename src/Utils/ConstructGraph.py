@@ -74,7 +74,7 @@ class NaiveGraphConstructor:
             # todo move in function
             if self.mode == "train":
                 person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
-                tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long()
+                tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
                 joints_gt_position = torch.cat([tmp, joint_idx_gt.unsqueeze(1)], 1)
                 unique_elements = torch.eq(joints_gt_position[:, :2].unsqueeze(1), joint_det[:, :2])
                 unique_elements = unique_elements[:, :, 0] & unique_elements[:, :, 1]

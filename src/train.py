@@ -4,6 +4,7 @@ from CocoKeypoints import CocoKeypoints
 import numpy as np
 import pickle
 import Models.PoseEstimation.PoseEstimation as pose
+from Models.MessagePassingNetwork.VanillaMPN2 import default_config, VanillaMPN2
 from torch_geometric.utils import recall, accuracy, precision, f1_score
 from torch.utils.tensorboard import SummaryWriter
 import os
@@ -54,17 +55,20 @@ def main():
 
     dataset_path = "../../storage/user/kistern/coco"
     pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
-    model_path = "../log/PoseEstimationBaseline/2/pose_estimation.pth"
+    model_path = None# "../log/PoseEstimationBaseline/2/pose_estimation.pth"
 
-    log_dir = "../log/PoseEstimationBaseline/2"
+    log_dir = "../log/PoseEstimationBaseline/5"
     model_save_path = f"{log_dir}/pose_estimation.pth"
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
 
-    # hyperparameters
+    # hyperparameters and other stuff
     learn_rate = 3e-5
-    num_epochs = 100
+    num_epochs = 50
     batch_size = 16  # pretty much largest possible batch size
+    config = pose.default_config
+    config["message_passing"] = VanillaMPN2
+    config["message_passing_config"] = default_config
 
     ##########################################################
     print("Load model")

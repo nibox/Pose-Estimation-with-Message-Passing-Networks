@@ -11,14 +11,6 @@ default_config = {"backbone": PoseNet,
                                       "inp_dim": 256,
                                       "oup_dim": 68},
                   "message_passing": VanillaMPN,
-                  "message_passing_config": {"steps": 4,
-                                             "node_input_dim": 128,
-                                             "edge_input_dim": 2 + 17 * 17,
-                                             "node_feature_dim": 128,
-                                             "edge_feature_dim": 128,
-                                             "node_hidden_dim": 256,
-                                             "edge_hidden_dim": 512
-                                             },
                   "graph_constructor": NaiveGraphConstructor
                   }
 
