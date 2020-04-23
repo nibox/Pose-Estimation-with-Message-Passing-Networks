@@ -14,18 +14,22 @@ def create_train_validation_split(data_root, batch_size, mini=False):
     # todo connect the preprosseing with the model selection (input size etc)
     # todo add validation
     if mini:
-        if not os.path.exists("mini_train_valid_split.p"):
+        print("Using mini dataset")
+        tv_split_name = "tmp/mini_train_valid_split_4.p"
+        if not os.path.exists(tv_split_name):
+            print(f"Creating train validation split {tv_split_name}")
             data_set = CocoKeypoints(data_root, mini=True, seed=0, mode="train")
             train, valid = torch.utils.data.random_split(data_set, [3500, 500])
             train_valid_split = [train.dataset.img_ids[train.indices], valid.dataset.img_ids[valid.indices]]
-            pickle.dump(train_valid_split, open("mini_train_valid_split.p", "wb"))
+            pickle.dump(train_valid_split, open(tv_split_name, "wb"))
         else:
-            train_ids, valid_ids = pickle.load(open("mini_train_valid_split.p", "rb"))
+            print(f"Loading train validation split {tv_split_name}")
+            train_ids, valid_ids = pickle.load(open(tv_split_name, "rb"))
             train = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=train_ids)
             valid = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=valid_ids)
 
-        return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True), \
-               DataLoader(valid, batch_size=batch_size, num_workers=4, pin_memory=True)
+        return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8), \
+               DataLoader(valid, batch_size=batch_size, num_workers=8)
     else:
         raise NotImplementedError
 
@@ -59,8 +63,9 @@ def main():
 
     # hyperparameters
     learn_rate = 3e-5
-    num_epochs = 50
+    num_epochs = 100
     batch_size = 16  # pretty much largest possible batch size
+
     ##########################################################
     print("Load model")
     if model_path is not None:
@@ -90,7 +95,7 @@ def main():
             keypoints = keypoints.to(device)
             pred, joint_det, edge_index, edge_labels = model(imgs, keypoints)
 
-            if len(edge_labels[edge_labels == 1]) != 0:
+            if len(edge_labels[edge_labels == 1]) != 0 and len(edge_labels[edge_labels == 0]) != 0:
                 pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
             else:
                 pos_weight = torch.tensor(1.0)

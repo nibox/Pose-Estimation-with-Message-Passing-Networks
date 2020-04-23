@@ -27,10 +27,13 @@ class CocoKeypoints(Dataset):
         self.cat_ids = self.coco.getCatIds(catNms=["person"])
         self.img_ids = img_ids if img_ids is not None else self.coco.getImgIds(catIds=self.cat_ids)
         if filter_empty and img_ids is None:
-            cached = os.path.exists("usable_ids.p") and True
+            filtered_ids_fname = "tmp/usable_ids.p"
+            cached = os.path.exists(filtered_ids_fname) and True
             if cached:
-                self.img_ids = pickle.load(open("usable_ids.p", "rb"))
+                print("loading cached filtered image ids")
+                self.img_ids = pickle.load(open(filtered_ids_fname, "rb"))
             else:
+                print("Creating filtered image ids")
                 empty_ids = []
                 usable_ids = []
                 for id in self.img_ids:
@@ -39,14 +42,15 @@ class CocoKeypoints(Dataset):
                     not_empty = False
                     for i in range(len(ann)):
                         keypoints = np.array(ann[i]["keypoints"]).reshape([-1, 3])
-                        not_empty = not_empty or np.sum(keypoints[:, 2]) >= 1
+                        vis_flag_count = len(np.where(keypoints[:, 2] != 0)[0])
+                        not_empty = not_empty or vis_flag_count > 1
 
                     if not_empty:
                         usable_ids.append(id)
                     else:
                         empty_ids.append(id)
                 self.img_ids = usable_ids
-                pickle.dump(self.img_ids, open("usable_ids.p", "wb"))
+                pickle.dump(self.img_ids, open(filtered_ids_fname, "wb"))
 
         if mini and img_ids is None:
             self.img_ids = np.random.choice(self.img_ids, 4000)

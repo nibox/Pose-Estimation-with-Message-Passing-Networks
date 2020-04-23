@@ -39,13 +39,14 @@ def create_train_validation_split(data_root, batch_size, mini=False):
     # todo connect the preprosseing with the model selection (input size etc)
     # todo add validation
     if mini:
-        if not os.path.exists("mini_train_valid_split.p"):
+        tv_split_fname = "tmp/mini_train_valid_split_4.p"
+        if not os.path.exists(tv_split_fname):
             data_set = CocoKeypoints(data_root, mini=True, seed=0, mode="train")
             train, valid = torch.utils.data.random_split(data_set, [3500, 500])
             train_valid_split = [train.dataset.img_ids[train.indices], valid.dataset.img_ids[valid.indices]]
-            pickle.dump(train_valid_split, open("mini_train_valid_split.p", "wb"))
+            pickle.dump(train_valid_split, open(tv_split_fname, "wb"))
         else:
-            train_ids, valid_ids = pickle.load(open("train_valid_split.p", "rb"))
+            train_ids, valid_ids = pickle.load(open(tv_split_fname, "rb"))
             train = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=train_ids)
             valid = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=valid_ids)
 
@@ -103,11 +104,11 @@ def main():
     modus = "train" if mini else "valid"  # decides which validation set to use. "valid" means the coco2014 validation
 
     dataset_path = "../../storage/user/kistern/coco"
-    model_path = "../log/PoseEstimationBaseline/2/pose_estimation.pth"
+    model_path = "../log/PoseEstimationBaseline/3/pose_estimation.pth"
     # set is used, "train" means validation set corresponding to the mini train set is used )
     if modus == "train":
-        train_ids, valid_ids = pickle.load(open("mini_train_valid_split.p", "rb"))
-        eval_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=train_ids)
+        train_ids, valid_ids = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))
+        eval_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
         # valid = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=valid_ids)
     else:
         raise NotImplementedError
@@ -141,6 +142,9 @@ def main():
             scale = max(gt_height, gt_width) / 200
             mat = get_transform((gt_width / 2, gt_height / 2), scale, (128, 128))
             inv_mat = np.linalg.inv(mat)[:2]  # might this lead to numerical errors?
+            print(persons_pred.shape)
+            if persons_pred.shape[0] == 0:
+                continue
             tmp = np.ascontiguousarray(np.copy(persons_pred[:, :, :2]))
             persons_pred[:, :, :2] = kpt_affine(tmp, inv_mat)
 
