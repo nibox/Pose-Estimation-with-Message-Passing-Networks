@@ -10,9 +10,11 @@ import os
 
 from Utils.Utils import kpt_affine, get_transform
 
+
 class CocoKeypoints(Dataset):
 
-    def __init__(self, path, mini=False, input_size=512, output_size=128, mode="train", seed=0, filter_empty=True, img_ids=None):
+    def __init__(self, path, mini=False, input_size=512, output_size=128, mode="train", seed=0, filter_empty=True,
+                 img_ids=None):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
@@ -26,12 +28,14 @@ class CocoKeypoints(Dataset):
 
         self.cat_ids = self.coco.getCatIds(catNms=["person"])
         self.img_ids = img_ids if img_ids is not None else self.coco.getImgIds(catIds=self.cat_ids)
+        assert len(self.img_ids) == len(set(self.img_ids))
         if filter_empty and img_ids is None:
             filtered_ids_fname = "tmp/usable_ids.p"
             cached = os.path.exists(filtered_ids_fname) and True
             if cached:
                 print("loading cached filtered image ids")
                 self.img_ids = pickle.load(open(filtered_ids_fname, "rb"))
+                assert len(self.img_ids) == len(set(self.img_ids))
             else:
                 print("Creating filtered image ids")
                 empty_ids = []
@@ -53,7 +57,9 @@ class CocoKeypoints(Dataset):
                 pickle.dump(self.img_ids, open(filtered_ids_fname, "wb"))
 
         if mini and img_ids is None:
-            self.img_ids = np.random.choice(self.img_ids, 4000)
+            self.img_ids = np.random.choice(self.img_ids, 4000, replace=False)
+
+            assert len(self.img_ids) == len(set(self.img_ids))
 
     def __getitem__(self, idx):
         img_id = int(self.img_ids[idx])  # img_ids is array of numpy.int32
@@ -130,4 +136,3 @@ def pack_keypoints_for_batch(keypoints: np.array, max_num_people):
 if __name__ == "__main__":
     dataset_path = "../../storage/user/kistern/coco"
     dataset = CocoKeypoints(dataset_path, seed=0, mode="train")
-

@@ -8,13 +8,14 @@ from Utils.Utils import *
 
 class NaiveGraphConstructor:
 
-    def __init__(self, scoremaps, features, joints_gt, mode):
+    def __init__(self, scoremaps, features, joints_gt, use_gt=True, no_false_positives=False):
         self.scoremaps = scoremaps
         self.features = features
         self.joints_gt = joints_gt
         self.batch_size = scoremaps.shape[0]
         self.device = scoremaps.device
-        self.mode = mode
+        self.use_gt = use_gt
+        self.no_false_positives = no_false_positives
 
     def _construct_mpn_graph(self, joint_det, features):
         # joint_locations tuple (joint type, height, width)
@@ -36,6 +37,7 @@ class NaiveGraphConstructor:
         # todo using k_nn and setting distances between joints of certain type on can create the different graphs
         # todo remove connections between same type
         temp = joint_det[:, :2].float()  # nn.knn_graph (cuda) can't handle int64 tensors
+        # print(temp.shape)
         edge_index = torch_geometric.nn.knn_graph(temp, 50)
         edge_index = gutils.to_undirected(edge_index)
         edge_index, _ = gutils.remove_self_loops(edge_index)
@@ -72,7 +74,7 @@ class NaiveGraphConstructor:
             # extend joint_det with joints_gt in order to have a perfect matching at train time
             # !!! be careufull to use it at test time!!!
             # todo move in function
-            if self.mode == "train":
+            if self.use_gt:
                 person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
                 tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
                 joints_gt_position = torch.cat([tmp, joint_idx_gt.unsqueeze(1)], 1)
@@ -80,6 +82,8 @@ class NaiveGraphConstructor:
                 unique_elements = unique_elements[:, :, 0] & unique_elements[:, :, 1]
                 unique_elements = unique_elements.sum(dim=0)
                 joint_det = torch.cat([joint_det[unique_elements == 0], joints_gt_position], 0)
+                if self.no_false_positives:
+                    joint_det = joints_gt_position
 
             x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch])
 

@@ -11,7 +11,9 @@ default_config = {"backbone": PoseNet,
                                       "inp_dim": 256,
                                       "oup_dim": 68},
                   "message_passing": VanillaMPN,
-                  "graph_constructor": NaiveGraphConstructor
+                  "graph_constructor": NaiveGraphConstructor,
+                  "cheat": True,
+                  "use_gt": True
                   }
 
 
@@ -26,6 +28,9 @@ class PoseEstimationBaseline(nn.Module):
 
         self.with_logits = with_logits
 
+        self.cheat = config["cheat"]
+        self.use_gt = config["use_gt"]
+
         self.pool = nn.MaxPool2d(3, 1, 1)
 
     def forward(self, imgs: torch.Tensor, keypoints_gt=None, with_logits=True) -> torch.tensor:
@@ -34,8 +39,8 @@ class PoseEstimationBaseline(nn.Module):
 
         features = self.feature_gather(features)
 
-        mode = "train" if self.training else "valid"
-        graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, mode)
+        graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, use_gt=self.use_gt,
+                                                   no_false_positives=self.cheat)
 
         x, edge_attr, edge_index, edge_labels, joint_det = graph_constructor.construct_graph()
 

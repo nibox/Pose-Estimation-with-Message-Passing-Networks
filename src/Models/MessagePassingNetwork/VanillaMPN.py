@@ -5,7 +5,6 @@ from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import add_self_loops, degree
 
 
-
 class PerInvMLP(nn.Module):
 
     def __init__(self, node_feature_dim, edge_feature_dim):
@@ -30,6 +29,15 @@ class PerInvMLP(nn.Module):
         return edge_attr
 
 
+default_config = {"steps": 4,
+                  "node_input_dim": 128,
+                  "edge_input_dim": 2 + 17 * 17,
+                  "node_feature_dim": 128,
+                  "edge_feature_dim": 128,
+                  "node_hidden_dim": 256,
+                  "edge_hidden_dim": 512}
+
+
 class VanillaMPLayer(MessagePassing):
 
     # todo with or without inital feature skip connection
@@ -42,7 +50,6 @@ class VanillaMPLayer(MessagePassing):
                                       non_lin,
                                       )
 
-
         # self.mlp_edge = PerInvMLP(node_feature_dim, edge_feature_dim)
         self.mlp_node = nn.Sequential(nn.Linear(node_feature_dim + edge_feature_dim, node_feature_dim),
                                       non_lin,
@@ -51,7 +58,7 @@ class VanillaMPLayer(MessagePassing):
     def forward(self, x, edge_attr, edge_index):
         num_nodes = x.size(0)
 
-        j, i = edge_index # message is from j to i
+        j, i = edge_index  # message is from j to i
         x_i, x_j = x[i], x[j]
         e_ij = edge_attr
         edge_attr = self.mlp_edge(torch.cat([x_i, x_j, e_ij], dim=1))  # todo ask if edge features are permutation inv

@@ -21,11 +21,14 @@ def create_train_validation_split(data_root, batch_size, mini=False):
             print(f"Creating train validation split {tv_split_name}")
             data_set = CocoKeypoints(data_root, mini=True, seed=0, mode="train")
             train, valid = torch.utils.data.random_split(data_set, [3500, 500])
+            assert len(data_set.img_ids) == len(set(data_set.img_ids))
             train_valid_split = [train.dataset.img_ids[train.indices], valid.dataset.img_ids[valid.indices]]
             pickle.dump(train_valid_split, open(tv_split_name, "wb"))
         else:
             print(f"Loading train validation split {tv_split_name}")
             train_ids, valid_ids = pickle.load(open(tv_split_name, "rb"))
+            print(set(train_ids).intersection(set(valid_ids)))
+            assert len(set(train_ids).intersection(set(valid_ids))) == 0
             train = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=train_ids)
             valid = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=valid_ids)
 
@@ -57,18 +60,20 @@ def main():
     pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
     model_path = None# "../log/PoseEstimationBaseline/2/pose_estimation.pth"
 
-    log_dir = "../log/PoseEstimationBaseline/5"
+    log_dir = "../log/PoseEstimationBaseline/5_simple"
     model_save_path = f"{log_dir}/pose_estimation.pth"
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
 
     # hyperparameters and other stuff
-    learn_rate = 3e-5
+    learn_rate = 3e-4
     num_epochs = 50
     batch_size = 16  # pretty much largest possible batch size
     config = pose.default_config
     config["message_passing"] = VanillaMPN2
     config["message_passing_config"] = default_config
+    config["cheat"] = True
+    config["use_gt"] = True
 
     ##########################################################
     print("Load model")
