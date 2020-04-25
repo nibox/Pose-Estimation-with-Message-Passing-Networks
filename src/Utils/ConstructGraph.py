@@ -179,18 +179,29 @@ def graph_cluster_to_persons(joints, joint_connections):
     graph = csr_matrix(adj_matrix)
     n_components, person_labels = connected_components(graph, directed=False, return_labels=True)
     persons = []
+    mutant_detected = False
     for i in range(n_components):
         # check if cc has more than one node
         person_joints = joints[person_labels == i]
         person_joint_types = person_joints[:, 2]
+        if len(person_joints) <= 1:
+            continue
+        persons_det, persons_det_types = [person_joints], [person_joint_types]
         if len(person_joints) > 17:
             print(f"Mutant detected!! It has {len(person_joints)} joints!!")
+            mutant_detected = True
+            # find beginning of siamese twin an cut it
+            # joint types seems to be acsending so the mutant is at the index which drops in value
+            diff = person_joint_types[1:] - person_joint_types[:-1]
+            start_siamese = np.array(diff <= 0).astype(int).nonzero()[0] + 1
+            persons_det = np.split(person_joints, start_siamese)
+            persons_det_types= np.split(person_joint_types, start_siamese)
 
-        if len(person_joints) > 1:  # isolated joints also form a cluster -> ignore them
+        for person_joint, person_joint_types in zip(persons_det, persons_det_types):
             # rearrange person joints
             keypoints = np.zeros([17, 3])
-            keypoints[person_joint_types, :2] = person_joints[:, :2]
+            keypoints[person_joint_types, :2] = person_joint[:, :2]
             keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
             persons.append(keypoints)
     persons = np.array(persons)
-    return persons
+    return persons, mutant_detected
