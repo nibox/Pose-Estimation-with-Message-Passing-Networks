@@ -1,6 +1,7 @@
 from ..Hourglass.Hourglass import PoseNet
 from ..MessagePassingNetwork.VanillaMPN import VanillaMPN
 from Utils.ConstructGraph import *
+from Utils.Utils import FocalLoss
 
 import torch
 import torch.nn as nn
@@ -13,7 +14,9 @@ default_config = {"backbone": PoseNet,
                   "message_passing": VanillaMPN,
                   "graph_constructor": NaiveGraphConstructor,
                   "cheat": True,
-                  "use_gt": True
+                  "use_gt": True,
+                  "use_focal_loss": False,
+                  "use_neighbours": False
                   }
 
 
@@ -30,6 +33,10 @@ class PoseEstimationBaseline(nn.Module):
 
         self.cheat = config["cheat"]
         self.use_gt = config["use_gt"]
+        self.use_neighbours = config["use_neighbours"]
+        self.focal = None
+        if config["use_focal_loss"]:
+            self.focal = FocalLoss(logits=True)
 
         self.pool = nn.MaxPool2d(3, 1, 1)
 
@@ -40,7 +47,7 @@ class PoseEstimationBaseline(nn.Module):
         features = self.feature_gather(features)
 
         graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, use_gt=self.use_gt,
-                                                   no_false_positives=self.cheat)
+                                                   no_false_positives=self.cheat, use_neighbours=self.use_neighbours)
 
         x, edge_attr, edge_index, edge_labels, joint_det = graph_constructor.construct_graph()
 
@@ -51,6 +58,9 @@ class PoseEstimationBaseline(nn.Module):
         return pred, joint_det, edge_index, edge_labels
 
     def loss(self, output, targets, with_logits=True, pos_weight=None) -> torch.Tensor:
+        if self.focal is not None:
+            return self.focal(output, targets)
+
         if with_logits:
             return F.binary_cross_entropy_with_logits(output, targets, pos_weight=pos_weight)
         else:

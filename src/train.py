@@ -58,22 +58,24 @@ def main():
 
     dataset_path = "../../storage/user/kistern/coco"
     pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
-    model_path = None# "../log/PoseEstimationBaseline/2/pose_estimation.pth"
+    model_path =  "../log/PoseEstimationBaseline/6/pose_estimation.pth"
 
-    log_dir = "../log/PoseEstimationBaseline/5_simple"
+    log_dir = "../log/PoseEstimationBaseline/6_continue"
     model_save_path = f"{log_dir}/pose_estimation.pth"
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
 
     # hyperparameters and other stuff
-    learn_rate = 3e-4
-    num_epochs = 50
-    batch_size = 16  # pretty much largest possible batch size
+    learn_rate = 3e-5 #3e-4
+    num_epochs = 100
+    batch_size = 8  # pretty much largest possible batch size
     config = pose.default_config
     config["message_passing"] = VanillaMPN2
     config["message_passing_config"] = default_config
-    config["cheat"] = True
+    config["cheat"] = False
     config["use_gt"] = True
+    config["use_focal_loss"] = True
+    config["use_neighbours"] = False
 
     ##########################################################
     print("Load model")
@@ -100,7 +102,7 @@ def main():
             # split batch
             imgs, masks, keypoints = batch
             imgs = imgs.to(device)
-            masks = masks.to(device)
+            #masks = masks.to(device)
             keypoints = keypoints.to(device)
             pred, joint_det, edge_index, edge_labels = model(imgs, keypoints)
 
@@ -114,26 +116,36 @@ def main():
             result = pred.sigmoid().squeeze()
             result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
 
+            # metrics
+            # edge_labels[edge_labels<0.99] = 0.0  # some edge labels might be
+            prec = precision(result, edge_labels, 2)[1]
+            rec = recall(result, edge_labels, 2)[1]
+            acc = accuracy(result, edge_labels)
+            f1 = f1_score(result, edge_labels, 2)[1]
             print(f"Iter: {iter}, loss:{loss.item():6f}, "
-                  f"Precision : {precision(result, edge_labels, 2)[1]:5f} "
-                  f"Recall: {recall(result, edge_labels, 2)[1]:5f} "
-                  f"Accuracy: {accuracy(result, edge_labels):5f} "
-                  f"F1 score: {f1_score(result, edge_labels, 2)[1]:5f}")
+                  f"Precision : {prec:5f} "
+                  f"Recall: {rec:5f} "
+                  f"Accuracy: {acc:5f} "
+                  f"F1 score: {f1:5f}")
 
             writer.add_scalar("Loss/train", loss.item(), iter)
-            writer.add_scalar("Metric/train_f1:", f1_score(result, edge_labels, 2)[1], iter)
+            writer.add_scalar("Metric/train_f1:", f1, iter)
+            writer.add_scalar("Metric/train_prec:", prec, iter)
+            writer.add_scalar("Metric/train_rec:", rec, iter)
         model.eval()
 
         print("#### BEGIN VALIDATION ####")
         valid_loss = []
         valid_acc = []
         valid_f1 = []
+        valid_prec = []
+        valid_recall = []
         with torch.no_grad():
             for batch in valid_loader:
                 # split batch
                 imgs, masks, keypoints = batch
                 imgs = imgs.to(device)
-                masks = masks.to(device)
+                # masks = masks.to(device)
                 keypoints = keypoints.to(device)
                 pred, joint_det, edge_index, edge_labels = model(imgs, keypoints)
 
@@ -148,12 +160,16 @@ def main():
                 valid_loss.append(loss.item())
                 valid_acc.append(accuracy(result, edge_labels))
                 valid_f1.append(f1_score(result, edge_labels, 2)[1])
+                valid_prec.append(precision(result, edge_labels, 2)[1])
+                valid_recall.append(recall(result, edge_labels, 2)[1])
         print(f"Epoch: {epoch + start_epoch}, loss:{np.mean(valid_loss):6f}, "
               f"Accuracy: {np.mean(valid_acc)}")
 
         writer.add_scalar("Loss/valid", np.mean(valid_loss), epoch + start_epoch)
         writer.add_scalar("Metric/valid_acc", np.mean(valid_acc), epoch + start_epoch)
         writer.add_scalar("Metric/valid_f1:", np.mean(valid_f1), epoch + start_epoch)
+        writer.add_scalar("Metric/valid_prec:", np.mean(valid_prec), epoch + start_epoch)
+        writer.add_scalar("Metric/valid_recall:", np.mean(valid_recall), epoch + start_epoch)
         torch.save({"epoch": epoch + start_epoch,
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict()

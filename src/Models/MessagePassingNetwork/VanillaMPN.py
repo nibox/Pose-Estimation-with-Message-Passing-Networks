@@ -46,7 +46,9 @@ class VanillaMPLayer(MessagePassing):
         # todo better architecture
 
         non_lin = nn.ReLU()
-        self.mlp_edge = nn.Sequential(nn.Linear(node_feature_dim * 2 + edge_feature_dim, edge_feature_dim),
+        self.mlp_edge = nn.Sequential(nn.Linear(node_feature_dim * 2 + edge_feature_dim, 64),
+                                      non_lin,
+                                      nn.Linear(64, edge_feature_dim),
                                       non_lin,
                                       )
 
@@ -84,22 +86,22 @@ class VanillaMPN(torch.nn.Module):
         self.mpn = VanillaMPLayer(node_feature_dim, edge_feature_dim)
 
         non_linearity = nn.ReLU()
-        self.edge_embedding = nn.Sequential(nn.Linear(edge_input_dim, edge_hidden_dim),  # 2 + 17*17,
+        self.edge_embedding = nn.Sequential(nn.Linear(edge_input_dim, 256),  # 2 + 17*17,
                                             non_linearity,
-                                            nn.Linear(edge_hidden_dim, edge_hidden_dim),
+                                            nn.Linear(256, 128),
                                             non_linearity,
-                                            nn.Linear(edge_hidden_dim, edge_hidden_dim),
+                                            nn.Linear(128, 64),
                                             non_linearity,
-                                            nn.Linear(edge_hidden_dim, edge_feature_dim))
-        self.node_embedding = nn.Sequential(nn.Linear(node_input_dim, node_hidden_dim),
+                                            nn.Linear(64, edge_feature_dim))
+        self.node_embedding = nn.Sequential(nn.Linear(node_input_dim, 128),
                                             non_linearity,
-                                            nn.Linear(node_hidden_dim, node_hidden_dim),
+                                            nn.Linear(128, 64),
                                             non_linearity,
-                                            nn.Linear(node_hidden_dim, node_hidden_dim),
-                                            non_linearity,
-                                            nn.Linear(node_hidden_dim, node_feature_dim))
+                                            nn.Linear(64, node_feature_dim))
 
-        self.classification = nn.Sequential(nn.Linear(edge_feature_dim, 1))
+        self.classification = nn.Sequential(nn.Linear(edge_feature_dim, 16),
+                                            non_linearity,
+                                            nn.Linear(16, 1))
 
         self.steps = steps
 

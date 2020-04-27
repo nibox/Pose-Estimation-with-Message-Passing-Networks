@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import numpy as np
 
 def non_maximum_suppression(scoremap, threshold=0.05):
@@ -70,3 +71,25 @@ def get_transform(center, scale, res, rot=0):
         t_inv[:2, 2] *= -1
         t = np.dot(t_inv, np.dot(rot_mat, np.dot(t_mat, t)))
     return t
+
+
+class FocalLoss(nn.Module):
+    def __init__(self, alpha=1, gamma=2, logits=False, reduce=True):
+        super(FocalLoss, self).__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.logits = logits
+        self.reduce = reduce
+
+    def forward(self, inputs, targets):
+        if self.logits:
+            BCE_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduce=False)
+        else:
+            BCE_loss = F.binary_cross_entropy(inputs, targets, reduce=False)
+        pt = torch.exp(-BCE_loss)
+        F_loss = self.alpha * (1 - pt) ** self.gamma * BCE_loss
+
+        if self.reduce:
+            return torch.mean(F_loss)
+        else:
+            return F_loss
