@@ -168,23 +168,27 @@ class NaiveGraphConstructor:
             distances[type_det] = 1000.0
             distances[:, source_nodes_part_of_body] = 1000.0
             distances[distances >= 5] = 0.0
-            target_idxs, source_idxs = distances[source_nodes_part_of_body].nonzero(as_tuple=True)
-            distances[distances == 0.0] = 1000.0
-            weights = distances[source_nodes_part_of_body]
-            sigma = 2.0
-            weights = torch.exp(-1 * torch.pow(weights, 2) / (2*sigma**2))
-            weights[weights < 0.01] = 0.0  # not sure if necessary
+            distances = distances != 0
+            # remove ambiguous cases here
+            distances_tmp = distances[source_nodes_part_of_body.unique(sorted=True)]
+            mult_assignments = distances_tmp.sum(dim=0)
+            distances = distances[source_nodes_part_of_body]
+            distances[:, mult_assignments >1 ] = False
+
+            target_idxs, source_idxs = distances.long().nonzero(as_tuple=True)
             new_target_nodes = target_nodes_part_of_body[target_idxs]
             # at this point i have new edges from new canditates to old keypoints and label constructing is just ready from the weights
             # but i would have to remvoe duplicates edges from edge_index
             # so goal is to identifiy the indices of these duplicates
-            edge_to_label = torch.stack([source_idxs, new_target_nodes])
+            edge_to_label_1 = torch.stack([source_idxs, new_target_nodes])
+            edge_to_label_2 = torch.stack([new_target_nodes, source_idxs])
+            edge_to_label = torch.cat([edge_to_label_1, edge_to_label_2], 1)
             edge_comparision = torch.eq(edge_index.T.unsqueeze(1), edge_to_label.T)
             edge_comparision = edge_comparision[:, :, 0] & edge_comparision[:, :, 1]
             duplicate_edges = edge_comparision.sum(dim=1)
             existing_edges = edge_comparision.sum(dim=0)
             edge_labels_2 = torch.zeros(num_edges, device=joint_det.device)
-            edge_labels_2[duplicate_edges==1] = 1.0  # weights[target_idxs[existing_edges!=0], source_idxs[existing_edges!=0]]
+            edge_labels_2[duplicate_edges==1] = 1.0
 
             edge_labels_f += edge_labels_2.to(joint_det.device)
             assert edge_labels_f.max() <= 1.0
@@ -240,3 +244,5 @@ def graph_cluster_to_persons(joints, joint_connections):
             persons.append(keypoints)
     persons = np.array(persons)
     return persons, mutant_detected
+
+

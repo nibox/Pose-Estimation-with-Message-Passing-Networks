@@ -56,11 +56,11 @@ def test_construct_labels():
 
     joint_det = torch.tensor([[4, 4, 5], [8, 5, 6], [7, 6, 7],
                               [4, 1, 5], [8, 1, 7],
-                              [4, 2, 5]])
+                              [4, 2, 5], [4, 7, 5]])
     # detected joint is 5 (6ths)
     #
-    edge_index = torch.tensor([[0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5],
-                               [1, 2, 3, 4, 5, 2, 3, 4, 5, 0, 3, 4, 5, 1, 0, 4, 5, 1, 2, 0, 5, 1, 2, 3, 0, 0, 1, 2, 3, 4]])
+    edge_index = torch.tensor([[0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 0, 1, 2, 3, 4, 5],
+                               [1, 2, 3, 4, 5, 2, 3, 4, 5, 0, 3, 4, 5, 1, 0, 4, 5, 1, 2, 0, 5, 1, 2, 3, 0, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 6, 6, 6, 6, 6, 6]])
     constr = NaiveGraphConstructor(torch.zeros([1, 17, 128, 128]), None, None, use_neighbours=True)
     edge_labels = constr._construct_edge_labels(joint_det, joint_gt, edge_index)
     print(edge_index[0, edge_labels==1])
