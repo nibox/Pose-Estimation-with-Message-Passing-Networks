@@ -94,11 +94,11 @@ def main():
     mini = True
 
     dataset_path = "../../storage/user/kistern/coco"
-    model_path = "../log/PoseEstimationBaseline/5_simple/pose_estimation.pth"
+    model_path = "../log/PoseEstimationBaseline/6/pose_estimation_continue.pth"
     config = pose.default_config
     config["message_passing"] = VanillaMPN2
     config["message_passing_config"] = default_config
-    config["cheat"] = True
+    config["cheat"] = False
     config["use_gt"] = True
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
@@ -131,12 +131,33 @@ def main():
     print("Upper bound")
     coco_eval(eval_set.coco, anns, eval_set.img_ids.astype(np.int))
 
+    print("Upper bound 2")
+    anns = []
+    for i in range(500):
+
+        imgs, masks, keypoints = eval_set[i]
+        imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
+        keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
+        _, joint_det, edge_index, edge_labels = model(imgs, keypoints, with_logits=False)
+
+        test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_labels)
+        sol = cluster_graph(test_graph, "MUT", complete=False)
+        sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
+        persons_pred, _ = graph_cluster_to_persons(joint_det, sparse_sol)  # might crash
+
+        img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
+        if len(persons_pred.shape) == 1:  # this means none persons were detected
+            persons_pred = np.zeros([1, 17, 3])
+        persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
+
+        ann = gen_ann_format(persons_pred_orig, eval_set.img_ids[i])
+        anns.append(ann)
+    coco_eval(eval_set.coco, anns, eval_set.img_ids.astype(np.int))
     # eval model
     anns = []
     with torch.no_grad():
         for i in range(500):
 
-            print(f"ITERATION {i}")
             imgs, masks, keypoints = eval_set[i]
             imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
             # masks = masks.to(device)
@@ -146,8 +167,6 @@ def main():
             keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
             pred, joint_det, edge_index, _ = model(imgs, keypoints, with_logits=False)
 
-            print(f"num_edges: {pred.shape[0]}")
-            print(f"num_detect {joint_det.shape[0]}")
             # pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
             test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
             sol = cluster_graph(test_graph, "MUT", complete=False)

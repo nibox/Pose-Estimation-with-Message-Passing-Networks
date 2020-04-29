@@ -18,7 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-def draw_detection(img: torch.tensor, joint_det: torch.tensor, joint_gt: torch.tensor, fname=None):
+def draw_detection(img, joint_det, joint_gt, fname=None):
     """
     :param img: torcg.tensor. image
     :param joint_det: shape: (num_joints, 2) list of xy positions of detected joints (without classes or clustering)
@@ -26,10 +26,7 @@ def draw_detection(img: torch.tensor, joint_det: torch.tensor, joint_gt: torch.t
     :return:
     """
 
-    fig = plt.figure()
-    img = img.detach().cpu().numpy().copy()
-    joint_det = joint_det.detach().cpu().numpy()
-    joint_gt = joint_gt.detach().cpu().numpy()
+    img = to_numpy(img)
 
     for i in range(len(joint_det)):
         # scale up to 512 x 512
@@ -48,6 +45,7 @@ def draw_detection(img: torch.tensor, joint_det: torch.tensor, joint_gt: torch.t
                 if type != -1:
                     cv2.circle(img, (x, y), 3, (0., 0., 1.), -1)
 
+    fig = plt.figure()
     plt.imshow(img)
     if fname is not None:
         plt.savefig(fig=fig, fname=fname)
@@ -67,7 +65,13 @@ def draw_poses(img: [torch.tensor, np.array], persons, fname=None):
     img = to_numpy(img)
     assert img.shape[0] == 512
     assert img.shape[1] == 512
-    assert len(persons.shape) == 3
+
+    if len(persons) == 0:
+        fig = plt.figure()
+        plt.imshow(img)
+        plt.savefig(fig=fig, fname=fname)
+        plt.close(fig)
+        return
     pair_ref = [
         [1, 2], [2, 3], [1, 3],
         [6, 8], [8, 10], [12, 14], [14, 16],
@@ -110,12 +114,12 @@ def main():
     mini = True
 
     dataset_path = "../../storage/user/kistern/coco"
-    model_name = "5_simple"
-    model_path = f"../log/PoseEstimationBaseline/{model_name}/pose_estimation.pth"
+    model_name = "6"
+    model_path = f"../log/PoseEstimationBaseline/{model_name}/pose_estimation_continue.pth"
     config = pose.default_config
     config["message_passing"] = VanillaMPN2
     config["message_passing_config"] = default_config
-    config["cheat"] = True
+    config["cheat"] = False
     config["use_gt"] = True
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
@@ -141,7 +145,7 @@ def main():
 
     image_to_draw = []
     with torch.no_grad():
-        for i in range(500):
+        for i in range(250):
 
             print(f"ITERATION {i}")
             imgs, masks, keypoints = eval_set[i]
@@ -163,20 +167,24 @@ def main():
 
             if (num_persons_gt != num_persons_det) or mutants or f1_s < 0.9:
                 keypoints = keypoints[:, :num_persons_gt].squeeze().cpu().numpy()
+                joint_det = joint_det.squeeze().cpu().numpy()
+                if len(keypoints.shape) != 3:
+                    keypoints = keypoints[np.newaxis]
                 saving_cause = SavingCause(f1=f1_s, additional_p=num_persons_det>num_persons_gt,
                                            missing_p=num_persons_det<num_persons_gt, mutants=mutants)
-                image_to_draw.append((eval_set.img_ids[i], imgs.squeeze(), persons_pred, keypoints, saving_cause))
+                image_to_draw.append((eval_set.img_ids[i], imgs.squeeze(), persons_pred, joint_det, keypoints, saving_cause))
 
         # draw images
         # best image
         output_dir = f"output_{model_name}"
         os.makedirs(output_dir, exist_ok=True)
         for samples in image_to_draw:
-            img_id, img, persons, keypoints, saving_cause = samples
+            img_id, img, persons, joint_det, keypoints, saving_cause = samples
             failures = filter(lambda x: x is not None, [cause if getattr(saving_cause, cause) and cause!="f1" else None for cause  in  saving_cause.__dict__.keys()])
             failures = "|".join(failures)
             draw_poses(img, persons, f"{output_dir}/{img_id}_{int(saving_cause.f1 * 100)}_{failures}.png")
             draw_poses(img, keypoints, f"{output_dir}/{img_id}_gt.png")
+            draw_detection(img, joint_det, keypoints, fname=f"{output_dir}/{img_id}_det.png")
 
 
 
