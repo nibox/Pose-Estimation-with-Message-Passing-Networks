@@ -61,7 +61,12 @@ def test_construct_labels():
     #
     edge_index = torch.tensor([[0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 5, 5, 5, 5, 5, 6, 6, 6, 6, 6, 6, 0, 1, 2, 3, 4, 5],
                                [1, 2, 3, 4, 5, 2, 3, 4, 5, 0, 3, 4, 5, 1, 0, 4, 5, 1, 2, 0, 5, 1, 2, 3, 0, 0, 1, 2, 3, 4, 0, 1, 2, 3, 4, 5, 6, 6, 6, 6, 6, 6]])
-    constr = NaiveGraphConstructor(torch.zeros([1, 17, 128, 128]), None, None, use_neighbours=True)
+    constr = NaiveGraphConstructor(torch.zeros([1, 17, 128, 128]), torch.zeros(1, 128, 128, 17), torch.zeros(1, 17, 3), device=edge_index.device, use_neighbours = True)
+    person_idx_gt, joint_idx_gt = joint_gt[:, :, 2].nonzero(as_tuple=True)
+    joints_gt_loc = joint_gt[person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
+    joints_gt_loc = torch.cat([joints_gt_loc, joint_idx_gt.unsqueeze(1)], 1)
+
+    constr.remove_ambigiuous_det(joint_det, joints_gt_loc)
     edge_labels = constr._construct_edge_labels(joint_det, joint_gt, edge_index)
     print(edge_index[0, edge_labels==1])
     print(edge_index[1, edge_labels == 1])

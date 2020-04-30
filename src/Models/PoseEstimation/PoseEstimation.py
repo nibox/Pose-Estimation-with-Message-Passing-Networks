@@ -47,7 +47,8 @@ class PoseEstimationBaseline(nn.Module):
         features = self.feature_gather(features)
 
         graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, use_gt=self.use_gt,
-                                                   no_false_positives=self.cheat, use_neighbours=self.use_neighbours)
+                                                   no_false_positives=self.cheat, use_neighbours=self.use_neighbours,
+                                                   device=scoremap.device)
 
         x, edge_attr, edge_index, edge_labels, joint_det = graph_constructor.construct_graph()
 

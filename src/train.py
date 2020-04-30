@@ -58,24 +58,24 @@ def main():
 
     dataset_path = "../../storage/user/kistern/coco"
     pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
-    model_path =  "../log/PoseEstimationBaseline/6/pose_estimation.pth"
+    model_path = None  #  "../log/PoseEstimationBaseline/6/pose_estimation.pth"
 
-    log_dir = "../log/PoseEstimationBaseline/6_continue"
+    log_dir = "../log/PoseEstimationBaseline/9"
     model_save_path = f"{log_dir}/pose_estimation.pth"
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
 
     # hyperparameters and other stuff
-    learn_rate = 3e-5 #3e-4
+    learn_rate = 3e-4
     num_epochs = 100
-    batch_size = 8  # pretty much largest possible batch size
+    batch_size = 16  # pretty much largest possible batch size
     config = pose.default_config
     config["message_passing"] = VanillaMPN2
     config["message_passing_config"] = default_config
     config["cheat"] = False
     config["use_gt"] = True
     config["use_focal_loss"] = True
-    config["use_neighbours"] = False
+    config["use_neighbours"] = True
 
     ##########################################################
     print("Load model")

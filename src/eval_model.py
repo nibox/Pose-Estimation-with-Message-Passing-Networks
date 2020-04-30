@@ -92,14 +92,16 @@ def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
     ######################################
     mini = True
+    eval_num = 500
 
     dataset_path = "../../storage/user/kistern/coco"
-    model_path = "../log/PoseEstimationBaseline/6/pose_estimation_continue.pth"
+    model_path = "../log/PoseEstimationBaseline/9/pose_estimation.pth"
     config = pose.default_config
     config["message_passing"] = VanillaMPN2
     config["message_passing_config"] = default_config
     config["cheat"] = False
     config["use_gt"] = True
+    config["use_neighbours"] = True
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
     modus = "train" if mini else "valid"  # decides which validation set to use. "valid" means the coco2014 validation
@@ -117,7 +119,7 @@ def main():
     # baseline: upper bound
 
     anns = []
-    for i in range(500):
+    for i in range(eval_num):
 
         imgs, masks, keypoints = eval_set[i]
         num_persons_gt = np.count_nonzero(keypoints[:, :, 2].sum(axis=1))
@@ -129,11 +131,11 @@ def main():
         ann = gen_ann_format(persons_pred_orig, eval_set.img_ids[i])
         anns.append(ann)
     print("Upper bound")
-    coco_eval(eval_set.coco, anns, eval_set.img_ids.astype(np.int))
+    coco_eval(eval_set.coco, anns, eval_set.img_ids[:eval_num].astype(np.int))
 
     print("Upper bound 2")
     anns = []
-    for i in range(500):
+    for i in range(eval_num):
 
         imgs, masks, keypoints = eval_set[i]
         imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
@@ -152,11 +154,11 @@ def main():
 
         ann = gen_ann_format(persons_pred_orig, eval_set.img_ids[i])
         anns.append(ann)
-    coco_eval(eval_set.coco, anns, eval_set.img_ids.astype(np.int))
+    coco_eval(eval_set.coco, anns, eval_set.img_ids[:eval_num].astype(np.int))
     # eval model
     anns = []
     with torch.no_grad():
-        for i in range(500):
+        for i in range(eval_num):
 
             imgs, masks, keypoints = eval_set[i]
             imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
@@ -180,7 +182,7 @@ def main():
 
             ann = gen_ann_format(persons_pred_orig, eval_set.img_ids[i])
             anns.append(ann)
-        coco_eval(eval_set.coco, anns, eval_set.img_ids.astype(np.int))
+        coco_eval(eval_set.coco, anns, eval_set.img_ids[:eval_num].astype(np.int))
 
 
 if __name__ == "__main__":

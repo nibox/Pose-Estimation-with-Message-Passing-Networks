@@ -8,12 +8,12 @@ from Utils.Utils import *
 
 class NaiveGraphConstructor:
 
-    def __init__(self, scoremaps, features, joints_gt, use_gt=True, no_false_positives=False, use_neighbours=False):
-        self.scoremaps = scoremaps
-        self.features = features
-        self.joints_gt = joints_gt
+    def __init__(self, scoremaps, features, joints_gt, device, use_gt=True, no_false_positives=False, use_neighbours=False):
+        self.scoremaps = scoremaps.to(device)
+        self.features = features.to(device)
+        self.joints_gt = joints_gt.to(device)
         self.batch_size = scoremaps.shape[0]
-        self.device = scoremaps.device
+        self.device = device
         self.use_gt = use_gt
         self.no_false_positives = no_false_positives
         self.include_neighbouring_keypoints = use_neighbours
@@ -29,6 +29,7 @@ class NaiveGraphConstructor:
         joint_y = joint_det[:, 1]
         joint_type = joint_det[:, 2]
         joint_features = features[:, joint_y, joint_x]
+
 
         # construct node features
         x = joint_features.T
@@ -75,6 +76,14 @@ class NaiveGraphConstructor:
             # extend joint_det with joints_gt in order to have a perfect matching at train time
             # !!! be careufull to use it at test time!!!
             # todo move in function
+
+            # remove detected joints that are close to multiple gt joints
+            person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
+            joints_gt_loc = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
+            joints_gt_loc = torch.cat([joints_gt_loc, joint_idx_gt.unsqueeze(1)], 1)
+
+            joint_det = self.remove_ambigiuous_det(joint_det, joints_gt_loc)
+
             if self.use_gt:
                 person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
                 tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
@@ -101,6 +110,7 @@ class NaiveGraphConstructor:
         # update edge_indices for batching
         for i in range(1, len(x_list)):
             edge_index_list[i] += num_node_list[i]
+
         x_list = torch.cat(x_list, 0)
         edge_attr_list = torch.cat(edge_attr_list, 0)
         edge_index_list = torch.cat(edge_index_list, 1)
@@ -108,6 +118,17 @@ class NaiveGraphConstructor:
         joint_det_list = torch.cat(joint_det_list, 0)
 
         return x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list
+
+    def remove_ambigiuous_det(self, joint_det, joints_gt_loc):
+        distances = torch.norm(joint_det[:, :2].unsqueeze(1).float() - joints_gt_loc[:, :2].float(), dim=2)
+        # set distances of joint pairs of different type to some high value
+        type_det = torch.logical_not(torch.eq(joint_det[:, 2].unsqueeze(1), joints_gt_loc[:, 2]))
+        distances[type_det] = 1000.0  # different type joint are exempt
+        distances[distances >= 5] = 0.0  # todo set radius and maybe norm
+        distances = distances != 0
+        joints_to_remove = distances.sum(dim=1) > 1
+        joint_det = joint_det[torch.logical_not(joints_to_remove)]
+        return joint_det
 
     def _construct_edge_labels(self, joint_det, joints_gt, edge_index):
         # joint_idx_det, joint_y, joint_x = joint_map.nonzero(as_tuple=True)
@@ -145,22 +166,18 @@ class NaiveGraphConstructor:
         # which gets mapped by person_idx_ext_() to -1/-2 that means that comparing the persons, each joint_det
         # is mapped to, results in no edge for joint_dets without match since -1 != -2 and an edge for joint_dets
         # of same person
-        person_idx_ext = torch.zeros(len(person_idx_gt) + 1) - 1
+        person_idx_ext = torch.zeros(len(person_idx_gt) + 1, device=self.device) - 1
         person_idx_ext[1:] = person_idx_gt
-        person_idx_ext_2 = torch.zeros(len(person_idx_gt) + 1) - 2
+        person_idx_ext_2 = torch.zeros(len(person_idx_gt) + 1, device=self.device) - 2
         person_idx_ext_2[1:] = person_idx_gt
         person_1 = person_idx_ext[node_to_gt[edge_index[0]]]
         person_2 = person_idx_ext_2[node_to_gt[edge_index[1]]]
-        edge_labels = torch.where(torch.eq(person_1, person_2), torch.ones(num_edges), torch.zeros(num_edges))
+        edge_labels = torch.where(torch.eq(person_1, person_2), torch.ones(num_edges, device=self.device),
+                                  torch.zeros(num_edges, device=self.device))
 
-        #todo adapt weight for neighbours
-
-
-        edge_index = edge_index.to(joint_det.device)
-        edge_labels_f = edge_labels.to(joint_det.device)
         if self.include_neighbouring_keypoints:
-            source_nodes_part_of_body = edge_index[0, edge_labels_f == 1]
-            target_nodes_part_of_body = edge_index[1, edge_labels_f == 1]
+            source_nodes_part_of_body = edge_index[0, edge_labels == 1]
+            target_nodes_part_of_body = edge_index[1, edge_labels == 1]
 
             distances = torch.norm(joint_det[:, :2].unsqueeze(1).float() - joint_det[:, :2].float(), dim=2)
             # set distances of joint pairs of different type to some high value
@@ -188,11 +205,11 @@ class NaiveGraphConstructor:
             duplicate_edges = edge_comparision.sum(dim=1)
             existing_edges = edge_comparision.sum(dim=0)
             edge_labels_2 = torch.zeros(num_edges, device=joint_det.device)
-            edge_labels_2[duplicate_edges==1] = 1.0
+            edge_labels_2[duplicate_edges == 1] = 1.0
 
-            edge_labels_f += edge_labels_2.to(joint_det.device)
-            assert edge_labels_f.max() <= 1.0
-        return edge_labels_f
+            edge_labels += edge_labels_2.to(joint_det.device)
+            assert edge_labels.max() <= 1.0
+        return edge_labels
 
 
 def joint_det_from_scoremap(scoremap, threshold=0.007):
@@ -222,26 +239,30 @@ def graph_cluster_to_persons(joints, joint_connections):
     for i in range(n_components):
         # check if cc has more than one node
         person_joints = joints[person_labels == i]
-        person_joint_types = person_joints[:, 2]
-        if len(person_joints) <= 1:
-            continue
-        persons_det, persons_det_types = [person_joints], [person_joint_types]
         if len(person_joints) > 17:
-            print(f"Mutant detected!! It has {len(person_joints)} joints!!")
+            # print(f"Mutant detected!! It has {len(person_joints)} joints!!")
+            # todo change meaning of mutant
             mutant_detected = True
-            # find beginning of siamese twin an cut it
-            # joint types seems to be acsending so the mutant is at the index which drops in value
-            diff = person_joint_types[1:] - person_joint_types[:-1]
-            start_siamese = np.array(diff <= 0).astype(int).nonzero()[0] + 1
-            persons_det = np.split(person_joints, start_siamese)
-            persons_det_types= np.split(person_joint_types, start_siamese)
 
-        for person_joint, person_joint_types in zip(persons_det, persons_det_types):
+        if len(person_joints) > 1:  # isolated joints also form a cluster -> ignore them
             # rearrange person joints
+            """
             keypoints = np.zeros([17, 3])
-            keypoints[person_joint_types, :2] = person_joint[:, :2]
+            keypoints[person_joint_types, :2] = person_joints[:, :2]
             keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
+            keypoints[:, 2] = 0
+            """
+
+            keypoints = np.zeros([17, 3])
+            for joint_type in range(17):  # 17 different joint types
+                # take the detected joints of a certain type
+                person_joint_for_type = person_joints[person_joints[:, 2] == joint_type]
+                if len(person_joint_for_type) != 0:
+                    keypoints[joint_type] = np.mean(person_joint_for_type, axis=0)
+            keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
+            keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
             persons.append(keypoints)
+            # print(test)
     persons = np.array(persons)
     return persons, mutant_detected
 
