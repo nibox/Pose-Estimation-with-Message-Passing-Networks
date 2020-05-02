@@ -58,15 +58,15 @@ def main():
 
     dataset_path = "../../storage/user/kistern/coco"
     pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
-    model_path = None  #  "../log/PoseEstimationBaseline/6/pose_estimation.pth"
+    model_path =   "../log/PoseEstimationBaseline/9/pose_estimation.pth"
 
     log_dir = "../log/PoseEstimationBaseline/9"
-    model_save_path = f"{log_dir}/pose_estimation.pth"
+    model_save_path = f"{log_dir}/pose_estimation_continue.pth"
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
 
     # hyperparameters and other stuff
-    learn_rate = 3e-4
+    learn_rate = 3e-5
     num_epochs = 100
     batch_size = 16  # pretty much largest possible batch size
     config = pose.default_config

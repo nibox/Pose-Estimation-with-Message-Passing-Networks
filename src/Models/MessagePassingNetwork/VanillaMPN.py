@@ -29,13 +29,21 @@ class PerInvMLP(nn.Module):
         return edge_attr
 
 
-default_config = {"steps": 4,
+"""default_config = {"steps": 4,
                   "node_input_dim": 128,
                   "edge_input_dim": 2 + 17 * 17,
                   "node_feature_dim": 128,
                   "edge_feature_dim": 128,
                   "node_hidden_dim": 256,
                   "edge_hidden_dim": 512}
+                  """
+
+default_config = {"steps": 8,
+                  "node_input_dim": 128,
+                  "edge_input_dim": 2 + 17 * 17,
+                  "node_feature_dim": 32,
+                  "edge_feature_dim": 32,
+                  }
 
 
 class VanillaMPLayer(MessagePassing):

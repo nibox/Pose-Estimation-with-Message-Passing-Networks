@@ -8,7 +8,8 @@ from Utils.Utils import *
 
 class NaiveGraphConstructor:
 
-    def __init__(self, scoremaps, features, joints_gt, device, use_gt=True, no_false_positives=False, use_neighbours=False):
+    def __init__(self, scoremaps, features, joints_gt, device, use_gt=True, no_false_positives=False,
+                 use_neighbours=False):
         self.scoremaps = scoremaps.to(device)
         self.features = features.to(device)
         self.joints_gt = joints_gt.to(device)
@@ -23,13 +24,10 @@ class NaiveGraphConstructor:
         # extract joint features from feature map
         # joint_idx_det, joint_y, joint_x = joint_map.nonzero(as_tuple=True)
 
-        num_joints_det = len(joint_det)
-
         joint_x = joint_det[:, 0]
         joint_y = joint_det[:, 1]
         joint_type = joint_det[:, 2]
         joint_features = features[:, joint_y, joint_x]
-
 
         # construct node features
         x = joint_features.T
@@ -39,7 +37,6 @@ class NaiveGraphConstructor:
         # todo using k_nn and setting distances between joints of certain type on can create the different graphs
         # todo remove connections between same type
         temp = joint_det[:, :2].float()  # nn.knn_graph (cuda) can't handle int64 tensors
-        # print(temp.shape)
         edge_index = torch_geometric.nn.knn_graph(temp, 50)
         edge_index = gutils.to_undirected(edge_index)
         edge_index, _ = gutils.remove_self_loops(edge_index)
@@ -47,14 +44,14 @@ class NaiveGraphConstructor:
         # construct edge labels (each connection type is one label
         labels = torch.arange(0, 17 * 17, dtype=torch.long, device=self.device).view(17, 17)
         connection_type = labels[joint_type[edge_index[0]], joint_type[edge_index[1]]]
-         # remove connections between same type
-        same_type_connection_types = torch.arange(0, 17*17, 18, dtype=torch.long, device=self.device)
+        # remove connections between same type
+        same_type_connection_types = torch.arange(0, 17 * 17, 18, dtype=torch.long, device=self.device)
         assert same_type_connection_types.shape[0] == 17
         same_type_connections = torch.eq(connection_type.unsqueeze(1), same_type_connection_types).sum(dim=1)
         edge_index = edge_index.T
         edge_index = edge_index[same_type_connections == 0].T
         connection_type = connection_type[same_type_connections == 0]
-        connection_label = torch.nn.functional.one_hot(connection_type, num_classes=17*17)
+        connection_label = torch.nn.functional.one_hot(connection_type, num_classes=17 * 17)
 
         edge_attr_y = joint_y[edge_index[1]] - joint_y[edge_index[0]]
         edge_attr_x = joint_x[edge_index[1]] - joint_x[edge_index[0]]
@@ -72,7 +69,7 @@ class NaiveGraphConstructor:
             # joint_map = non_maximum_suppression(self.scoremaps[batch], threshold=0.007)
             # print(f"gt kp: {num_joints_gt}, d kp: {num_joints_det}")
 
-            ###############cheating#################
+            # ##############cheating#################
             # extend joint_det with joints_gt in order to have a perfect matching at train time
             # !!! be careufull to use it at test time!!!
             # todo move in function
@@ -190,7 +187,7 @@ class NaiveGraphConstructor:
             distances_tmp = distances[source_nodes_part_of_body.unique(sorted=True)]
             mult_assignments = distances_tmp.sum(dim=0)
             distances = distances[source_nodes_part_of_body]
-            distances[:, mult_assignments >1 ] = False
+            distances[:, mult_assignments > 1] = False
 
             target_idxs, source_idxs = distances.long().nonzero(as_tuple=True)
             new_target_nodes = target_nodes_part_of_body[target_idxs]
@@ -265,5 +262,3 @@ def graph_cluster_to_persons(joints, joint_connections):
             # print(test)
     persons = np.array(persons)
     return persons, mutant_detected
-
-

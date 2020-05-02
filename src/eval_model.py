@@ -18,6 +18,10 @@ import matplotlib;
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+def sprase_to_dense(edge_index, num_nodes):
+    mat = torch.zeros(num_nodes, num_nodes, dtype=torch.long)
+    mat[edge_index[0], edge_index[1]] = 1.0
+    return mat
 
 def reverse_affine_map(keypoints, img_size_orig):
     """
@@ -93,6 +97,7 @@ def main():
     ######################################
     mini = True
     eval_num = 500
+    cc_method = "GAEC"
 
     dataset_path = "../../storage/user/kistern/coco"
     model_path = "../log/PoseEstimationBaseline/9/pose_estimation.pth"
@@ -123,7 +128,7 @@ def main():
 
         imgs, masks, keypoints = eval_set[i]
         num_persons_gt = np.count_nonzero(keypoints[:, :, 2].sum(axis=1))
-        persons_pred = keypoints[:num_persons_gt].round()
+        persons_pred = keypoints[:num_persons_gt].round()  # rounding lead to ap=0.9
 
         img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
         persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
@@ -143,8 +148,10 @@ def main():
         _, joint_det, edge_index, edge_labels = model(imgs, keypoints, with_logits=False)
 
         test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_labels)
-        sol = cluster_graph(test_graph, "MUT", complete=False)
+        sol = cluster_graph(test_graph, cc_method, complete=False)
         sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
+        # construct solution by using only labeled edges (instead of corr clustering)
+        #sparse_sol = torch.stack([edge_index[0, edge_labels==1], edge_index[1, edge_labels==1]])
         persons_pred, _ = graph_cluster_to_persons(joint_det, sparse_sol)  # might crash
 
         img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
@@ -171,7 +178,7 @@ def main():
 
             # pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
             test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
-            sol = cluster_graph(test_graph, "MUT", complete=False)
+            sol = cluster_graph(test_graph, cc_method, complete=False)
             sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
             persons_pred, _ = graph_cluster_to_persons(joint_det, sparse_sol)  # might crash
 
