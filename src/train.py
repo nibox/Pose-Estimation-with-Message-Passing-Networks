@@ -33,7 +33,7 @@ def create_train_validation_split(data_root, batch_size, mini=False):
             valid = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=valid_ids)
 
         return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8), \
-               DataLoader(valid, batch_size=batch_size, num_workers=8)
+               DataLoader(valid, batch_size=batch_size//2, num_workers=8)
     else:
         raise NotImplementedError
 
@@ -47,7 +47,11 @@ def load_checkpoint(path, model_class, model_config, device):
 
     optimizer = torch.optim.Adam(model.parameters())
     optimizer.load_state_dict(state_dict["optimizer_state_dict"])
-    return model, optimizer, state_dict["epoch"]
+    scheduler = None
+    if "lr_scheduler_state_dict" in state_dict:
+        scheduler = state_dict["lr_scheduler_state_dict"]
+
+    return model, optimizer, state_dict["epoch"], scheduler
 
 
 def main():
@@ -80,7 +84,7 @@ def main():
     ##########################################################
     print("Load model")
     if model_path is not None:
-        model, optimizer, start_epoch = load_checkpoint(model_path,
+        model, optimizer, start_epoch, scheduler = load_checkpoint(model_path,
                                                         pose.PoseEstimationBaseline, pose.default_config, device)
         start_epoch += 1
     else:
@@ -89,6 +93,7 @@ def main():
         model.to(device)
         model.freeze_backbone()
         optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 60, 0.1)
         start_epoch = 0
     print("Load dataset")
     train_loader, valid_loader = create_train_validation_split(dataset_path, batch_size=batch_size, mini=True)
@@ -164,6 +169,7 @@ def main():
                 valid_recall.append(recall(result, edge_labels, 2)[1])
         print(f"Epoch: {epoch + start_epoch}, loss:{np.mean(valid_loss):6f}, "
               f"Accuracy: {np.mean(valid_acc)}")
+        scheduler.step()
 
         writer.add_scalar("Loss/valid", np.mean(valid_loss), epoch + start_epoch)
         writer.add_scalar("Metric/valid_acc", np.mean(valid_acc), epoch + start_epoch)
@@ -172,7 +178,8 @@ def main():
         writer.add_scalar("Metric/valid_recall:", np.mean(valid_recall), epoch + start_epoch)
         torch.save({"epoch": epoch + start_epoch,
                     "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict()
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "lr_scheduler_state_dict": scheduler.state_dict()
                     }, model_save_path)
     writer.close()
 

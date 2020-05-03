@@ -50,13 +50,22 @@ class NaiveGraphConstructor:
         same_type_connections = torch.eq(connection_type.unsqueeze(1), same_type_connection_types).sum(dim=1)
         edge_index = edge_index.T
         edge_index = edge_index[same_type_connections == 0].T
+        # create edge features
+        """
         connection_type = connection_type[same_type_connections == 0]
         connection_label = torch.nn.functional.one_hot(connection_type, num_classes=17 * 17)
+        """
+        # connection label 2
+        num_edges = edge_index.shape[1]
+        connection_label_2 = torch.zeros(num_edges, 17, dtype=torch.long, device=self.device)
+        connection_label_2[list(range(0, num_edges)), joint_type[edge_index[0]]] = 1
+        connection_label_2[list(range(0, num_edges)), joint_type[edge_index[1]]] = 1
+        print(connection_label_2[0])
 
         edge_attr_y = joint_y[edge_index[1]] - joint_y[edge_index[0]]
         edge_attr_x = joint_x[edge_index[1]] - joint_x[edge_index[0]]
 
-        edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1), connection_label], dim=1).float()
+        edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1), connection_label_2], dim=1).float()
 
         return x, edge_attr, edge_index
 
