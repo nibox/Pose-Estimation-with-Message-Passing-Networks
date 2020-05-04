@@ -9,7 +9,7 @@ from Utils.Utils import *
 class NaiveGraphConstructor:
 
     def __init__(self, scoremaps, features, joints_gt, masks, device, use_gt=True, no_false_positives=False,
-                 use_neighbours=False, edge_label_method=1, mask_crowds=False):
+                 use_neighbours=False, edge_label_method=1, mask_crowds=False, detect_threshold=0.007):
         self.scoremaps = scoremaps.to(device)
         self.features = features.to(device)
         self.joints_gt = joints_gt.to(device)
@@ -21,6 +21,7 @@ class NaiveGraphConstructor:
         self.include_neighbouring_keypoints = use_neighbours
         self.edge_label_method = edge_label_method
         self.mask_crowds = mask_crowds
+        self.detect_threshold = detect_threshold
 
     def _construct_mpn_graph(self, joint_det, features):
         # joint_locations tuple (joint type, height, width)
@@ -76,9 +77,9 @@ class NaiveGraphConstructor:
         num_node_list = [0]
         for batch in range(self.batch_size):
             if self.mask_crowds:
-                joint_det = joint_det_from_scoremap(self.scoremaps[batch], threshold=0.007, mask=self.masks[batch])
+                joint_det = joint_det_from_scoremap(self.scoremaps[batch], threshold=self.detect_threshold, mask=self.masks[batch])
             else:
-                joint_det = joint_det_from_scoremap(self.scoremaps[batch], threshold=0.007)
+                joint_det = joint_det_from_scoremap(self.scoremaps[batch], threshold=self.detect_threshold)
 
 
             # joint_map = non_maximum_suppression(self.scoremaps[batch], threshold=0.007)
@@ -277,9 +278,18 @@ def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
     joint_map = non_maximum_suppression(scoremap, threshold=threshold)
     if mask is not None:
         joint_map = joint_map * mask.unsqueeze(0)
-        joint_idx_det, joint_y, joint_x = joint_map.nonzero(as_tuple=True)
+    scoremap = scoremap * joint_map
+    if threshold is not None:
+        scoremap = torch.where(scoremap < threshold, torch.zeros_like(scoremap), scoremap)
+        joint_idx_det, joint_y, joint_x = scoremap.nonzero(as_tuple=True)
     else:
-        joint_idx_det, joint_y, joint_x = joint_map.nonzero(as_tuple=True)
+        scoremap_shape = scoremap.shape
+        _, indices = scoremap.view(17, -1).topk(k=30, dim=1)
+        container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.int).reshape(17, -1)
+        container[:, indices] = 1
+        container = container.reshape(scoremap_shape)
+        joint_idx_det, joint_y, joint_x = container.nonzero(as_tuple=True)
+
     joint_positions_det = torch.stack([joint_x, joint_y, joint_idx_det], 1)
     return joint_positions_det
 
