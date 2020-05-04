@@ -9,7 +9,7 @@ from Utils.Utils import *
 class NaiveGraphConstructor:
 
     def __init__(self, scoremaps, features, joints_gt, device, use_gt=True, no_false_positives=False,
-                 use_neighbours=False):
+                 use_neighbours=False, edge_label_method=1):
         self.scoremaps = scoremaps.to(device)
         self.features = features.to(device)
         self.joints_gt = joints_gt.to(device)
@@ -18,6 +18,7 @@ class NaiveGraphConstructor:
         self.use_gt = use_gt
         self.no_false_positives = no_false_positives
         self.include_neighbouring_keypoints = use_neighbours
+        self.edge_label_method = edge_label_method
 
     def _construct_mpn_graph(self, joint_det, features):
         # joint_locations tuple (joint type, height, width)
@@ -60,7 +61,6 @@ class NaiveGraphConstructor:
         connection_label_2 = torch.zeros(num_edges, 17, dtype=torch.long, device=self.device)
         connection_label_2[list(range(0, num_edges)), joint_type[edge_index[0]]] = 1
         connection_label_2[list(range(0, num_edges)), joint_type[edge_index[1]]] = 1
-        print(connection_label_2[0])
 
         edge_attr_y = joint_y[edge_index[1]] - joint_y[edge_index[0]]
         edge_attr_x = joint_x[edge_index[1]] - joint_x[edge_index[0]]
@@ -106,7 +106,10 @@ class NaiveGraphConstructor:
             # sol maps nodes to gt joints/  gt joints to nodes and connectivity maps between gt joints
             edge_labels = None
             if self.joints_gt is not None:
-                edge_labels = self._construct_edge_labels(joint_det, self.joints_gt[batch], edge_index)
+                if self.edge_label_method == 1:
+                    edge_labels = self._construct_edge_labels_1(joint_det, self.joints_gt[batch], edge_index)
+                elif self.edge_label_method == 2:
+                    edge_labels = self._construct_edge_labels_2(joint_det, self.joints_gt[batch], edge_index)
             x_list.append(x)
             num_node_list.append(x.shape[0] + num_node_list[-1])
             edge_attr_list.append(edge_attr)
@@ -136,7 +139,7 @@ class NaiveGraphConstructor:
         joint_det = joint_det[torch.logical_not(joints_to_remove)]
         return joint_det
 
-    def _construct_edge_labels(self, joint_det, joints_gt, edge_index):
+    def _construct_edge_labels_1(self, joint_det, joints_gt, edge_index):
         # joint_idx_det, joint_y, joint_x = joint_map.nonzero(as_tuple=True)
         # joint_positions_det = torch.stack([joint_x, joint_y], 1)
 
@@ -163,9 +166,9 @@ class NaiveGraphConstructor:
         # create mapping joint_det -> joint_gt
         # because not all joint_det have a corresponding partner all other joints_dets are mapped to 0
         # this means the position of joint_gt given joint_idx_det is node_to_gt[joint_idx_det] - 1
-        node_to_gt = torch.zeros(num_joints_det, dtype=torch.int) - 1
-        node_to_gt[sol[1]] = torch.arange(0, num_joints_gt, dtype=torch.int)
-        node_to_gt = node_to_gt.long() + 1
+        node_to_gt = torch.zeros(num_joints_det, dtype=torch.long) - 1
+        node_to_gt[sol[1]] = torch.from_numpy(sol[0])
+        node_to_gt = node_to_gt + 1
 
         # person_idx_ext_(1/2) map joint_gt_idx to the respective person (node_to_gt maps to joint_gt_idx + 1 and
         # because person_idx_ext_() is shifted one to the right it evens out) node_to_gt maps joint_det without match to 0
@@ -200,7 +203,7 @@ class NaiveGraphConstructor:
 
             target_idxs, source_idxs = distances.long().nonzero(as_tuple=True)
             new_target_nodes = target_nodes_part_of_body[target_idxs]
-            # at this point i have new edges from new canditates to old keypoints and label constructing is just ready from the weights
+            # at this point i have new edges from new canditates to old keypoints and label constructing
             # but i would have to remvoe duplicates edges from edge_index
             # so goal is to identifiy the indices of these duplicates
             edge_to_label_1 = torch.stack([source_idxs, new_target_nodes])
@@ -214,7 +217,53 @@ class NaiveGraphConstructor:
             edge_labels_2[duplicate_edges == 1] = 1.0
 
             edge_labels += edge_labels_2.to(joint_det.device)
-            assert edge_labels.max() <= 1.0
+        return edge_labels
+
+    def _construct_edge_labels_2(self, joint_det, joints_gt, edge_index):
+        assert self.use_gt
+        num_joints_det = len(joint_det)
+
+        person_idx_gt, joint_idx_gt = joints_gt[:, :, 2].nonzero(as_tuple=True)
+        num_joints_gt = len(person_idx_gt)
+
+        distance = torch.norm(joints_gt[person_idx_gt, joint_idx_gt, :2].unsqueeze(1).round().float().clamp(0, 127) - joint_det[:, :2].float(), dim=2)
+        # set distance between joints of different type to some high value
+        different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
+        distance[different_type] = 1000.0
+        if self.include_neighbouring_keypoints:
+            assignment = distance < -1  # fast way to generate array initialized with false
+            assignment[:, :-num_joints_gt] = distance[:, :-num_joints_gt] < 5.0
+            assignment[np.arange(0, num_joints_gt), np.arange(num_joints_det-num_joints_gt, num_joints_det)] = True
+        else:
+            assignment = distance < -1  # fast way to generate array initialized with false
+            assignment[np.arange(0, num_joints_gt), np.arange(num_joints_det-num_joints_gt, num_joints_det)] = True
+            # set diagonal to true because it should be true
+        assert assignment.sum(dim=0)[:-num_joints_gt].max() < 2
+        # this means that one source node is assigned two target nodes
+        # this should not happen for detected keypoints as these cases are removed
+        # this happens for gt keypoints in case where the original positions are close and even closer after resizing
+        # and rounding
+        assert assignment.sum(dim=1).min() >= 1
+        # this means that each target node is assigned at least one source node (which is the corresponding gt node)
+        target_joint_gt, source_joint_det = assignment.long().nonzero(as_tuple=True)
+
+        sol = target_joint_gt, source_joint_det
+
+        # todo wrap following code in method
+        num_edges = edge_index.shape[1]  # num_joints_det * num_joints_det - num_joints_det
+
+        node_to_gt = torch.zeros(num_joints_det, dtype=torch.long, device=self.device) - 1
+        node_to_gt[sol[1]] = sol[0]
+        node_to_gt = node_to_gt.long() + 1
+
+        person_idx_ext = torch.zeros(len(person_idx_gt) + 1, device=self.device) - 1
+        person_idx_ext[1:] = person_idx_gt
+        person_idx_ext_2 = torch.zeros(len(person_idx_gt) + 1, device=self.device) - 2
+        person_idx_ext_2[1:] = person_idx_gt
+        person_1 = person_idx_ext[node_to_gt[edge_index[0]]]
+        person_2 = person_idx_ext_2[node_to_gt[edge_index[1]]]
+        edge_labels = torch.where(torch.eq(person_1, person_2), torch.ones(num_edges, device=self.device),
+                                  torch.zeros(num_edges, device=self.device))
         return edge_labels
 
 

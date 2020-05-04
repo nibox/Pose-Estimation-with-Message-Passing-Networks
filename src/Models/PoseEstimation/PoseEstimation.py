@@ -16,7 +16,8 @@ default_config = {"backbone": PoseNet,
                   "cheat": True,
                   "use_gt": True,
                   "use_focal_loss": False,
-                  "use_neighbours": False
+                  "use_neighbours": False,
+                  "edge_label_method": 1
                   }
 
 
@@ -34,6 +35,7 @@ class PoseEstimationBaseline(nn.Module):
         self.cheat = config["cheat"]
         self.use_gt = config["use_gt"]
         self.use_neighbours = config["use_neighbours"]
+        self.edge_label_method = config["edge_label_method"]
         self.focal = None
         if config["use_focal_loss"]:
             self.focal = FocalLoss(logits=True)
@@ -48,7 +50,7 @@ class PoseEstimationBaseline(nn.Module):
 
         graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, use_gt=self.use_gt,
                                                    no_false_positives=self.cheat, use_neighbours=self.use_neighbours,
-                                                   device=scoremap.device)
+                                                   device=scoremap.device, edge_label_method=self.edge_label_method)
 
         x, edge_attr, edge_index, edge_labels, joint_det = graph_constructor.construct_graph()
 
