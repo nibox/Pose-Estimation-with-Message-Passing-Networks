@@ -107,6 +107,7 @@ def main():
     config["cheat"] = False
     config["use_gt"] = True
     config["use_neighbours"] = True
+    config["mask_crowds"] = False
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
     modus = "train" if mini else "valid"  # decides which validation set to use. "valid" means the coco2014 validation
@@ -151,7 +152,7 @@ def main():
         sol = cluster_graph(test_graph, cc_method, complete=False)
         sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
         # construct solution by using only labeled edges (instead of corr clustering)
-        #sparse_sol = torch.stack([edge_index[0, edge_labels==1], edge_index[1, edge_labels==1]])
+        # sparse_sol = torch.stack([edge_index[0, edge_labels==1], edge_index[1, edge_labels==1]])
         persons_pred, _ = graph_cluster_to_persons(joint_det, sparse_sol)  # might crash
 
         img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
@@ -169,12 +170,12 @@ def main():
 
             imgs, masks, keypoints = eval_set[i]
             imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
-            # masks = masks.to(device)
+            masks = masks.to(device)
             # todo use mask to mask of joint predicitions in crowd (is this allowed?)
             # todo remove cheating
             # todo lower bound!!
             keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
-            pred, joint_det, edge_index, _ = model(imgs, keypoints, with_logits=False)
+            pred, joint_det, edge_index, _ = model(imgs, keypoints, masks, with_logits=False)
 
             # pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
             test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)

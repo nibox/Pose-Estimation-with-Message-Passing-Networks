@@ -8,17 +8,19 @@ from Utils.Utils import *
 
 class NaiveGraphConstructor:
 
-    def __init__(self, scoremaps, features, joints_gt, device, use_gt=True, no_false_positives=False,
-                 use_neighbours=False, edge_label_method=1):
+    def __init__(self, scoremaps, features, joints_gt, masks, device, use_gt=True, no_false_positives=False,
+                 use_neighbours=False, edge_label_method=1, mask_crowds=False):
         self.scoremaps = scoremaps.to(device)
         self.features = features.to(device)
         self.joints_gt = joints_gt.to(device)
+        self.masks = masks.to(device)
         self.batch_size = scoremaps.shape[0]
         self.device = device
         self.use_gt = use_gt
         self.no_false_positives = no_false_positives
         self.include_neighbouring_keypoints = use_neighbours
         self.edge_label_method = edge_label_method
+        self.mask_crowds = mask_crowds
 
     def _construct_mpn_graph(self, joint_det, features):
         # joint_locations tuple (joint type, height, width)
@@ -73,7 +75,11 @@ class NaiveGraphConstructor:
         x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list = [], [], [], [], []
         num_node_list = [0]
         for batch in range(self.batch_size):
-            joint_det = joint_det_from_scoremap(self.scoremaps[batch], threshold=0.007)
+            if self.mask_crowds:
+                joint_det = joint_det_from_scoremap(self.scoremaps[batch], threshold=0.007, mask=self.masks[batch])
+            else:
+                joint_det = joint_det_from_scoremap(self.scoremaps[batch], threshold=0.007)
+
 
             # joint_map = non_maximum_suppression(self.scoremaps[batch], threshold=0.007)
             # print(f"gt kp: {num_joints_gt}, d kp: {num_joints_det}")
@@ -267,9 +273,13 @@ class NaiveGraphConstructor:
         return edge_labels
 
 
-def joint_det_from_scoremap(scoremap, threshold=0.007):
+def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
     joint_map = non_maximum_suppression(scoremap, threshold=threshold)
-    joint_idx_det, joint_y, joint_x = joint_map.nonzero(as_tuple=True)
+    if mask is not None:
+        joint_map = joint_map * mask.unsqueeze(0)
+        joint_idx_det, joint_y, joint_x = joint_map.nonzero(as_tuple=True)
+    else:
+        joint_idx_det, joint_y, joint_x = joint_map.nonzero(as_tuple=True)
     joint_positions_det = torch.stack([joint_x, joint_y, joint_idx_det], 1)
     return joint_positions_det
 

@@ -17,7 +17,8 @@ default_config = {"backbone": PoseNet,
                   "use_gt": True,
                   "use_focal_loss": False,
                   "use_neighbours": False,
-                  "edge_label_method": 1
+                  "edge_label_method": 1,
+                  "mask_crowds": False
                   }
 
 
@@ -36,19 +37,22 @@ class PoseEstimationBaseline(nn.Module):
         self.use_gt = config["use_gt"]
         self.use_neighbours = config["use_neighbours"]
         self.edge_label_method = config["edge_label_method"]
+        self.mask_crowds = config["mask_crowds"]
         self.focal = None
         if config["use_focal_loss"]:
             self.focal = FocalLoss(logits=True)
 
         self.pool = nn.MaxPool2d(3, 1, 1)
 
-    def forward(self, imgs: torch.Tensor, keypoints_gt=None, with_logits=True) -> torch.tensor:
+    def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None, with_logits=True) -> torch.tensor:
+        if self.mask_crowds:
+            assert masks is not None
         scoremap, features, early_features = self.backbone(imgs)
         scoremap = scoremap[:, -1, :17]
 
         features = self.feature_gather(features)
 
-        graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, use_gt=self.use_gt,
+        graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, masks, use_gt=self.use_gt,
                                                    no_false_positives=self.cheat, use_neighbours=self.use_neighbours,
                                                    device=scoremap.device, edge_label_method=self.edge_label_method)
 
@@ -62,6 +66,7 @@ class PoseEstimationBaseline(nn.Module):
 
     def loss(self, output, targets, with_logits=True, pos_weight=None) -> torch.Tensor:
         if self.focal is not None:
+            assert with_logits
             return self.focal(output, targets)
 
         if with_logits:

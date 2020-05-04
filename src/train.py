@@ -80,6 +80,7 @@ def main():
     config["use_gt"] = True
     config["use_focal_loss"] = True
     config["use_neighbours"] = True
+    config["mask_crowds"] = True
 
     ##########################################################
     print("Load model")
@@ -107,9 +108,9 @@ def main():
             # split batch
             imgs, masks, keypoints = batch
             imgs = imgs.to(device)
-            #masks = masks.to(device)
+            masks = masks.to(device)
             keypoints = keypoints.to(device)
-            pred, joint_det, edge_index, edge_labels = model(imgs, keypoints)
+            pred, joint_det, edge_index, edge_labels = model(imgs, keypoints, masks)
 
             if len(edge_labels[edge_labels == 1]) != 0 and len(edge_labels[edge_labels == 0]) != 0:
                 pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
@@ -150,9 +151,9 @@ def main():
                 # split batch
                 imgs, masks, keypoints = batch
                 imgs = imgs.to(device)
-                # masks = masks.to(device)
+                masks = masks.to(device)
                 keypoints = keypoints.to(device)
-                pred, joint_det, edge_index, edge_labels = model(imgs, keypoints)
+                pred, joint_det, edge_index, edge_labels = model(imgs, keypoints, masks)
 
                 if len(edge_labels[edge_labels == 1]) != 0:
                     pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
