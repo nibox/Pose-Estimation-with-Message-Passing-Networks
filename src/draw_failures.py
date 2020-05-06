@@ -150,17 +150,18 @@ def main():
             print(f"ITERATION {i}")
             imgs, masks, keypoints = eval_set[i]
             imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
+            masks = torch.from_numpy(masks).to(device).unsqueeze(0)
             num_persons_gt = np.count_nonzero(keypoints[:, :, 2].sum(axis=1))
             # todo use mask to mask of joint predicitions in crowd (is this allowed?)
             keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
-            pred, joint_det, edge_index, edge_labels = model(imgs, keypoints, with_logits=False)
+            pred, joint_det, edge_index, edge_labels = model(imgs, keypoints, masks, with_logits=False)
 
             result = pred.squeeze()
             result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
             f1_s = f1_score(result, edge_labels, 2)[1]
             # draw images that have low f1 score, that could not detect all persons or to many persons, or mutants
             test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
-            sol = cluster_graph(test_graph, "MUT", complete=False)
+            sol = cluster_graph(test_graph, "GAEC", complete=False)
             sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
             persons_pred, mutants = graph_cluster_to_persons(joint_det, sparse_sol)  # might crash
             num_persons_det = len(persons_pred)

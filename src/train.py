@@ -47,9 +47,9 @@ def load_checkpoint(path, model_class, model_config, device):
 
     optimizer = torch.optim.Adam(model.parameters())
     optimizer.load_state_dict(state_dict["optimizer_state_dict"])
-    scheduler = None
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 60)
     if "lr_scheduler_state_dict" in state_dict:
-        scheduler = state_dict["lr_scheduler_state_dict"]
+        scheduler.load_state_dict(state_dict["lr_scheduler_state_dict"])
 
     return model, optimizer, state_dict["epoch"], scheduler
 

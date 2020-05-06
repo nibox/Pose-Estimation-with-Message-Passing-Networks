@@ -145,8 +145,9 @@ def main():
 
         imgs, masks, keypoints = eval_set[i]
         imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
+        masks = torch.from_numpy(masks).to(device).unsqueeze(0)
         keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
-        _, joint_det, edge_index, edge_labels = model(imgs, keypoints, with_logits=False)
+        _, joint_det, edge_index, edge_labels = model(imgs, keypoints, masks, with_logits=False)
 
         test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_labels)
         sol = cluster_graph(test_graph, cc_method, complete=False)
@@ -170,7 +171,7 @@ def main():
 
             imgs, masks, keypoints = eval_set[i]
             imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
-            masks = masks.to(device)
+            masks = torch.from_numpy(masks).to(device).unsqueeze(0)
             # todo use mask to mask of joint predicitions in crowd (is this allowed?)
             # todo remove cheating
             # todo lower bound!!

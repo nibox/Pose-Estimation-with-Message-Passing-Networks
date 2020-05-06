@@ -85,6 +85,7 @@ def main():
         scoremap, features = torch.load("test_output/score_map_batch.pt"), torch.load("test_output/features_batch.pt")
         # use half of the batch
         imgs = imgs[:batch_size]
+        masks = masks[:batch_size]
         keypoints = keypoints[:batch_size]
         scoremap = scoremap[:batch_size]
         features = features[:batch_size]
@@ -94,9 +95,15 @@ def main():
     feature_gather = nn.AvgPool2d(3, 1, 1)
     features = feature_gather(features)
 
-    constr = NaiveGraphConstructor(scoremap.cuda(), features.cuda(), keypoints.cuda(), use_gt=True,
-                                   no_false_positives=False, use_neighbours=True)
+    constr = NaiveGraphConstructor(scoremap.cuda(), features.cuda(), keypoints.cuda(), masks, use_gt=True,
+                                   no_false_positives=False, use_neighbours=True, device=torch.device("cuda"),
+                                   edge_label_method=2,
+                                   mask_crowds=False)
     x, edge_attr, edge_index, edge_labels, joint_det = constr.construct_graph()
+    if batch_size == 1:
+        print(f"Num detection: {len(x)}")
+        print(f"Num edges : {len(edge_index[0])}")
+        print(f"Num active edges: {(edge_labels==1).sum()}")
 
     config_2 = {"steps": 4,
                 "node_input_dim": 256,
