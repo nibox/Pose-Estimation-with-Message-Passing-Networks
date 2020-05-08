@@ -43,14 +43,15 @@ default_config = {"steps": 8,
                   "edge_input_dim": 2 + 17 * 17,
                   "node_feature_dim": 32,
                   "edge_feature_dim": 32,
+                  "aggr": "add"
                   }
 
 
 class VanillaMPLayer(MessagePassing):
 
     # todo with or without inital feature skip connection
-    def __init__(self, node_feature_dim, edge_feature_dim):
-        super(VanillaMPLayer, self).__init__(aggr="add")
+    def __init__(self, node_feature_dim, edge_feature_dim, aggr):
+        super(VanillaMPLayer, self).__init__(aggr=aggr)
         # todo better architecture
 
         non_lin = nn.ReLU()
@@ -87,11 +88,10 @@ class VanillaMPLayer(MessagePassing):
 class VanillaMPN(torch.nn.Module):
 
     def __init__(self, steps, node_input_dim, edge_input_dim, node_feature_dim, edge_feature_dim,
-                 node_hidden_dim=256,
-                 edge_hidden_dim=512):
+                 aggr):
         super().__init__()
         # self.mpn = nn.ModuleList([VanillaMPLayer(node_feature_dim, edge_feature_dim) for i in range(steps)])
-        self.mpn = VanillaMPLayer(node_feature_dim, edge_feature_dim)
+        self.mpn = VanillaMPLayer(node_feature_dim, edge_feature_dim, aggr=aggr)
 
         non_linearity = nn.ReLU()
         self.edge_embedding = nn.Sequential(nn.Linear(edge_input_dim, 256),  # 2 + 17*17,

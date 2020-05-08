@@ -1,12 +1,11 @@
 import os
-import cv2
 import pickle
 import torch
 import numpy as np
 from torch_geometric.utils import dense_to_sparse, f1_score
 
 from CocoKeypoints import CocoKeypoints
-from Utils.Utils import load_model, to_numpy
+from Utils.Utils import load_model, draw_detection, draw_poses
 import Models.PoseEstimation.PoseEstimation as pose
 from Models.MessagePassingNetwork.VanillaMPN2 import VanillaMPN2, default_config
 from Utils.ConstructGraph import graph_cluster_to_persons
@@ -15,112 +14,29 @@ from Utils.correlation_clustering.correlation_clustering_utils import cluster_gr
 import matplotlib;
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
-
-def draw_detection(img, joint_det, joint_gt, fname=None):
-    """
-    :param img: torcg.tensor. image
-    :param joint_det: shape: (num_joints, 2) list of xy positions of detected joints (without classes or clustering)
-    :param fname: optional - file name of image to save. If None the image is show with plt.show
-    :return:
-    """
-
-    img = to_numpy(img)
-
-    for i in range(len(joint_det)):
-        # scale up to 512 x 512
-        scale = 512.0 / 128.0
-        x, y = int(joint_det[i, 0] * scale), int(joint_det[i, 1] * scale)
-        type = joint_det[i, 2]
-        if type != -1:
-            cv2.circle(img, (x, y), 3, (0., 1., 0.), -1)
-    for person in range(len(joint_gt)):
-        if np.sum(joint_gt[person]) > 0.0:
-            for i in range(len(joint_gt[person])):
-                # scale up to 512 x 512
-                scale = 512.0 / 128.0
-                x, y = int(joint_gt[person, i, 0] * scale), int(joint_gt[person, i, 1] * scale)
-                type = i
-                if type != -1:
-                    cv2.circle(img, (x, y), 3, (0., 0., 1.), -1)
-
-    fig = plt.figure()
-    plt.imshow(img)
-    if fname is not None:
-        plt.savefig(fig=fig, fname=fname)
-        plt.close(fig)
-    else:
-        raise NotImplementedError
-
-
-def draw_poses(img: [torch.tensor, np.array], persons, fname=None):
-    """
-
-    :param img:
-    :param persons: (N,17,3) array containing the person in the image img. Detected or ground truth does not matter.
-    :param fname: If not none an image will be saved under this name , otherwise the image will be displayed
-    :return:
-    """
-    img = to_numpy(img)
-    assert img.shape[0] == 512
-    assert img.shape[1] == 512
-
-    if len(persons) == 0:
-        fig = plt.figure()
-        plt.imshow(img)
-        plt.savefig(fig=fig, fname=fname)
-        plt.close(fig)
-        return
-    pair_ref = [
-        [1, 2], [2, 3], [1, 3],
-        [6, 8], [8, 10], [12, 14], [14, 16],
-        [7, 9], [9, 11], [13, 15], [15, 17],
-        [6, 7], [12, 13], [6, 12], [7, 13]
-    ]
-    bones = np.array(pair_ref) - 1
-    colors = np.arange(0, 179, np.ceil(179 / len(persons)))
-    # image to 8bit hsv (i dont know what hsv values opencv expects in 32bit case=)
-    img = img * 255.0
-    img = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_RGB2HSV)
-    assert len(colors) == len(persons)
-    for person in range(len(persons)):
-        scale = 512.0 / 128.0
-        color = (colors[person], 255., 255)
-        valid_joints = persons[person, :, 2] > 0
-        t = persons[person, valid_joints]
-        center_joint = np.mean(persons[person, valid_joints] * scale, axis=0).astype(np.int)
-        for i in range(len(persons[person])):
-            # scale up to 512 x 512
-            joint_1 = persons[person, i]
-            joint_1_valid = joint_1[2] > 0
-            x_1, y_1 = np.multiply(joint_1[:2], scale).astype(np.int)
-            if joint_1_valid:
-                cv2.circle(img, (x_1, y_1), 3, color, -1)
-                cv2.line(img, (x_1, y_1), (center_joint[0], center_joint[1]), color)
-
-    img = cv2.cvtColor(img, cv2.COLOR_HSV2RGB)
-    fig = plt.figure()
-    plt.imshow(img)
-    if fname is not None:
-        plt.savefig(fig=fig, fname=fname)
-    else:
-        raise NotImplementedError
 
 
 def main():
-    device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
+    device = torch.device("cuda") if torch.cuda.is_available() and False else torch.device("cpu")
     ######################################
     mini = True
 
     dataset_path = "../../storage/user/kistern/coco"
-    model_name = "6"
-    model_path = f"../log/PoseEstimationBaseline/{model_name}/pose_estimation_continue.pth"
+    model_name = "11"
+    model_path = f"../log/PoseEstimationBaseline/{model_name}/pose_estimation.pth"
     config = pose.default_config
     config["message_passing"] = VanillaMPN2
     config["message_passing_config"] = default_config
+    config["message_passing_config"]["aggr"] = "max"
+    config["message_passing_config"]["edge_input_dim"] = 2 + 17
     config["cheat"] = False
     config["use_gt"] = True
+    config["use_focal_loss"] = True
+    config["use_neighbours"] = True
+    config["mask_crowds"] = False
+    config["detect_threshold"] = 0.007  # default was 0.007
+    config["edge_label_method"] = 1
+    img_ids_to_use = [84015, 84381, 117772, 237976, 281133, 286645, 505421]
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
     modus = "train" if mini else "valid"  # decides which validation set to use. "valid" means the coco2014 validation
@@ -146,7 +62,8 @@ def main():
     image_to_draw = []
     with torch.no_grad():
         for i in range(250):
-
+            if eval_set.img_ids[i] not in img_ids_to_use:
+                continue
             print(f"ITERATION {i}")
             imgs, masks, keypoints = eval_set[i]
             imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)

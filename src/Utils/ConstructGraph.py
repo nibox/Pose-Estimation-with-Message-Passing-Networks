@@ -24,14 +24,18 @@ class NaiveGraphConstructor:
         self.detect_threshold = detect_threshold
 
     def _construct_mpn_graph(self, joint_det, features):
-        # joint_locations tuple (joint type, height, width)
-        # extract joint features from feature map
-        # joint_idx_det, joint_y, joint_x = joint_map.nonzero(as_tuple=True)
+        """
+
+        :param joint_det: Shape: (Num_dets, 3) x, y, type,
+        :param features: Shape: (C, H, W)
+        :return: x (Num_dets, feature_dim), edge_attr (Num_edges, feature_dim), edge_index (2, Num_dets)
+        """
 
         joint_x = joint_det[:, 0]
         joint_y = joint_det[:, 1]
         joint_type = joint_det[:, 2]
         joint_features = features[:, joint_y, joint_x]
+        num_joints_det = len(joint_x)
 
         # construct node features
         x = joint_features.T
@@ -154,6 +158,7 @@ class NaiveGraphConstructor:
 
         person_idx_gt, joint_idx_gt = joints_gt[:, :, 2].nonzero(as_tuple=True)
         num_joints_gt = len(person_idx_gt)
+        num_edges = edge_index.shape[1]  # num_joints_det * num_joints_det - num_joints_det
 
         joints_position_gt = joints_gt[:, :, :2]
         joints_position_gt = joints_position_gt.view(-1, 1, 2).round().float()  # !!! cast to long !!! and then to float
@@ -166,30 +171,8 @@ class NaiveGraphConstructor:
         sol = linear_sum_assignment(cost_mat)
         cost = np.sum(cost_mat[sol[0], sol[1]])
 
-        # construct edge labels
-        # idea: an edge has label 1 if source and destination node are assigned to joint_gt of the same person
-        # this results in an fully connected pose graph per person
-        num_edges = edge_index.shape[1]  # num_joints_det * num_joints_det - num_joints_det
-        # create mapping joint_det -> joint_gt
-        # because not all joint_det have a corresponding partner all other joints_dets are mapped to 0
-        # this means the position of joint_gt given joint_idx_det is node_to_gt[joint_idx_det] - 1
-        node_to_gt = torch.zeros(num_joints_det, dtype=torch.long) - 1
-        node_to_gt[sol[1]] = torch.from_numpy(sol[0])
-        node_to_gt = node_to_gt + 1
-
-        # person_idx_ext_(1/2) map joint_gt_idx to the respective person (node_to_gt maps to joint_gt_idx + 1 and
-        # because person_idx_ext_() is shifted one to the right it evens out) node_to_gt maps joint_det without match to 0
-        # which gets mapped by person_idx_ext_() to -1/-2 that means that comparing the persons, each joint_det
-        # is mapped to, results in no edge for joint_dets without match since -1 != -2 and an edge for joint_dets
-        # of same person
-        person_idx_ext = torch.zeros(len(person_idx_gt) + 1, device=self.device) - 1
-        person_idx_ext[1:] = person_idx_gt
-        person_idx_ext_2 = torch.zeros(len(person_idx_gt) + 1, device=self.device) - 2
-        person_idx_ext_2[1:] = person_idx_gt
-        person_1 = person_idx_ext[node_to_gt[edge_index[0]]]
-        person_2 = person_idx_ext_2[node_to_gt[edge_index[1]]]
-        edge_labels = torch.where(torch.eq(person_1, person_2), torch.ones(num_edges, device=self.device),
-                                  torch.zeros(num_edges, device=self.device))
+        sol_torch = torch.stack(list(map(torch.from_numpy, sol)), dim=1).to(joint_det.device).T
+        edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol_torch)
 
         if self.include_neighbouring_keypoints:
             source_nodes_part_of_body = edge_index[0, edge_labels == 1]
@@ -256,12 +239,34 @@ class NaiveGraphConstructor:
 
         sol = target_joint_gt, source_joint_det
 
-        # todo wrap following code in method
-        num_edges = edge_index.shape[1]  # num_joints_det * num_joints_det - num_joints_det
+        edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol)
+        return edge_labels
 
-        node_to_gt = torch.zeros(num_joints_det, dtype=torch.long, device=self.device) - 1
-        node_to_gt[sol[1]] = sol[0]
-        node_to_gt = node_to_gt.long() + 1
+    @staticmethod
+    def match_cc(a_to_clusters, nodes_b, edges_b, edges_a_to_b):
+        """
+        Given two graph A and B, with A consisting of k connected components. Given a biparite matching between all
+        nodes in A and a subset B' of nodes in B, chose edges E' in B using the given mapping between nodes of A and B'
+         s.t.the connected components of A are reconstructed in B. I.e nodes in B that are connected by edges from E'
+         should have corresponding nodes in A that are part of the same connected component.
+        :param a_to_clusters: Mapping of nodes from A to the corresponding connected component (cluster)
+        :param nodes_b: List of nodes of B
+        :param edges_b: List of all edges of B
+        :param edges_a_to_b: matching between A and B'
+        :return: list of labels indicating wether edge in edges_b belongs to E'
+        """
+        device = a_to_clusters.device
+        num_nodes_b = len(nodes_b)
+        num_edges_b = edges_b.shape[1]  # num_joints_det * num_joints_det - num_joints_det
+        # construct edge labels
+        # idea: an edge has label 1 if source and destination node are assigned to joint_gt of the same person
+        # this results in an fully connected pose graph per person
+        # create mapping nodes_b -> nodes_a (for EACH node in nodes_b)
+        # because not all joint_det have a corresponding partner all other joints_dets are mapped to 0
+        # this means the position of joint_gt given joint_idx_det is node_to_gt[joint_idx_det] - 1
+        edges_b_to_a = torch.zeros(num_nodes_b, dtype=torch.long, device=device) - 1
+        edges_b_to_a[edges_a_to_b[1]] = edges_a_to_b[0]
+        edges_b_to_a = edges_b_to_a + 1
 
         person_idx_ext = torch.zeros(len(person_idx_gt) + 1, device=self.device) - 1
         person_idx_ext[1:] = person_idx_gt
