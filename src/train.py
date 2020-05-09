@@ -33,7 +33,7 @@ def create_train_validation_split(data_root, batch_size, mini=False):
             valid = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=valid_ids)
 
         return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8), \
-               DataLoader(valid, batch_size=batch_size//2, num_workers=8)
+               DataLoader(valid, batch_size=1, num_workers=8)
     else:
         raise NotImplementedError
 
@@ -86,10 +86,10 @@ def main():
     print("Load model")
     if model_path is not None:
         model, optimizer, start_epoch, scheduler = load_checkpoint(model_path,
-                                                        pose.PoseEstimationBaseline, pose.default_config, device)
+                                                        pose.PoseEstimationBaseline, config, device)
         start_epoch += 1
     else:
-        model = load_model(model_path, pose.PoseEstimationBaseline, pose.default_config, device,
+        model = load_model(model_path, pose.PoseEstimationBaseline, config, device,
                            pretrained_path=pretrained_path)
         model.to(device)
         model.freeze_backbone()

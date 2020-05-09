@@ -19,7 +19,8 @@ default_config = {"backbone": PoseNet,
                   "use_neighbours": False,
                   "edge_label_method": 1,
                   "mask_crowds": False,
-                  "detect_threshold": 0.007
+                  "detect_threshold": 0.007,
+                  "inclusion_radius": 5.0
                   }
 
 
@@ -57,7 +58,9 @@ class PoseEstimationBaseline(nn.Module):
         graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, masks, use_gt=self.use_gt,
                                                    no_false_positives=self.cheat, use_neighbours=self.use_neighbours,
                                                    device=scoremap.device, edge_label_method=self.edge_label_method,
-                                                   detect_threshold=self.config["detect_threshold"])
+                                                   detect_threshold=self.config["detect_threshold"],
+                                                   mask_crowds=self.mask_crowds,
+                                                   inclusion_radius=self.config["inclusion_radius"])
 
         x, edge_attr, edge_index, edge_labels, joint_det = graph_constructor.construct_graph()
 

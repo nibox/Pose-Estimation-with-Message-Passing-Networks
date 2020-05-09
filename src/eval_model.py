@@ -4,7 +4,7 @@ import pickle
 import torch
 import numpy as np
 from torch.utils.data import DataLoader
-from torch_geometric.utils import dense_to_sparse
+from torch_geometric.utils import dense_to_sparse, precision, recall
 
 from CocoKeypoints import CocoKeypoints
 from Utils.Utils import load_model, get_transform, kpt_affine, to_numpy
@@ -17,6 +17,27 @@ import matplotlib;
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+
+
+def specificity(pred, target, num_classes):
+    r"""Computes the recall
+    :math:`\frac{\mathrm{TP}}{\mathrm{TP}+\mathrm{FN}}` of predictions.
+
+    Args:
+        pred (Tensor): The predictions.
+        target (Tensor): The targets.
+        num_classes (int): The number of classes.
+
+    :rtype: :class:`Tensor`
+    """
+    from torch_geometric.utils import true_negative, false_positive
+    tn = true_negative(pred, target, num_classes).to(torch.float)
+    fp = false_positive(pred, target, num_classes).to(torch.float)
+
+    out = tn / (tn + fp)
+    out[torch.isnan(out)] = 0
+
+    return out
 
 def sprase_to_dense(edge_index, num_nodes):
     mat = torch.zeros(num_nodes, num_nodes, dtype=torch.long)
@@ -118,7 +139,7 @@ def main():
     else:
         raise NotImplementedError
 
-    model = load_model(model_path, pose.PoseEstimationBaseline, pose.default_config, device).to(device)
+    model = load_model(model_path, pose.PoseEstimationBaseline, config, device).to(device)
     model.eval()
 
     # baseline : predicting full connectiosn
@@ -166,6 +187,13 @@ def main():
     coco_eval(eval_set.coco, anns, eval_set.img_ids[:eval_num].astype(np.int))
     # eval model
     anns = []
+    eval_prec_negative = []
+    eval_prec_positive = []
+    eval_recall_negative = []
+    eval_recall_positive = []
+    eval_specificity_positive = []
+    result_stack = []
+    label_stack = []
     with torch.no_grad():
         for i in range(eval_num):
 
@@ -176,8 +204,20 @@ def main():
             # todo remove cheating
             # todo lower bound!!
             keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
-            pred, joint_det, edge_index, _ = model(imgs, keypoints, masks, with_logits=False)
+            pred, joint_det, edge_index, _ = model(imgs, keypoints, masks, with_logits=True)
 
+            pred = pred.sigmoid().squeeze()
+            result = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
+            result_stack.append(result)
+            label_stack.append(_)
+
+            eval_prec_positive.append(precision(result, _, 2)[1])
+            eval_prec_negative.append(precision(result, _, 2)[0])
+            eval_recall_positive.append(recall(result, _, 2)[1])
+            eval_recall_negative.append(recall(result, _, 2)[0])
+            eval_specificity_positive.append(specificity(result, _, 2)[1])
+            # pred = pred * _  # this shows the impact of higher recall
+            # pred = torch.where(_ == 0.0, pred, _)  # this shows the impact of higher specificity
             # pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
             test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
             sol = cluster_graph(test_graph, cc_method, complete=False)
@@ -192,6 +232,12 @@ def main():
             ann = gen_ann_format(persons_pred_orig, eval_set.img_ids[i])
             anns.append(ann)
         coco_eval(eval_set.coco, anns, eval_set.img_ids[:eval_num].astype(np.int))
+        print(precision(torch.cat(result_stack, 0), torch.cat(label_stack, 0), 2))
+        print(f"Positive Precision: {np.mean(eval_prec_positive)}")
+        print(f"Positive Recall: {np.mean(eval_recall_positive)}")
+        print(f"Negative Precision: {np.mean(eval_prec_negative)}")
+        print(f"Negative Recall: {np.mean(eval_recall_negative)}")
+        print(f"Positive Specificity: {np.mean(eval_specificity_positive)}")
 
 
 if __name__ == "__main__":
