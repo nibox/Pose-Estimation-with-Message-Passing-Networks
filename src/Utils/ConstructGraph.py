@@ -41,11 +41,12 @@ class NaiveGraphConstructor:
             # todo move in function
 
             # remove detected joints that are close to multiple gt joints
-            person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
-            joints_gt_loc = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
-            joints_gt_loc = torch.cat([joints_gt_loc, joint_idx_gt.unsqueeze(1)], 1)
+            if self.use_gt:
+                person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
+                joints_gt_loc = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
+                joints_gt_loc = torch.cat([joints_gt_loc, joint_idx_gt.unsqueeze(1)], 1)
 
-            joint_det, _, _ = self.remove_ambigiuous_det(joint_det, joints_gt_loc, self.inclusion_radius)
+                joint_det = NaiveGraphConstructor.remove_ambigiuous_det(joint_det, joints_gt_loc, self.inclusion_radius)
 
             if self.use_gt:
                 person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
@@ -60,9 +61,10 @@ class NaiveGraphConstructor:
 
             x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch])
 
+
             # sol maps nodes to gt joints/  gt joints to nodes and connectivity maps between gt joints
             edge_labels = None
-            if self.joints_gt is not None:
+            if self.use_gt:
                 if self.edge_label_method == 1:
                     edge_labels = self._construct_edge_labels_1(joint_det, self.joints_gt[batch], edge_index)
                 elif self.edge_label_method == 2:
@@ -80,10 +82,13 @@ class NaiveGraphConstructor:
         x_list = torch.cat(x_list, 0)
         edge_attr_list = torch.cat(edge_attr_list, 0)
         edge_index_list = torch.cat(edge_index_list, 1)
-        edge_labels_list = torch.cat(edge_labels_list, 0)
         joint_det_list = torch.cat(joint_det_list, 0)
+        if self.use_gt:
+            assert edge_labels_list[0] is not None
+            edge_labels_list = torch.cat(edge_labels_list, 0)
+        label_mask_list = None  # preperation for label mask
 
-        return x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list
+        return x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list, label_mask_list
 
     def _construct_mpn_graph(self, joint_det, features):
         """
@@ -107,9 +112,9 @@ class NaiveGraphConstructor:
         # todo using k_nn and setting distances between joints of certain type on can create the different graphs
         # todo remove connections between same type
         temp = joint_det[:, :2].float()  # nn.knn_graph (cuda) can't handle int64 tensors
-        edge_index = torch_geometric.nn.knn_graph(temp, 50)
+        edge_index = torch_geometric.nn.knn_graph(temp, k=50)
         # edge_index, _ = gutils.dense_to_sparse(torch.ones([num_joints_det, num_joints_det], dtype=torch.long))
-        edge_index = gutils.to_undirected(edge_index)
+        edge_index = gutils.to_undirected(edge_index, len(joint_det))
         edge_index, _ = gutils.remove_self_loops(edge_index)
 
         # construct edge labels (each connection type is one label
@@ -141,7 +146,8 @@ class NaiveGraphConstructor:
 
         return x, edge_attr, edge_index
 
-    def remove_ambigiuous_det(self, joint_det, joints_gt_loc, radius):
+    @staticmethod
+    def remove_ambigiuous_det(joint_det, joints_gt_loc, radius):
         distances = torch.norm(joint_det[:, :2].unsqueeze(1).float() - joints_gt_loc[:, :2].float(), dim=2)
         # set distances of joint pairs of different type to some high value
         type_det = torch.logical_not(torch.eq(joint_det[:, 2].unsqueeze(1), joints_gt_loc[:, 2]))
@@ -149,9 +155,20 @@ class NaiveGraphConstructor:
         distances[distances >= radius] = 0.0  # todo set radius and maybe norm
         distances = distances != 0
         joints_to_remove = distances.sum(dim=1) > 1
-        removed_idx = joints_to_remove.int().nonzero(as_tuple=True)[0]
         joint_det_smaller = joint_det[torch.logical_not(joints_to_remove)]
-        return joint_det_smaller, joint_det, removed_idx
+        return joint_det_smaller
+
+    @staticmethod
+    def soft_remove_neighbours(joint_det, joints_gt_loc, radius):
+        distances = torch.norm(joint_det[:, :2].unsqueeze(1).float() - joints_gt_loc[:, :2].float(), dim=2)
+        # set distances of joint pairs of different type to some high value
+        type_det = torch.logical_not(torch.eq(joint_det[:, 2].unsqueeze(1), joints_gt_loc[:, 2]))
+        distances[type_det] = 1000.0  # different type joint are exempt
+        distances[distances >= radius] = 0.0  # todo set radius and maybe norm
+        distances = distances != 0
+        joints_to_remove = distances.sum(dim=1) >= 1
+        removed_idx = joints_to_remove.int().nonzero(as_tuple=True)[0]
+        return removed_idx
 
     def _construct_edge_labels_1(self, joint_det, joints_gt, edge_index):
         # joint_idx_det, joint_y, joint_x = joint_map.nonzero(as_tuple=True)
@@ -286,6 +303,28 @@ class NaiveGraphConstructor:
                                   torch.zeros(num_edges_b, device=device))
         return edge_labels
 
+    @staticmethod
+    def create_loss_mask(joints, edge_index):
+        """
+        Given a list os joint idx whose connections should not contribute to the loss and the edges, create the
+        loss mask
+        :param joints: tensor (Num joints to consider) contains joint idxs
+        :param edge_index: edges of graph
+        :return: loss mask (same shape as edge labels)
+        """
+        loss_mask = torch.ones(edge_index.shape[1], dtype=torch.float, device=edge_index.device)
+        # mask all edges starting at points from joints
+        source_edges = torch.eq(edge_index[0].unsqueeze(1), joints).sum(dim=1)
+        assert source_edges.max() <= 1.0
+        source_edges = source_edges == 1.0
+
+        target_edges = torch.eq(edge_index[1].unsqueeze(1), joints).sum(dim=1)
+        assert target_edges.max() <= 1.0
+        target_edges = target_edges == 1.0
+        loss_mask[source_edges | target_edges] = 0.0
+        return loss_mask
+
+
 
 def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
     joint_map = non_maximum_suppression(scoremap, threshold=threshold)
@@ -343,6 +382,5 @@ def graph_cluster_to_persons(joints, joint_connections):
             keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
             keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
             persons.append(keypoints)
-            # print(test)
     persons = np.array(persons)
     return persons, mutant_detected

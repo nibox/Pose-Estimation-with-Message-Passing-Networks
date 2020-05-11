@@ -62,19 +62,21 @@ class PoseEstimationBaseline(nn.Module):
                                                    mask_crowds=self.mask_crowds,
                                                    inclusion_radius=self.config["inclusion_radius"])
 
-        x, edge_attr, edge_index, edge_labels, joint_det = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, joint_det, label_mask = graph_constructor.construct_graph()
 
         pred = self.mpn(x, edge_attr, edge_index).squeeze()
         if not with_logits:
             pred = torch.sigmoid(pred)
 
-        return pred, joint_det, edge_index, edge_labels
+        return pred, joint_det, edge_index, edge_labels, label_mask
 
-    def loss(self, output, targets, with_logits=True, pos_weight=None) -> torch.Tensor:
+    def loss(self, output, targets, with_logits=True, pos_weight=None, mask=None) -> torch.Tensor:
         if self.focal is not None:
             assert with_logits
-            return self.focal(output, targets)
+            loss = self.focal(output, targets, mask)
+            return loss
 
+        assert mask is None
         if with_logits:
             return F.binary_cross_entropy_with_logits(output, targets, pos_weight=pos_weight)
         else:

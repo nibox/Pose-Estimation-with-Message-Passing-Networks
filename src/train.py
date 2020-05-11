@@ -79,8 +79,13 @@ def main():
     config["cheat"] = False
     config["use_gt"] = True
     config["use_focal_loss"] = True
-    config["use_neighbours"] = True
-    config["mask_crowds"] = True
+    config["use_neighbours"] = False
+    config["mask_crowds"] = False
+    config["detect_threshold"] = 0.007  # default was 0.007
+    config["edge_label_method"] = 2
+    config["inclusion_radius"] = 0.0
+
+    use_label_mask = False
 
     ##########################################################
     print("Load model")
@@ -110,13 +115,14 @@ def main():
             imgs = imgs.to(device)
             masks = masks.to(device)
             keypoints = keypoints.to(device)
-            pred, joint_det, edge_index, edge_labels = model(imgs, keypoints, masks)
+            pred, joint_det, edge_index, edge_labels, label_mask = model(imgs, keypoints, masks)
 
             if len(edge_labels[edge_labels == 1]) != 0 and len(edge_labels[edge_labels == 0]) != 0:
                 pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
             else:
                 pos_weight = torch.tensor(1.0)
-            loss = model.loss(pred, edge_labels, pos_weight=pos_weight)
+            label_mask = label_mask if use_label_mask else None
+            loss = model.loss(pred, edge_labels, pos_weight=pos_weight, mask=label_mask)
             loss.backward()
             optimizer.step()
             result = pred.sigmoid().squeeze()
@@ -153,13 +159,14 @@ def main():
                 imgs = imgs.to(device)
                 masks = masks.to(device)
                 keypoints = keypoints.to(device)
-                pred, joint_det, edge_index, edge_labels = model(imgs, keypoints, masks)
+                pred, joint_det, edge_index, edge_labels, label_mask = model(imgs, keypoints, masks)
 
                 if len(edge_labels[edge_labels == 1]) != 0:
                     pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
                 else:
                     pos_weight = torch.tensor(1.0)
-                loss = model.loss(pred, edge_labels, pos_weight=pos_weight)
+                label_mask = label_mask if use_label_mask else None
+                loss = model.loss(pred, edge_labels, pos_weight=pos_weight, mask=label_mask)
                 result = pred.sigmoid().squeeze()
                 result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
 
