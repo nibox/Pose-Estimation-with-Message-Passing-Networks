@@ -48,7 +48,6 @@ class NaiveGraphConstructor:
 
                 joint_det = NaiveGraphConstructor.remove_ambigiuous_det(joint_det, joints_gt_loc, self.inclusion_radius)
 
-            if self.use_gt:
                 person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
                 tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
                 joints_gt_position = torch.cat([tmp, joint_idx_gt.unsqueeze(1)], 1)
@@ -246,6 +245,7 @@ class NaiveGraphConstructor:
         else:
             assignment = distance < -1  # fast way to generate array initialized with false
             assignment[np.arange(0, num_joints_gt), np.arange(num_joints_det-num_joints_gt, num_joints_det)] = True
+            assert assignment.sum(dim=1).min() == 1
             # set diagonal to true because it should be true
         if num_joints_det != num_joints_gt and self.use_gt:
             assert assignment.sum(dim=0)[:-num_joints_gt].max() < 2
@@ -254,6 +254,7 @@ class NaiveGraphConstructor:
         # this happens for gt keypoints in case where the original positions are close and even closer after resizing
         # and rounding
         assert assignment.sum(dim=1).min() >= 1
+        # print(f"max num neighbours: {assignment.sum(dim=1).max()}")
         # this means that each target node is assigned at least one source node (which is the corresponding gt node)
         target_joint_gt, source_joint_det = assignment.long().nonzero(as_tuple=True)
 

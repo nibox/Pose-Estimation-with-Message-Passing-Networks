@@ -47,9 +47,11 @@ def load_checkpoint(path, model_class, model_config, device):
 
     optimizer = torch.optim.Adam(model.parameters())
     optimizer.load_state_dict(state_dict["optimizer_state_dict"])
+    #"""
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 60)
     if "lr_scheduler_state_dict" in state_dict:
         scheduler.load_state_dict(state_dict["lr_scheduler_state_dict"])
+    # """
 
     return model, optimizer, state_dict["epoch"], scheduler
 
@@ -63,28 +65,29 @@ def main():
     ##########################################################
     dataset_path = "../../storage/user/kistern/coco"
     pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
-    model_path =   "../log/PoseEstimationBaseline/9/pose_estimation.pth"
+    model_path = None  # "../log/PoseEstimationBaseline/13/pose_estimation.pth"
 
-    log_dir = "../log/PoseEstimationBaseline/9"
-    model_save_path = f"{log_dir}/pose_estimation_continue.pth"
+    log_dir = "../log/PoseEstimationBaseline/17"
+    model_save_path = f"{log_dir}/pose_estimation.pth"
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
 
-    # hyperparameters and other stuff
-    learn_rate = 3e-5
+    learn_rate = 3e-4
     num_epochs = 100
-    batch_size = 16  # pretty much largest possible batch size
+    batch_size = 8  # 16 is pretty much largest possible batch size
     config = pose.default_config
     config["message_passing"] = VanillaMPN2
     config["message_passing_config"] = default_config
+    config["message_passing_config"]["aggr"] = "add"
+    # config["message_passing_config"]["steps"] = 10
     config["cheat"] = False
     config["use_gt"] = True
     config["use_focal_loss"] = True
-    config["use_neighbours"] = False
-    config["mask_crowds"] = False
+    config["use_neighbours"] = True
+    config["mask_crowds"] = True
     config["detect_threshold"] = 0.007  # default was 0.007
     config["edge_label_method"] = 2
-    config["inclusion_radius"] = 0.0
+    config["inclusion_radius"] = 3.0
 
     use_label_mask = False
 
@@ -100,7 +103,7 @@ def main():
         model.to(device)
         model.freeze_backbone()
         optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 60, 0.1)
+        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [60, 150], 0.1)
         start_epoch = 0
     print("Load dataset")
     train_loader, valid_loader = create_train_validation_split(dataset_path, batch_size=batch_size, mini=True)

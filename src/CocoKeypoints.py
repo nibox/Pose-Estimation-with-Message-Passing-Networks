@@ -81,8 +81,7 @@ class CocoKeypoints(Dataset):
         keypoints_list = []
         for i in range(num_people):
             keypoints_np[i] = np.array(ann[i]["keypoints"]).reshape([-1, 3])
-            t = np.sum(np.array(ann[i]["keypoints"]).reshape([-1, 3]), axis=0)
-            if np.sum(np.array(ann[i]["keypoints"]).reshape([-1, 3]), axis=0)[2] > 0:
+            if ann[i]["num_keypoints"] > 0:
                 keypoints_list.append(np.array(ann[i]["keypoints"]).reshape([-1, 3]))
 
         keypoints = np.array(keypoints_list).astype(np.float)
@@ -93,8 +92,16 @@ class CocoKeypoints(Dataset):
         mask = np.zeros([img_height, img_width])
         for j in ann:
             if j["iscrowd"]:
+                assert j["num_keypoints"] == 0
+            # testing for the number of keypoints should be sufficient if the assertion above is true
+            if j["num_keypoints"] == 0:
                 encoding = maskapi.frPyObjects(j["segmentation"], img_height, img_width)
-                mask += maskapi.decode(encoding)
+                inst_mask = maskapi.decode(encoding)
+                if len(inst_mask.shape) == 3:
+                    inst_mask = maskapi.decode(encoding).sum(axis=2)
+                mask += inst_mask
+
+
         mask = (mask < 0.5).astype(np.float32)
 
         # img processing
