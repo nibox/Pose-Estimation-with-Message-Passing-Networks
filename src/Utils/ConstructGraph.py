@@ -3,7 +3,7 @@ import torch_geometric
 import torch_geometric.utils as gutils
 from scipy.optimize import linear_sum_assignment
 import numpy as np
-from Utils.Utils import *
+from Utils.Utils import non_maximum_suppression
 
 
 class NaiveGraphConstructor:
@@ -344,43 +344,3 @@ def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
 
     joint_positions_det = torch.stack([joint_x, joint_y, joint_idx_det], 1)
     return joint_positions_det
-
-
-def graph_cluster_to_persons(joints, joint_connections):
-    """
-    :param joints: (N, 2) vector of joints
-    :param joint_connections: (2, E) array/tensor that indicates which joint are connected thus belong to the same person
-    :return: (N persons, 17, 3) array. 17 joints, 2 positions + visibiilty flag (in case joints are missing)
-    """
-    joints, joint_connections = to_numpy(joints), to_numpy(joint_connections)
-    from scipy.sparse import csr_matrix
-    from scipy.sparse.csgraph import connected_components
-    # construct dense adj matrix
-    num_nodes = len(joints)
-    adj_matrix = np.zeros([num_nodes, num_nodes])
-    adj_matrix[joint_connections[0], joint_connections[1]] = 1
-    graph = csr_matrix(adj_matrix)
-    n_components, person_labels = connected_components(graph, directed=False, return_labels=True)
-    persons = []
-    mutant_detected = False
-    for i in range(n_components):
-        # check if cc has more than one node
-        person_joints = joints[person_labels == i]
-        if len(person_joints) > 17:
-            # print(f"Mutant detected!! It has {len(person_joints)} joints!!")
-            # todo change meaning of mutant
-            mutant_detected = True
-
-        if len(person_joints) > 1:  # isolated joints also form a cluster -> ignore them
-            # rearrange person joints
-            keypoints = np.zeros([17, 3])
-            for joint_type in range(17):  # 17 different joint types
-                # take the detected joints of a certain type
-                person_joint_for_type = person_joints[person_joints[:, 2] == joint_type]
-                if len(person_joint_for_type) != 0:
-                    keypoints[joint_type] = np.mean(person_joint_for_type, axis=0)
-            keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
-            keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
-            persons.append(keypoints)
-    persons = np.array(persons)
-    return persons, mutant_detected

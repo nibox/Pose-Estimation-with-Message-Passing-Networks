@@ -60,6 +60,7 @@ def main():
     np.random.seed(seed)
     torch.manual_seed(seed)
 
+    ##########################################################
     dataset_path = "../../storage/user/kistern/coco"
     pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
     model_path =   "../log/PoseEstimationBaseline/9/pose_estimation.pth"
@@ -176,7 +177,8 @@ def main():
                 valid_prec.append(precision(result, edge_labels, 2)[1])
                 valid_recall.append(recall(result, edge_labels, 2)[1])
         print(f"Epoch: {epoch + start_epoch}, loss:{np.mean(valid_loss):6f}, "
-              f"Accuracy: {np.mean(valid_acc)}")
+              f"Accuracy: {np.mean(valid_acc)}, "
+              f"Precision: {np.mean(valid_prec)}")
         scheduler.step()
 
         writer.add_scalar("Loss/valid", np.mean(valid_loss), epoch + start_epoch)

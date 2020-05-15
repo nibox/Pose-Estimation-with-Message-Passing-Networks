@@ -1,22 +1,12 @@
-import os
-import cv2
 import pickle
 import torch
 import numpy as np
-from torch.utils.data import DataLoader
-from torch_geometric.utils import dense_to_sparse, precision, recall
-
+from torch_geometric.utils import precision, recall
+from tqdm import tqdm
 from CocoKeypoints import CocoKeypoints
-from Utils.Utils import load_model, get_transform, kpt_affine, to_numpy
+from Utils.Utils import load_model, get_transform, kpt_affine, pred_to_person, num_non_detected_points
 import Models.PoseEstimation.PoseEstimation as pose
 from Models.MessagePassingNetwork.VanillaMPN2 import VanillaMPN2, default_config
-from Utils.ConstructGraph import graph_cluster_to_persons
-from Utils.dataset_utils import Graph
-from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
-import matplotlib;
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 
 def specificity(pred, target, num_classes):
@@ -95,7 +85,6 @@ def coco_eval(coco, dt, image_ids, tmp_dir="tmp", log=True):
     from https://github.com/princeton-vl/pose-ae-train
     Evaluate the result with COCO API
     """
-    from pycocotools.coco import COCO
     from pycocotools.cocoeval import COCOeval
 
     import json
@@ -112,9 +101,9 @@ def coco_eval(coco, dt, image_ids, tmp_dir="tmp", log=True):
     coco_eval.summarize()
     return coco_eval.stats
 
-
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
+    dataset_path = "../../storage/user/kistern/coco"
     ######################################
     mini = True
     eval_num = 500
@@ -142,60 +131,23 @@ def main():
     model = load_model(model_path, pose.PoseEstimationBaseline, config, device).to(device)
     model.eval()
 
-    # baseline : predicting full connectiosn
+    # baseline : predicting full connections
     # baseline: upper bound
 
-    anns = []
-    for i in range(eval_num):
-
-        imgs, masks, keypoints = eval_set[i]
-        num_persons_gt = np.count_nonzero(keypoints[:, :, 2].sum(axis=1))
-        persons_pred = keypoints[:num_persons_gt].round()  # rounding lead to ap=0.9
-
-        img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
-        persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
-
-        ann = gen_ann_format(persons_pred_orig, eval_set.img_ids[i])
-        anns.append(ann)
-    print("Upper bound")
-    coco_eval(eval_set.coco, anns, eval_set.img_ids[:eval_num].astype(np.int))
-
-    print("Upper bound 2")
-    anns = []
-    for i in range(eval_num):
-
-        imgs, masks, keypoints = eval_set[i]
-        imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
-        masks = torch.from_numpy(masks).to(device).unsqueeze(0)
-        keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
-        _, joint_det, edge_index, edge_labels = model(imgs, keypoints, masks, with_logits=False)
-
-        test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_labels)
-        sol = cluster_graph(test_graph, cc_method, complete=False)
-        sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
-        # construct solution by using only labeled edges (instead of corr clustering)
-        # sparse_sol = torch.stack([edge_index[0, edge_labels==1], edge_index[1, edge_labels==1]])
-        persons_pred, _ = graph_cluster_to_persons(joint_det, sparse_sol)  # might crash
-
-        img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
-        if len(persons_pred.shape) == 1:  # this means none persons were detected
-            persons_pred = np.zeros([1, 17, 3])
-        persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
-
-        ann = gen_ann_format(persons_pred_orig, eval_set.img_ids[i])
-        anns.append(ann)
-    coco_eval(eval_set.coco, anns, eval_set.img_ids[:eval_num].astype(np.int))
     # eval model
-    anns = []
     eval_prec_negative = []
     eval_prec_positive = []
     eval_recall_negative = []
     eval_recall_positive = []
     eval_specificity_positive = []
-    result_stack = []
-    label_stack = []
+
+    anns = []
+    anns_inter_person = []
+    anns_intra_person = []
+    imgs_fully_det = []  # save ids with perfect detections so i can eval performance on
+    print("Eval on Labeled data")
     with torch.no_grad():
-        for i in range(eval_num):
+        for i in tqdm(range(eval_num)):
 
             imgs, masks, keypoints = eval_set[i]
             imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
@@ -204,40 +156,86 @@ def main():
             # todo remove cheating
             # todo lower bound!!
             keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
-            pred, joint_det, edge_index, _ = model(imgs, keypoints, masks, with_logits=True)
+            pred, joint_det, edge_index, edge_labels, _ = model(imgs, keypoints, masks, with_logits=True)
 
             pred = pred.sigmoid().squeeze()
             result = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
-            result_stack.append(result)
-            label_stack.append(_)
+            n, _ = num_non_detected_points(joint_det.cpu(), keypoints.cpu())
 
-            eval_prec_positive.append(precision(result, _, 2)[1])
-            eval_prec_negative.append(precision(result, _, 2)[0])
-            eval_recall_positive.append(recall(result, _, 2)[1])
-            eval_recall_negative.append(recall(result, _, 2)[0])
-            eval_specificity_positive.append(specificity(result, _, 2)[1])
-            # pred = pred * _  # this shows the impact of higher recall
-            # pred = torch.where(_ == 0.0, pred, _)  # this shows the impact of higher specificity
+            eval_prec_positive.append(precision(result, edge_labels, 2)[1])
+            eval_prec_negative.append(precision(result, edge_labels, 2)[0])
+            eval_recall_positive.append(recall(result, edge_labels, 2)[1])
+            eval_recall_negative.append(recall(result, edge_labels, 2)[0])
+            eval_specificity_positive.append(specificity(result, edge_labels, 2)[1])
+
+            pred_intra_person = pred * edge_labels  # this shows the impact of higher recall
+            pred_inter_person = torch.where(edge_labels == 0.0, pred, edge_labels)  # this shows the impact of higher specificity
             # pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
-            test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
-            sol = cluster_graph(test_graph, cc_method, complete=False)
-            sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
-            persons_pred, _ = graph_cluster_to_persons(joint_det, sparse_sol)  # might crash
-
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
-            if len(persons_pred.shape) == 1:  # this means none persons were detected
-                persons_pred = np.zeros([1, 17, 3])
-            persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
 
-            ann = gen_ann_format(persons_pred_orig, eval_set.img_ids[i])
+            ann = perd_to_ann(joint_det, edge_index, pred, img_info, int(eval_set.img_ids[i]), cc_method)
+            ann_intra = perd_to_ann(joint_det, edge_index, pred_intra_person, img_info, int(eval_set.img_ids[i]), cc_method)
+            ann_inter = perd_to_ann(joint_det, edge_index, pred_inter_person, img_info, int(eval_set.img_ids[i]), cc_method)
+
             anns.append(ann)
+            anns_intra_person.append(ann_intra)
+            anns_inter_person.append(ann_inter)
+            if int(n) == 0:
+                imgs_fully_det.append(int(eval_set.img_ids[i]))
+
+        anns_real = []
+        anns_full = []
+        model.use_gt = False
+        print("Eval on Real data")
+        with torch.no_grad():
+            for i in tqdm(range(eval_num)):
+                imgs, masks, keypoints = eval_set[i]
+                imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
+                masks = torch.from_numpy(masks).to(device).unsqueeze(0)
+                # todo use mask to mask of joint predicitions in crowd (is this allowed?)
+                # todo remove cheating
+                # todo lower bound!!
+                keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
+                pred, joint_det, edge_index, _, _ = model(imgs, keypoints, masks, with_logits=True)
+
+                pred = pred.sigmoid().squeeze()
+
+                # pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
+                img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
+                ann = perd_to_ann(joint_det, edge_index, pred, img_info, int(eval_set.img_ids[i]), cc_method)
+                anns_real.append(ann)
+                if int(eval_set.img_ids[i]) in imgs_fully_det:
+                    anns_full.append(ann)
+        print("##################")
+        print("General Evaluation")
         coco_eval(eval_set.coco, anns, eval_set.img_ids[:eval_num].astype(np.int))
-        print(precision(torch.cat(result_stack, 0), torch.cat(label_stack, 0), 2))
+        print("##################")
+        print("Inter Person Ability")
+        coco_eval(eval_set.coco, anns_inter_person, eval_set.img_ids[:eval_num].astype(np.int))
+        print("##################")
+        print("Intra Person Ability")
+        coco_eval(eval_set.coco, anns_intra_person, eval_set.img_ids[:eval_num].astype(np.int))
+        print("##################")
+        print("Real Evaluation")
+        coco_eval(eval_set.coco, anns_real, eval_set.img_ids[:eval_num].astype(np.int))
+        print("##################")
+        print("Real Evaluation on perfect images")
+        coco_eval(eval_set.coco, anns_full, imgs_fully_det)
         print(f"Positive Precision: {np.mean(eval_prec_positive)}")
         print(f"Positive Recall: {np.mean(eval_recall_positive)}")
         print(f"Negative Precision: {np.mean(eval_prec_negative)}")
         print(f"Negative Recall: {np.mean(eval_recall_negative)}")
         print(f"Positive Specificity: {np.mean(eval_specificity_positive)}")
+
+
+def perd_to_ann(joint_det, edge_index, pred, img_info, img_id, cc_method):
+    persons_pred, _ = pred_to_person(joint_det, edge_index, pred, cc_method)
+
+    if len(persons_pred.shape) == 1:  # this means none persons were detected
+        persons_pred = np.zeros([1, 17, 3])
+    persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
+    ann = gen_ann_format(persons_pred_orig, img_id)
+    return ann
 
 
 if __name__ == "__main__":

@@ -126,6 +126,19 @@ class CocoKeypoints(Dataset):
     def __len__(self):
         return len(self.img_ids)
 
+    def get_tensor(self, idx, device) -> torch.tensor:
+        """
+        Method that returns the idx sample with batch_size==1
+        :param idx:
+        :return:
+        """
+        img, mask, keypoints = self[idx]
+        img = torch.from_numpy(img).to(device).unsqueeze(0)
+        mask = torch.from_numpy(mask).to(device).unsqueeze(0)
+        keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
+
+        return img, mask, keypoints
+
 
 def pack_keypoints_for_batch(keypoints: np.array, max_num_people):
     out = np.zeros([max_num_people, 17, 3])

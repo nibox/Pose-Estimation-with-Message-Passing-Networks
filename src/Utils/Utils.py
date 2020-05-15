@@ -4,6 +4,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from matplotlib import pyplot as plt
+from torch_geometric.utils import dense_to_sparse
+
+from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
+from Utils.dataset_utils import Graph
 
 
 def non_maximum_suppression(scoremap, threshold=0.05):
@@ -263,3 +267,71 @@ def draw_clusters(img: [torch.tensor, np.array], joints, joint_connections, fnam
         plt.close(fig)
     else:
         raise NotImplementedError
+
+
+def pred_to_person(joint_det, edge_index, pred, cc_method):
+    test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
+    sol = cluster_graph(test_graph, cc_method, complete=False)
+    sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
+    persons_pred, mutants = graph_cluster_to_persons(joint_det, sparse_sol)  # might crash
+    return persons_pred, mutants
+
+
+def graph_cluster_to_persons(joints, joint_connections):
+    """
+    :param joints: (N, 2) vector of joints
+    :param joint_connections: (2, E) array/tensor that indicates which joint are connected thus belong to the same person
+    :return: (N persons, 17, 3) array. 17 joints, 2 positions + visibiilty flag (in case joints are missing)
+    """
+    joints, joint_connections = to_numpy(joints), to_numpy(joint_connections)
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import connected_components
+    # construct dense adj matrix
+    num_nodes = len(joints)
+    adj_matrix = np.zeros([num_nodes, num_nodes])
+    adj_matrix[joint_connections[0], joint_connections[1]] = 1
+    graph = csr_matrix(adj_matrix)
+    n_components, person_labels = connected_components(graph, directed=False, return_labels=True)
+    persons = []
+    mutant_detected = False
+    for i in range(n_components):
+        # check if cc has more than one node
+        person_joints = joints[person_labels == i]
+        if len(person_joints) > 17:
+            # print(f"Mutant detected!! It has {len(person_joints)} joints!!")
+            # todo change meaning of mutant
+            mutant_detected = True
+
+        if len(person_joints) > 1:  # isolated joints also form a cluster -> ignore them
+            # rearrange person joints
+            keypoints = np.zeros([17, 3])
+            for joint_type in range(17):  # 17 different joint types
+                # take the detected joints of a certain type
+                person_joint_for_type = person_joints[person_joints[:, 2] == joint_type]
+                if len(person_joint_for_type) != 0:
+                    keypoints[joint_type] = np.mean(person_joint_for_type, axis=0)
+            keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
+            keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
+            persons.append(keypoints)
+    persons = np.array(persons)
+    return persons, mutant_detected
+
+
+def num_non_detected_points(joint_det, keypoints):
+
+    person_idx_gt, joint_idx_gt = keypoints[0, :, :, 2].nonzero(as_tuple=True)
+    joints_gt = keypoints[0, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
+    joints_gt_loc = torch.cat([joints_gt, joint_idx_gt.unsqueeze(1)], 1)
+    distance = torch.norm(joints_gt_loc[:, None, :2] - joint_det[:, :2].float(), dim=2)
+
+    different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
+    distance[different_type] = 100000.0
+    non_valid = distance >= 5.0
+    distance[non_valid] = 100000.0
+    from scipy.optimize import linear_sum_assignment
+    distance = distance.cpu().numpy()
+    distance = distance[:, :-len(person_idx_gt)]
+    sol = linear_sum_assignment(distance)
+    cost = np.sum(distance[sol[0], sol[1]])
+    num_miss_detections = cost // 100000
+    return num_miss_detections, len(person_idx_gt)
