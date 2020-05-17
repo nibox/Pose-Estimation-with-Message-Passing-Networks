@@ -336,12 +336,14 @@ def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
         scoremap = torch.where(scoremap < threshold, torch.zeros_like(scoremap), scoremap)
         joint_idx_det, joint_y, joint_x = scoremap.nonzero(as_tuple=True)
     else:
+        k = 40
         scoremap_shape = scoremap.shape
-        _, indices = scoremap.view(17, -1).topk(k=30, dim=1)
+        _, indices = scoremap.view(17, -1).topk(k=k, dim=1)
         container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.int).reshape(17, -1)
-        container[:, indices] = 1
+        container[np.arange(0, 17).reshape(17, 1), indices] = 1
         container = container.reshape(scoremap_shape)
         joint_idx_det, joint_y, joint_x = container.nonzero(as_tuple=True)
+        assert len(joint_idx_det) == k * 17
 
     joint_positions_det = torch.stack([joint_x, joint_y, joint_idx_det], 1)
     return joint_positions_det
