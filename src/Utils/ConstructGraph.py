@@ -68,6 +68,8 @@ class NaiveGraphConstructor:
                     edge_labels = self._construct_edge_labels_1(joint_det, self.joints_gt[batch], edge_index)
                 elif self.edge_label_method == 2:
                     edge_labels = self._construct_edge_labels_2(joint_det, self.joints_gt[batch], edge_index)
+            elif self.joints_gt is not None:
+                edge_labels = self._construct_edge_labels_3(joint_det, self.joints_gt[batch], edge_index)
             x_list.append(x)
             num_node_list.append(x.shape[0] + num_node_list[-1])
             edge_attr_list.append(edge_attr)
@@ -82,7 +84,7 @@ class NaiveGraphConstructor:
         edge_attr_list = torch.cat(edge_attr_list, 0)
         edge_index_list = torch.cat(edge_index_list, 1)
         joint_det_list = torch.cat(joint_det_list, 0)
-        if self.use_gt:
+        if self.joints_gt is not None:
             assert edge_labels_list[0] is not None
             edge_labels_list = torch.cat(edge_labels_list, 0)
         label_mask_list = None  # preperation for label mask
@@ -261,6 +263,38 @@ class NaiveGraphConstructor:
         target_joint_gt, source_joint_det = assignment.long().nonzero(as_tuple=True)
 
         sol = target_joint_gt, source_joint_det
+
+        edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol)
+        return edge_labels
+
+    def _construct_edge_labels_3(self, joint_det, joints_gt, edge_index):
+        assert not self.use_gt
+        num_joints_det = len(joint_det)
+
+        person_idx_gt, joint_idx_gt = joints_gt[:, :, 2].nonzero(as_tuple=True)
+        num_joints_gt = len(person_idx_gt)
+
+        distance = torch.norm(joints_gt[person_idx_gt, joint_idx_gt, :2].unsqueeze(1).round().float().clamp(0, 127) - joint_det[:, :2].float(), dim=2)
+        # set distance between joints of different type to some high value
+        different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
+        distance[different_type] = 10000.0
+        distance[distance >= self.inclusion_radius] = 10000.0
+        if self.include_neighbouring_keypoints:
+            assignment = distance < self.inclusion_radius
+            sol = assignment.long().nonzero(as_tuple=True)
+        else:
+            cost_mat = distance.cpu().numpy()
+            sol = linear_sum_assignment(cost_mat)
+            row, col = sol
+            # remove mappings with cost 10000.0
+            valid_match = cost_mat[row, col] != 10000.0
+            row = row[valid_match]
+            col = col[valid_match]
+            row = np.arange(0, len(row), dtype=np.int64)
+            row, col = torch.from_numpy(row).to(self.device), torch.from_numpy(col).to(self.device)
+            sol = row, col
+
+            person_idx_gt = person_idx_gt[valid_match]
 
         edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol)
         return edge_labels
