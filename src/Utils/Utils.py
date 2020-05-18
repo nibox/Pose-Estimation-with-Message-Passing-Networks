@@ -115,6 +115,7 @@ def draw_detection(img, joint_det, joint_gt, fname=None):
     img = img * 255.0
     img = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_RGB2HSV)
     colors_joints = np.arange(0, 179, np.ceil(179 / 17), dtype=np.float)
+    colors_joints[1::2] = colors_joints[-2::-2] # swap some colors to have clearer distinction between similar joint types
 
     for i in range(len(joint_det)):
         # scale up to 512 x 512
@@ -170,6 +171,8 @@ def draw_poses(img: [torch.tensor, np.array], persons, fname=None):
     ]
     bones = np.array(pair_ref) - 1
     colors = np.arange(0, 179, np.ceil(179 / len(persons)))
+    colors_joints = np.arange(0, 179, np.ceil(179 / 17), dtype=np.float)
+    colors_joints[1::2] = colors_joints[-2::-2] # swap some colors to have clearer distinction between similar joint types
     # image to 8bit hsv (i dont know what hsv values opencv expects in 32bit case=)
     img = img * 255.0
     img = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_RGB2HSV)
@@ -183,10 +186,11 @@ def draw_poses(img: [torch.tensor, np.array], persons, fname=None):
         for i in range(len(persons[person])):
             # scale up to 512 x 512
             joint_1 = persons[person, i]
+            color_joint = (colors_joints[i], 255., 255.)
             joint_1_valid = joint_1[2] > 0
             x_1, y_1 = np.multiply(joint_1[:2], scale).astype(np.int)
             if joint_1_valid:
-                cv2.circle(img, (x_1, y_1), 2, color, -1)
+                cv2.circle(img, (x_1, y_1), 2, color_joint, -1)
                 cv2.line(img, (x_1, y_1), (center_joint[0], center_joint[1]), color)
 
     img = cv2.cvtColor(img, cv2.COLOR_HSV2RGB)
@@ -229,6 +233,7 @@ def draw_clusters(img: [torch.tensor, np.array], joints, joint_connections, fnam
 
     colors_person = np.arange(0, 179, np.ceil(179 / num_cc))
     colors_joints = np.arange(0, 179, np.ceil(179 / 17), dtype=np.float)
+    colors_joints[1::2] = colors_joints[-2::-2] # swap some colors to have clearer distinction between similar joint types
     img = img * 255.0
     img = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_RGB2HSV)
 
