@@ -173,12 +173,12 @@ class NaiveGraphConstructor:
             # code assumes that each joint type has same number of detections
             raise NotImplementedError
         _, indices = joint_det[:, 2].sort()
-        distance = torch.norm(joint_det[:, None, :2] - joint_det[indices][:, :2], dim=2).view(-1, 80)
+        distance = torch.norm(joint_det[:, None, :2] - joint_det[indices][:, :2], dim=2).view(-1, 40)
         # distance shape is (num_det * 17, num_det_per_type)
         _, top_k_idx = distance.topk(k=k, dim=1, largest=False)
         # top_k_idx shape (num_det * 17, k)
         top_k_idx = top_k_idx.view(len(joint_det), 17, k) + \
-                    torch.arange(0, 17, dtype=torch.long, device=self.device)[:, None] * 80
+                    torch.arange(0, 17, dtype=torch.long, device=self.device)[:, None] * 40
         top_k_idx = top_k_idx.view(-1)
         edge_index[1] = indices[top_k_idx]
 
@@ -397,7 +397,6 @@ class NaiveGraphConstructor:
         target_edges = target_edges == 1.0
         loss_mask[source_edges | target_edges] = 0.0
         return loss_mask
-
 
 
 def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
