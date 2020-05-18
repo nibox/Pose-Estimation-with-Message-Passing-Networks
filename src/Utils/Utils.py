@@ -322,7 +322,7 @@ def graph_cluster_to_persons(joints, joint_connections):
     return persons, mutant_detected
 
 
-def num_non_detected_points(joint_det, keypoints):
+def num_non_detected_points(joint_det, keypoints, threshold, use_gt):
 
     person_idx_gt, joint_idx_gt = keypoints[0, :, :, 2].nonzero(as_tuple=True)
     joints_gt = keypoints[0, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
@@ -331,11 +331,12 @@ def num_non_detected_points(joint_det, keypoints):
 
     different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
     distance[different_type] = 100000.0
-    non_valid = distance >= 5.0
+    non_valid = distance >= threshold
     distance[non_valid] = 100000.0
     from scipy.optimize import linear_sum_assignment
     distance = distance.cpu().numpy()
-    distance = distance[:, :-len(person_idx_gt)]
+    if use_gt:
+        distance = distance[:, :-len(person_idx_gt)]
     sol = linear_sum_assignment(distance)
     cost = np.sum(distance[sol[0], sol[1]])
     num_miss_detections = cost // 100000

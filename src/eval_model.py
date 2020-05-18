@@ -160,7 +160,7 @@ def main():
 
             pred = pred.sigmoid().squeeze()
             result = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
-            n, _ = num_non_detected_points(joint_det.cpu(), keypoints.cpu())
+            n, _ = num_non_detected_points(joint_det.cpu(), keypoints.cpu(), 6.0, config["use_gt"])
 
             eval_prec_positive.append(precision(result, edge_labels, 2)[1])
             eval_prec_negative.append(precision(result, edge_labels, 2)[0])

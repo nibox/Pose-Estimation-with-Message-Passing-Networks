@@ -66,8 +66,8 @@ def main():
         pred, joint_det, edge_index, edge_labels, _ = model(imgs, keypoints, masks)
         #deg.append(degree(edge_index[1], len(joint_det)).mean())
         imbalance.append(edge_labels.mean().item())
-        num_non_detected, num_gt = num_non_detected_points(joint_det, keypoints)
-        print(num_non_detected)
+        num_non_detected, num_gt = num_non_detected_points(joint_det, keypoints, 6.0,
+                                                           config["use_gt"])
 
         num_detections.append(len(joint_det))
         num_det_failures.append(float(num_non_detected) / num_gt)
