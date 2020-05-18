@@ -5,6 +5,7 @@ import torch.nn.functional as F
 import numpy as np
 from matplotlib import pyplot as plt
 from torch_geometric.utils import dense_to_sparse
+from torch_scatter import scatter_mean
 
 from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
 from Utils.dataset_utils import Graph
@@ -87,7 +88,7 @@ class FocalLoss(nn.Module):
         self.logits = logits
         self.reduce = reduce
 
-    def forward(self, inputs, targets, mask=None):
+    def forward(self, inputs, targets, mask=None, batch_index=None):
         if self.logits:
             BCE_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduce=False)
         else:
@@ -98,6 +99,9 @@ class FocalLoss(nn.Module):
             F_loss = F_loss * mask
 
         if self.reduce:
+            if batch_index is not None:
+                F_loss = scatter_mean(F_loss, batch_index)
+                assert len(F_loss) == batch_index.max() + 1
             return torch.mean(F_loss)
         else:
             return F_loss

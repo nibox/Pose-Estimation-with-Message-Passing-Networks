@@ -54,7 +54,7 @@ class UpperBoundModel(nn.Module):
                                                    inclusion_radius=self.config["inclusion_radius"],
                                                    mpn_graph_type=self.config["mpn_graph_type"])
 
-        x, edge_attr, edge_index, edge_labels, joint_det, label_mask = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, joint_det, label_mask, batch_index = graph_constructor.construct_graph()
 
         return edge_labels, joint_det, edge_index, edge_labels, label_mask
 

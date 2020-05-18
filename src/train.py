@@ -119,14 +119,14 @@ def main():
             imgs = imgs.to(device)
             masks = masks.to(device)
             keypoints = keypoints.to(device)
-            pred, joint_det, edge_index, edge_labels, label_mask = model(imgs, keypoints, masks)
+            pred, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks)
 
             if len(edge_labels[edge_labels == 1]) != 0 and len(edge_labels[edge_labels == 0]) != 0:
                 pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
             else:
                 pos_weight = torch.tensor(1.0)
             label_mask = label_mask if use_label_mask else None
-            loss = model.loss(pred, edge_labels, pos_weight=pos_weight, mask=label_mask)
+            loss = model.loss(pred, edge_labels, pos_weight=pos_weight, mask=label_mask, batch_index=batch_index)
             loss.backward()
             optimizer.step()
             result = pred.sigmoid().squeeze()
@@ -163,7 +163,7 @@ def main():
                 imgs = imgs.to(device)
                 masks = masks.to(device)
                 keypoints = keypoints.to(device)
-                pred, joint_det, edge_index, edge_labels, label_mask = model(imgs, keypoints, masks)
+                pred, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks)
 
                 if len(edge_labels[edge_labels == 1]) != 0:
                     pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
