@@ -4,6 +4,7 @@ import numpy as np
 import pickle
 from Models.PoseEstimation.UpperBound import UpperBoundModel, default_config
 from Utils.Utils import num_non_detected_points
+from tqdm import tqdm
 
 
 def load_backbone(config, device, pretrained_path=None):
@@ -50,19 +51,17 @@ def main():
 
     train_ids, valid_ids = pickle.load(open("../tmp/mini_train_valid_split_4.p", "rb"))
     ids = np.concatenate([train_ids, valid_ids])
-    img_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=ids)
+    valid_ids = np.random.choice(valid_ids, 100, replace=False)
+    img_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
 
     num_detections = []
     num_det_failures = []
     imbalance = []
     deg = []
     # todo number of not detected keypoints
-    for i in range(3500, 4000):  # just test the first 100 images
+    for i in tqdm(range(100)):  # just test the first 100 images
         # split batch
-        imgs, masks, keypoints = img_set[i]
-        imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
-        masks = torch.from_numpy(masks).to(device).unsqueeze(0)
-        keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
+        imgs, masks, keypoints = img_set.get_tensor(i, device)
 
         pred, joint_det, edge_index, edge_labels, _ = model(imgs, keypoints, masks)
         #deg.append(degree(edge_index[1], len(joint_det)).mean())

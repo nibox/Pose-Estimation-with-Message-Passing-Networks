@@ -5,6 +5,7 @@ import torch
 import numpy as np
 from torch.utils.data import DataLoader
 from torch_geometric.utils import dense_to_sparse, precision, recall
+from tqdm import tqdm
 
 from CocoKeypoints import CocoKeypoints
 from Utils.Utils import load_model, get_transform, kpt_affine, to_numpy, graph_cluster_to_persons
@@ -146,7 +147,7 @@ def main():
     model.eval()
 
     anns = []
-    for i in range(eval_num):
+    for i in tqdm(range(eval_num)):
 
         imgs, masks, keypoints = eval_set[i]
         num_persons_gt = np.count_nonzero(keypoints[:, :, 2].sum(axis=1))
@@ -164,7 +165,7 @@ def main():
     print("Upper bound 2")
     anns_cc = []
     anns_gt = []
-    for i in range(eval_num):
+    for i in tqdm(range(eval_num)):
 
         imgs, masks, keypoints = eval_set[i]
         imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)

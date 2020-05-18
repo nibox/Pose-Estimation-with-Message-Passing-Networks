@@ -58,6 +58,7 @@ def main():
     imgs_without_det = 0
     for i in range(500):  # just test the first 100 images
         # split batch
+        img_id = img_set.img_ids[i]
         print(f"Iter : {i}")
         print(f"img_idx: {img_set.img_ids[i]}")
         imgs, masks, keypoints = img_set.get_tensor(i, device)
