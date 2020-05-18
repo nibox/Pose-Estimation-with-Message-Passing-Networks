@@ -28,6 +28,7 @@ class NaiveGraphConstructor:
 
     def construct_graph(self):
         x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list = [], [], [], [], []
+        label_mask_list = []
         num_node_list = [0]
         for batch in range(self.batch_size):
             if self.mask_crowds:
@@ -71,6 +72,10 @@ class NaiveGraphConstructor:
                     edge_labels = self._construct_edge_labels_2(joint_det, self.joints_gt[batch], edge_index)
             elif self.joints_gt is not None:
                 edge_labels = self._construct_edge_labels_3(joint_det, self.joints_gt[batch], edge_index)
+                label_mask = torch.ones_like(edge_labels)
+                if edge_labels.max() == 0:
+                    label_mask = label_mask - 1
+                label_mask_list.append(label_mask)
             x_list.append(x)
             num_node_list.append(x.shape[0] + num_node_list[-1])
             edge_attr_list.append(edge_attr)
@@ -88,7 +93,10 @@ class NaiveGraphConstructor:
         if self.joints_gt is not None:
             assert edge_labels_list[0] is not None
             edge_labels_list = torch.cat(edge_labels_list, 0)
-        label_mask_list = None  # preperation for label mask
+        if len(label_mask_list) == 0:
+            label_mask_list = None  # preperation for label mask
+        else:
+            label_mask_list = torch.cat(label_mask_list, 0)
 
         return x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list, label_mask_list
 
