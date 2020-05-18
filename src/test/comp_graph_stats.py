@@ -41,6 +41,7 @@ def main():
     config["detect_threshold"] = 0.007  # default was 0.007
     config["edge_label_method"] = 2
     config["inclusion_radius"] = 5.0
+    config["mpn_graph_type"] = "knn"
 
     ##################################
 

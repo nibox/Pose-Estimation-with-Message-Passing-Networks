@@ -44,6 +44,7 @@ def main():
     config["detect_threshold"] = 0.007  # default was 0.007
     config["edge_label_method"] = 2
     config["inclusion_radius"] = 5.0
+    config["mpn_graph_type"] = "fully"
 
     cc_method = "GAEC"
     ##################################
@@ -88,6 +89,7 @@ def main():
         draw_poses(imgs, persons_pred_gt, fname=f"../tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt_labels.png")
 
         # """
+    print(f"num images without detection :{imgs_without_det}")
 
 
 if __name__ == "__main__":

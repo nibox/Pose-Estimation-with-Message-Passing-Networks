@@ -8,9 +8,9 @@ from Utils.Utils import non_maximum_suppression
 
 class NaiveGraphConstructor:
 
-    def __init__(self, scoremaps, features, joints_gt, masks, device, use_gt=True, no_false_positives=False,
-                 use_neighbours=False, edge_label_method=1, mask_crowds=False, detect_threshold=0.007,
-                 inclusion_radius=5.0):
+    def __init__(self, scoremaps, features, joints_gt, masks, device, use_gt, no_false_positives,
+                 use_neighbours, edge_label_method, mask_crowds, detect_threshold,
+                 inclusion_radius, mpn_graph_type):
         self.scoremaps = scoremaps.to(device)
         self.features = features.to(device)
         self.joints_gt = joints_gt.to(device)
@@ -24,6 +24,7 @@ class NaiveGraphConstructor:
         self.mask_crowds = mask_crowds
         self.detect_threshold = detect_threshold
         self.inclusion_radius = inclusion_radius
+        self.mpn_graph_type = mpn_graph_type
 
     def construct_graph(self):
         x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list = [], [], [], [], []
@@ -58,7 +59,7 @@ class NaiveGraphConstructor:
                 if self.no_false_positives:
                     joint_det = joints_gt_position
 
-            x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch])
+            x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch], self.mpn_graph_type)
 
 
             # sol maps nodes to gt joints/  gt joints to nodes and connectivity maps between gt joints
@@ -91,7 +92,7 @@ class NaiveGraphConstructor:
 
         return x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list, label_mask_list
 
-    def _construct_mpn_graph(self, joint_det, features):
+    def _construct_mpn_graph(self, joint_det, features, graph_type):
         """
 
         :param joint_det: Shape: (Num_dets, 3) x, y, type,
@@ -108,15 +109,15 @@ class NaiveGraphConstructor:
         # construct node features
         x = joint_features.T
 
-        # construct joint_det graph (fully connected)
-        # edge_index, _ = gutils.dense_to_sparse(torch.ones([num_joints_det, num_joints_det], dtype=torch.long))
-        # todo using k_nn and setting distances between joints of certain type on can create the different graphs
-        # todo remove connections between same type
-        temp = joint_det[:, :2].float()  # nn.knn_graph (cuda) can't handle int64 tensors
-        edge_index = torch_geometric.nn.knn_graph(temp, k=50)
-        # edge_index, _ = gutils.dense_to_sparse(torch.ones([num_joints_det, num_joints_det], dtype=torch.long))
-        edge_index = gutils.to_undirected(edge_index, len(joint_det))
-        edge_index, _ = gutils.remove_self_loops(edge_index)
+        if graph_type == "fully":
+            edge_index = self.fully_connected_mpn_graph(joint_det)
+        elif graph_type == "knn":
+            edge_index = self.knn_mpn_graph(joint_det)
+        elif graph_type == "topk":
+            assert self.detect_threshold is None  # for now only this works
+            edge_index = self.top_k_mpn_graph(joint_det, k=20)
+        else:
+            raise NotImplementedError
 
         # construct edge labels (each connection type is one label
         labels = torch.arange(0, 17 * 17, dtype=torch.long, device=self.device).view(17, 17)
@@ -148,6 +149,42 @@ class NaiveGraphConstructor:
         edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1), connection_label_2], dim=1).float()
 
         return x, edge_attr, edge_index
+
+    def knn_mpn_graph(self, joint_det):
+        temp = joint_det[:, :2].float()  # nn.knn_graph (cuda) can't handle int64 tensors
+        edge_index = torch_geometric.nn.knn_graph(temp, k=50)
+        edge_index = gutils.to_undirected(edge_index, len(joint_det))
+        edge_index, _ = gutils.remove_self_loops(edge_index)
+        return edge_index
+
+    def fully_connected_mpn_graph(self, joint_det):
+        num_joints_det = len(joint_det)
+        edge_index, _ = gutils.dense_to_sparse(torch.ones([num_joints_det, num_joints_det], dtype=torch.long))
+        edge_index = gutils.to_undirected(edge_index, len(joint_det))
+        edge_index, _ = gutils.remove_self_loops(edge_index)
+        return edge_index
+
+    def top_k_mpn_graph(self, joint_det, k):
+        edge_index = torch.zeros(2, len(joint_det), 17*k, dtype=torch.long, device=self.device)
+        edge_index[0] = edge_index[0] + torch.arange(0, len(joint_det), dtype=torch.long, device=self.device)[:, None]
+        edge_index = edge_index.reshape(2, -1)
+        joint_det = joint_det.float()
+        if self.detect_threshold is not None:
+            # code assumes that each joint type has same number of detections
+            raise NotImplementedError
+        _, indices = joint_det[:, 2].sort()
+        distance = torch.norm(joint_det[:, None, :2] - joint_det[indices][:, :2], dim=2).view(-1, 80)
+        # distance shape is (num_det * 17, num_det_per_type)
+        _, top_k_idx = distance.topk(k=k, dim=1, largest=False)
+        # top_k_idx shape (num_det * 17, k)
+        top_k_idx = top_k_idx.view(len(joint_det), 17, k) + \
+                    torch.arange(0, 17, dtype=torch.long, device=self.device)[:, None] * 80
+        top_k_idx = top_k_idx.view(-1)
+        edge_index[1] = indices[top_k_idx]
+
+        edge_index = gutils.to_undirected(edge_index, len(joint_det))
+        edge_index, _ = gutils.remove_self_loops(edge_index)
+        return edge_index
 
     @staticmethod
     def remove_ambigiuous_det(joint_det, joints_gt_loc, radius):

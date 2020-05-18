@@ -131,6 +131,7 @@ def main():
     config["detect_threshold"] = 0.007  # default was 0.007
     config["edge_label_method"] = 2
     config["inclusion_radius"] = 0.0
+    config["mpn_graph_type"] = "knn"
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
     modus = "train" if mini else "valid"  # decides which validation set to use. "valid" means the coco2014 validation
