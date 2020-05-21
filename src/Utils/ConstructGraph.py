@@ -133,8 +133,7 @@ class NaiveGraphConstructor:
         # construct edge labels (each connection type is one label
         labels = torch.arange(0, 17 * 17, dtype=torch.long, device=self.device).view(17, 17)
         connection_type = labels[joint_type[edge_index[0]], joint_type[edge_index[1]]]
-        # remove connections between same type
-        """
+        """  use this line to remove connections between same type
         same_type_connection_types = torch.arange(0, 17 * 17, 18, dtype=torch.long, device=self.device)
         assert same_type_connection_types.shape[0] == 17
         same_type_connections = torch.eq(connection_type.unsqueeze(1), same_type_connection_types).sum(dim=1)
@@ -142,9 +141,9 @@ class NaiveGraphConstructor:
         edge_index = edge_index[same_type_connections == 0].T
         # """
         # create edge features
-        # """
-        # connection_type = connection_type[same_type_connections == 0]
-        # connection_label = torch.nn.functional.one_hot(connection_type, num_classes=17 * 17)
+        """  use this line to remove old edge attr
+        connection_type = connection_type[same_type_connections == 0]
+        connection_label = torch.nn.functional.one_hot(connection_type, num_classes=17 * 17)
         # """
         # connection label 2
         # """
@@ -173,7 +172,7 @@ class NaiveGraphConstructor:
         edge_index, _ = gutils.dense_to_sparse(torch.ones([num_joints_det, num_joints_det], dtype=torch.long))
         edge_index = gutils.to_undirected(edge_index, len(joint_det))
         edge_index, _ = gutils.remove_self_loops(edge_index)
-        return edge_index
+        return edge_index.to(self.device)
 
     def top_k_mpn_graph(self, joint_det, k):
         edge_index = torch.zeros(2, len(joint_det), 17*k, dtype=torch.long, device=self.device)

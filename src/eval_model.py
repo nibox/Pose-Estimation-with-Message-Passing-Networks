@@ -156,7 +156,7 @@ def main():
             # todo remove cheating
             # todo lower bound!!
             keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
-            pred, joint_det, edge_index, edge_labels, _ = model(imgs, keypoints, masks, with_logits=True)
+            pred, joint_det, edge_index, edge_labels, _, _ = model(imgs, keypoints, masks, with_logits=True)
 
             pred = pred.sigmoid().squeeze()
             result = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
@@ -196,7 +196,7 @@ def main():
                 # todo remove cheating
                 # todo lower bound!!
                 keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
-                pred, joint_det, edge_index, _, _ = model(imgs, keypoints, masks, with_logits=True)
+                pred, joint_det, edge_index, _, _, _ = model(imgs, keypoints, masks, with_logits=True)
 
                 pred = pred.sigmoid().squeeze()
 

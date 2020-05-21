@@ -89,7 +89,8 @@ def main():
     config["edge_label_method"] = 2
     config["inclusion_radius"] = 3.0
 
-    use_label_mask = False
+    use_label_mask = True
+    use_batch_index = False
 
     ##########################################################
     print("Load model")
@@ -126,6 +127,7 @@ def main():
             else:
                 pos_weight = torch.tensor(1.0)
             label_mask = label_mask if use_label_mask else None
+            batch_index = batch_index if use_batch_index else None
             loss = model.loss(pred, edge_labels, pos_weight=pos_weight, mask=label_mask, batch_index=batch_index)
             loss.backward()
             optimizer.step()
