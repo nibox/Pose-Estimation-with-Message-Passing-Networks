@@ -221,8 +221,6 @@ class NaiveGraphConstructor:
         return removed_idx
 
     def _construct_edge_labels_1(self, joint_det, joints_gt, edge_index):
-        # joint_idx_det, joint_y, joint_x = joint_map.nonzero(as_tuple=True)
-        # joint_positions_det = torch.stack([joint_x, joint_y], 1)
 
         num_joints_det = len(joint_det)
 
@@ -341,7 +339,7 @@ class NaiveGraphConstructor:
             row, col = torch.from_numpy(row).to(self.device), torch.from_numpy(col).to(self.device)
             sol = row, col
 
-            person_idx_gt = person_idx_gt[valid_match]
+            person_idx_gt = person_idx_gt[row]
 
         edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol)
         return edge_labels
