@@ -149,7 +149,7 @@ def main():
     anns = []
     for i in tqdm(range(eval_num)):
 
-        imgs, masks, keypoints = eval_set[i]
+        imgs, masks, keypoints, _ = eval_set[i]
         num_persons_gt = np.count_nonzero(keypoints[:, :, 2].sum(axis=1))
         persons_pred = keypoints[:num_persons_gt].round()  # rounding lead to ap=0.9
 
@@ -167,11 +167,8 @@ def main():
     anns_gt = []
     for i in tqdm(range(eval_num)):
 
-        imgs, masks, keypoints = eval_set[i]
-        imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
-        masks = torch.from_numpy(masks).to(device).unsqueeze(0)
-        keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
-        _, joint_det, edge_index, edge_labels, _ = model(imgs, keypoints, masks)
+        imgs, masks, keypoints, factors = eval_set.get_tensor(i, device)
+        _, joint_det, edge_index, edge_labels, _ = model(imgs, keypoints, masks, factors)
 
         test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_labels)
         sol = cluster_graph(test_graph, cc_method, complete=False)

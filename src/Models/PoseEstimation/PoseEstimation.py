@@ -21,6 +21,7 @@ default_config = {"backbone": PoseNet,
                   "mask_crowds": False,
                   "detect_threshold": 0.007,
                   "inclusion_radius": 5.0,
+                  "matching_radius": None,
                   "mpn_graph_type": "knn"
                   }
 
@@ -48,7 +49,7 @@ class PoseEstimationBaseline(nn.Module):
 
         self.pool = nn.MaxPool2d(3, 1, 1)
 
-    def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None, with_logits=True) -> torch.tensor:
+    def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None, factors=None, with_logits=True) -> torch.tensor:
         if self.mask_crowds:
             assert masks is not None
         scoremap, features, early_features = self.backbone(imgs)
@@ -56,12 +57,13 @@ class PoseEstimationBaseline(nn.Module):
 
         features = self.feature_gather(features)
 
-        graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, masks, use_gt=self.use_gt,
+        graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, factors, masks, use_gt=self.use_gt,
                                                    no_false_positives=self.cheat, use_neighbours=self.use_neighbours,
                                                    device=scoremap.device, edge_label_method=self.edge_label_method,
                                                    detect_threshold=self.config["detect_threshold"],
                                                    mask_crowds=self.mask_crowds,
                                                    inclusion_radius=self.config["inclusion_radius"],
+                                                   matching_radius=self.config["matching_radius"],
                                                    mpn_graph_type=self.config["mpn_graph_type"])
 
         x, edge_attr, edge_index, edge_labels, joint_det, label_mask, batch_index = graph_constructor.construct_graph()

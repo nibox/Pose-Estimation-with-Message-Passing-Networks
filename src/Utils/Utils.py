@@ -52,6 +52,9 @@ def kpt_affine(kpt, mat):
     kpt = kpt.reshape(-1, 2)
     return np.dot(np.concatenate((kpt, kpt[:, 0:1] * 0 + 1), axis=1), mat.T).reshape(shape)
 
+def factor_affine(factors, mat):
+    return factors * mat[0, 0] * mat[1, 1]
+
 
 def get_transform(center, scale, res, rot=0):
     # Generate transformation matrix

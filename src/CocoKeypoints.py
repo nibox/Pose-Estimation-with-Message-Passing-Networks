@@ -8,7 +8,7 @@ import cv2
 import pickle
 import os
 
-from Utils.Utils import kpt_affine, get_transform
+from Utils.Utils import kpt_affine, get_transform, factor_affine
 
 
 class CocoKeypoints(Dataset):
@@ -77,14 +77,19 @@ class CocoKeypoints(Dataset):
             img = np.array(Image.open(f).convert("RGB"))
 
         # load keypoints
-        keypoints_np = np.zeros([num_people, 17, 3])  # 17 joints with xy position and visibility flag
+        kpt_oks_sigmas = np.array([.26, .25, .25, .35, .35, .79, .79, .72, .72, .62,.62, 1.07, 1.07, .87, .87, .89, .89])/10.0
+        distance_factor = np.zeros([num_people, 17])  # this factor combines sigma with scale (taken from OKS computation)
+        distance_factor[0:num_people] = (kpt_oks_sigmas * 2) ** 2
         keypoints_list = []
+        factor_list = []
         for i in range(num_people):
             keypoints_np[i] = np.array(ann[i]["keypoints"]).reshape([-1, 3])
             if ann[i]["num_keypoints"] > 0:
                 keypoints_list.append(np.array(ann[i]["keypoints"]).reshape([-1, 3]))
+                factor_list.append(np.array(kpt_oks_sigmas * 2) ** 2 * (ann[i]["area"] + np.spacing(1)) * 2.0)
 
         keypoints = np.array(keypoints_list).astype(np.float)
+        factors = np.array(factor_list)
         # in the code keypoints2 is created (seems to include only persons with atleast one visible keypoint)
         # not sure if it is necessary
 
@@ -125,10 +130,11 @@ class CocoKeypoints(Dataset):
 
         keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], mat_mask).astype(np.float32)
         keypoints = pack_keypoints_for_batch(keypoints, max_num_people=self.max_num_people)
-        # todo keypoints ref: constructs list of positions of keypoint in the scoremap. Maybe i dont need id
-        # todo random hue saturation brightness and contrast
 
-        return img, mask, keypoints
+        factors = factor_affine(factors, mat_mask)
+        factors = pack_for_batch(factors, self.max_num_people)
+
+        return img, mask, keypoints, factors
 
     def __len__(self):
         return len(self.img_ids)
@@ -139,17 +145,26 @@ class CocoKeypoints(Dataset):
         :param idx:
         :return:
         """
-        img, mask, keypoints = self[idx]
+        img, mask, keypoints, factor_list = self[idx]
         img = torch.from_numpy(img).to(device).unsqueeze(0)
         mask = torch.from_numpy(mask).to(device).unsqueeze(0)
         keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
+        factor_list = torch.from_numpy(factor_list).to(device).unsqueeze(0)
 
-        return img, mask, keypoints
+        return img, mask, keypoints, factor_list
 
 
 def pack_keypoints_for_batch(keypoints: np.array, max_num_people):
     out = np.zeros([max_num_people, 17, 3])
     out[:len(keypoints)] = keypoints
+    return out
+
+
+def pack_for_batch(array, max_num_people):
+    new_shape = list(array.shape)
+    new_shape[0] = max_num_people
+    out = np.zeros(new_shape)
+    out[:len(array)] = array
     return out
 
 

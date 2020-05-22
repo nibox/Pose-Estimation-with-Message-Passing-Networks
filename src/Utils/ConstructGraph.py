@@ -8,12 +8,14 @@ from Utils.Utils import non_maximum_suppression
 
 class NaiveGraphConstructor:
 
-    def __init__(self, scoremaps, features, joints_gt, masks, device, use_gt, no_false_positives,
-                 use_neighbours, edge_label_method, mask_crowds, detect_threshold,
+    def __init__(self, scoremaps, features, joints_gt, factor_list, masks, device, use_gt, no_false_positives,
+                 use_neighbours, edge_label_method, mask_crowds, detect_threshold, matching_radius,
                  inclusion_radius, mpn_graph_type):
         self.scoremaps = scoremaps.to(device)
         self.features = features.to(device)
         self.joints_gt = joints_gt.to(device)
+        self.factor_list = factor_list
+        assert factor_list.shape[0] == self.joints_gt.shape[0] and factor_list.shape[1] == self.joints_gt.shape[1]
         self.masks = masks.to(device)
         self.batch_size = scoremaps.shape[0]
         self.device = device
@@ -23,7 +25,8 @@ class NaiveGraphConstructor:
         self.edge_label_method = edge_label_method
         self.mask_crowds = mask_crowds
         self.detect_threshold = detect_threshold
-        self.inclusion_radius = inclusion_radius
+        self.matching_radius = matching_radius  # this is for the initial matching
+        self.inclusion_radius = inclusion_radius  # this is for the neighbouring matching
         self.mpn_graph_type = mpn_graph_type
 
     def construct_graph(self):
@@ -72,7 +75,12 @@ class NaiveGraphConstructor:
                 elif self.edge_label_method == 2:
                     edge_labels = self._construct_edge_labels_2(joint_det, self.joints_gt[batch], edge_index)
             elif self.joints_gt is not None:
-                edge_labels = self._construct_edge_labels_3(joint_det, self.joints_gt[batch], edge_index)
+                assert self.edge_label_method in [3, 4]
+                if self.edge_label_method == 3:
+                    edge_labels = self._construct_edge_labels_3(joint_det, self.joints_gt[batch], edge_index)
+                elif self.edge_label_method == 4:
+                    edge_labels = self._construct_edge_labels_4(joint_det, self.joints_gt[batch], self.factor_list[batch], edge_index)
+
                 label_mask = torch.ones_like(edge_labels)
                 if edge_labels.max() == 0:
                     label_mask = label_mask - 1
@@ -323,10 +331,9 @@ class NaiveGraphConstructor:
         # set distance between joints of different type to some high value
         different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
         distance[different_type] = 10000.0
-        distance[distance >= self.inclusion_radius] = 10000.0
+        distance[distance >= self.matching_radius] = 10000.0
         if self.include_neighbouring_keypoints:
-            assignment = distance < self.inclusion_radius
-            sol = assignment.long().nonzero(as_tuple=True)
+            raise NotImplementedError
         else:
             cost_mat = distance.cpu().numpy()
             sol = linear_sum_assignment(cost_mat)
@@ -335,11 +342,43 @@ class NaiveGraphConstructor:
             valid_match = cost_mat[row, col] != 10000.0
             row = row[valid_match]
             col = col[valid_match]
+            person_idx_gt = person_idx_gt[row]
             row = np.arange(0, len(row), dtype=np.int64)
             row, col = torch.from_numpy(row).to(self.device), torch.from_numpy(col).to(self.device)
             sol = row, col
 
             person_idx_gt = person_idx_gt[row]
+
+        edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol)
+        return edge_labels
+
+    def _construct_edge_labels_4(self, joint_det, joints_gt, factors, edge_index):
+        assert not self.use_gt
+        num_joints_det = len(joint_det)
+        person_idx_gt, joint_idx_gt = joints_gt[:, :, 2].nonzero(as_tuple=True)
+        num_joints_gt = len(person_idx_gt)
+
+        distance = (joints_gt[person_idx_gt, joint_idx_gt, :2].unsqueeze(1).round().float().clamp(0, 127) - joint_det[:, :2].float()).pow(2).sum(dim=2)
+        factor_per_joint = factors[person_idx_gt, joint_idx_gt]
+        similarity = torch.exp(-distance / factor_per_joint[:, None])
+
+        different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
+        similarity[different_type] = 0.0
+        similarity[similarity < self.matching_radius] = 0.0  # 0.1 worked well for threshold + knn graph
+        if self.include_neighbouring_keypoints:
+            raise NotImplementedError
+        else:
+            cost_mat = similarity.cpu().numpy()
+            sol = linear_sum_assignment(cost_mat, maximize=True)
+            row, col = sol
+            # remove mappings with cost 0.0
+            valid_match = cost_mat[row, col] != 0.0
+            row = row[valid_match]
+            col = col[valid_match]
+            person_idx_gt = person_idx_gt[row]
+            row = np.arange(0, len(row), dtype=np.int64)
+            row, col = torch.from_numpy(row).to(self.device), torch.from_numpy(col).to(self.device)
+            sol = row, col
 
         edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol)
         return edge_labels

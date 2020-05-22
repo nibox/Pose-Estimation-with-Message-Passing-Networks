@@ -17,6 +17,7 @@ default_config = {"backbone": PoseNet,
                   "mask_crowds": False,
                   "detect_threshold": 0.007,
                   "inclusion_radius": 5.0,
+                  "matching_radius": None,
                   "mpn_graph_type": "knn"
                   }
 
@@ -36,7 +37,7 @@ class UpperBoundModel(nn.Module):
         self.edge_label_method = config["edge_label_method"]
         self.mask_crowds = config["mask_crowds"]
 
-    def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None) -> torch.tensor:
+    def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None, factor_list=None) -> torch.tensor:
         if self.mask_crowds:
             assert masks is not None
 
@@ -46,12 +47,14 @@ class UpperBoundModel(nn.Module):
 
         features = self.feature_gather(features)
 
-        graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, masks, use_gt=self.use_gt,
+        graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, factor_list, masks,
+                                                   use_gt=self.use_gt,
                                                    no_false_positives=self.cheat, use_neighbours=self.use_neighbours,
                                                    device=scoremap.device, edge_label_method=self.edge_label_method,
                                                    detect_threshold=self.config["detect_threshold"],
                                                    mask_crowds=self.mask_crowds,
                                                    inclusion_radius=self.config["inclusion_radius"],
+                                                   matching_radius=self.config["matching_radius"],
                                                    mpn_graph_type=self.config["mpn_graph_type"])
 
         x, edge_attr, edge_index, edge_labels, joint_det, label_mask, batch_index = graph_constructor.construct_graph()

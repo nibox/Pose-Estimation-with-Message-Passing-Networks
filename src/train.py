@@ -93,6 +93,8 @@ def main():
     use_batch_index = False
 
     ##########################################################
+    if config["use_gt"]:
+        assert use_label_mask  # this ensures that images with no "persons"/clusters do not contribute to the loss
     print("Load model")
     if model_path is not None:
         model, optimizer, start_epoch, scheduler = load_checkpoint(model_path,
@@ -116,11 +118,12 @@ def main():
             iter = i + (epoch_len * (start_epoch + epoch))
             optimizer.zero_grad()
             # split batch
-            imgs, masks, keypoints = batch
+            imgs, masks, keypoints, factors = batch
             imgs = imgs.to(device)
             masks = masks.to(device)
             keypoints = keypoints.to(device)
-            pred, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks)
+            factors = factors.to(device)
+            pred, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
 
             if len(edge_labels[edge_labels == 1]) != 0 and len(edge_labels[edge_labels == 0]) != 0:
                 pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
@@ -161,11 +164,12 @@ def main():
         with torch.no_grad():
             for batch in valid_loader:
                 # split batch
-                imgs, masks, keypoints = batch
+                imgs, masks, keypoints, factors = batch
                 imgs = imgs.to(device)
                 masks = masks.to(device)
                 keypoints = keypoints.to(device)
-                pred, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks)
+                factors = factors.to(device)
+                pred, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
 
                 if len(edge_labels[edge_labels == 1]) != 0:
                     pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
