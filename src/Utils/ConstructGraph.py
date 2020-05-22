@@ -347,8 +347,6 @@ class NaiveGraphConstructor:
             row, col = torch.from_numpy(row).to(self.device), torch.from_numpy(col).to(self.device)
             sol = row, col
 
-            person_idx_gt = person_idx_gt[row]
-
         edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol)
         return edge_labels
 

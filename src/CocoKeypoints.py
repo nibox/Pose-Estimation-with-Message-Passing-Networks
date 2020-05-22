@@ -83,7 +83,6 @@ class CocoKeypoints(Dataset):
         keypoints_list = []
         factor_list = []
         for i in range(num_people):
-            keypoints_np[i] = np.array(ann[i]["keypoints"]).reshape([-1, 3])
             if ann[i]["num_keypoints"] > 0:
                 keypoints_list.append(np.array(ann[i]["keypoints"]).reshape([-1, 3]))
                 factor_list.append(np.array(kpt_oks_sigmas * 2) ** 2 * (ann[i]["area"] + np.spacing(1)) * 2.0)
