@@ -67,7 +67,7 @@ def main():
     pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
     model_path = None  # "../log/PoseEstimationBaseline/13/pose_estimation.pth"
 
-    log_dir = "../log/PoseEstimationBaseline/17"
+    log_dir = "../log/PoseEstimationBaseline/20"
     model_save_path = f"{log_dir}/pose_estimation.pth"
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
@@ -79,15 +79,18 @@ def main():
     config["message_passing"] = VanillaMPN2
     config["message_passing_config"] = default_config
     config["message_passing_config"]["aggr"] = "add"
+    config["message_passing_config"]["edge_input_dim"] = 2 + 17
     # config["message_passing_config"]["steps"] = 10
     config["cheat"] = False
-    config["use_gt"] = True
+    config["use_gt"] = False
     config["use_focal_loss"] = True
-    config["use_neighbours"] = True
+    config["use_neighbours"] = False
     config["mask_crowds"] = True
-    config["detect_threshold"] = 0.007  # default was 0.007
-    config["edge_label_method"] = 2
-    config["inclusion_radius"] = 3.0
+    config["detect_threshold"] = 0.005  # default was 0.007
+    config["mpn_graph_type"] = "knn"
+    config["edge_label_method"] = 4  # this only applies if use_gt==True
+    config["matching_radius"] = 0.1
+    config["inclusion_radius"] = 7.5
 
     use_label_mask = True
     use_batch_index = False

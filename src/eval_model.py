@@ -109,15 +109,22 @@ def main():
     eval_num = 500
     cc_method = "GAEC"
 
-    dataset_path = "../../storage/user/kistern/coco"
-    model_path = "../log/PoseEstimationBaseline/9/pose_estimation.pth"
+    model_path = "../log/PoseEstimationBaseline/20/pose_estimation.pth"
     config = pose.default_config
     config["message_passing"] = VanillaMPN2
     config["message_passing_config"] = default_config
+    config["message_passing_config"]["aggr"] = "add"
+    config["message_passing_config"]["edge_input_dim"] = 2 + 17
     config["cheat"] = False
-    config["use_gt"] = True
-    config["use_neighbours"] = True
-    config["mask_crowds"] = False
+    config["use_gt"] = False
+    config["use_focal_loss"] = True
+    config["use_neighbours"] = False
+    config["mask_crowds"] = True
+    config["detect_threshold"] = 0.005 # default was 0.007
+    config["mpn_graph_type"] = "knn"
+    config["edge_label_method"] = 4
+    config["matching_radius"] = 0.1
+    config["inclusion_radius"] = None
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
     modus = "train" if mini else "valid"  # decides which validation set to use. "valid" means the coco2014 validation
@@ -149,14 +156,8 @@ def main():
     with torch.no_grad():
         for i in tqdm(range(eval_num)):
 
-            imgs, masks, keypoints = eval_set[i]
-            imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
-            masks = torch.from_numpy(masks).to(device).unsqueeze(0)
-            # todo use mask to mask of joint predicitions in crowd (is this allowed?)
-            # todo remove cheating
-            # todo lower bound!!
-            keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
-            pred, joint_det, edge_index, edge_labels, _, _ = model(imgs, keypoints, masks, with_logits=True)
+            imgs, masks, keypoints, factors = eval_set.get_tensor(i, device)
+            pred, joint_det, edge_index, edge_labels, _, _ = model(imgs, keypoints, masks, factors, with_logits=True)
 
             pred = pred.sigmoid().squeeze()
             result = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
@@ -189,14 +190,8 @@ def main():
         print("Eval on Real data")
         with torch.no_grad():
             for i in tqdm(range(eval_num)):
-                imgs, masks, keypoints = eval_set[i]
-                imgs = torch.from_numpy(imgs).to(device).unsqueeze(0)
-                masks = torch.from_numpy(masks).to(device).unsqueeze(0)
-                # todo use mask to mask of joint predicitions in crowd (is this allowed?)
-                # todo remove cheating
-                # todo lower bound!!
-                keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
-                pred, joint_det, edge_index, _, _, _ = model(imgs, keypoints, masks, with_logits=True)
+                imgs, masks, keypoints, factors = eval_set.get_tensor(i, device)
+                pred, joint_det, edge_index, _, _, _ = model(imgs, keypoints, masks, factors, with_logits=True)
 
                 pred = pred.sigmoid().squeeze()
 
@@ -220,6 +215,7 @@ def main():
         coco_eval(eval_set.coco, anns_real, eval_set.img_ids[:eval_num].astype(np.int))
         print("##################")
         print("Real Evaluation on perfect images")
+        print(f"Number of perfect images: {len(anns_full)}")
         coco_eval(eval_set.coco, anns_full, imgs_fully_det)
         print(f"Positive Precision: {np.mean(eval_prec_positive)}")
         print(f"Positive Recall: {np.mean(eval_recall_positive)}")
