@@ -6,7 +6,6 @@ from torch_geometric.utils import dense_to_sparse, f1_score
 from tqdm import tqdm
 
 from CocoKeypoints import CocoKeypoints
-from Utils.Utils import load_model, draw_detection, draw_poses
 import Models.PoseEstimation.PoseEstimation as pose
 from Models.MessagePassingNetwork.VanillaMPN2 import VanillaMPN2, default_config
 from Utils.Utils import load_model, draw_detection, draw_poses, pred_to_person
@@ -21,24 +20,25 @@ def main():
     mini = True
     sample_ids = False
 
-    dataset_path = "../../storage/user/kistern/coco"
-    model_name = "11"
+    model_name = "20"
     model_path = f"../log/PoseEstimationBaseline/{model_name}/pose_estimation.pth"
     config = pose.default_config
     config["message_passing"] = VanillaMPN2
     config["message_passing_config"] = default_config
-    config["message_passing_config"]["aggr"] = "max"
+    # config["message_passing_config"]["aggr"] = "max"
     config["message_passing_config"]["edge_input_dim"] = 2 + 17
     config["cheat"] = False
-    config["use_gt"] = True
+    config["use_gt"] = False
     config["use_focal_loss"] = True
-    config["use_neighbours"] = True
+    config["use_neighbours"] = False
     config["mask_crowds"] = False
-    config["detect_threshold"] = 0.007  # default was 0.007
-    config["edge_label_method"] = 2
-    config["inclusion_radius"] = 0.0
+    config["detect_threshold"] = 0.005  # default was 0.007
+    config["edge_label_method"] = 4
+    config["inclusion_radius"] = None
+    config["matching_radius"] = 0.1
+    config["mpn_graph_type"] = "knn"
     img_ids_to_use = [84015, 84381, 117772, 237976, 281133, 286645, 505421]
-    # set is used, "train" means validation set corresponding to the mini train set is used )
+
     ######################################
     # set is used, "train" means validation set corresponding to the mini train set is used )
     modus = "train" if mini else "valid"  # decides which validation set to use. "valid" means the coco2014 validation
@@ -65,10 +65,13 @@ def main():
 
     image_to_draw = []
     with torch.no_grad():
-        for i in tqdm(img_ids_to_use):
-            imgs, masks, keypoints = eval_set.get_tensor(i, device)
-            num_persons_gt = np.count_nonzero(keypoints[:, :, 2].sum(axis=1))
-            pred, joint_det, edge_index, edge_labels, _ = model(imgs, keypoints, masks, with_logits=False)
+        for i in tqdm(range(len(eval_set))):
+            img_id = eval_set.img_ids[i]
+            if img_id not in img_ids_to_use:
+                continue
+            imgs, masks, keypoints, factors = eval_set.get_tensor(i, device)
+            num_persons_gt = np.count_nonzero(keypoints[:, :, :, 2].sum(axis=1))
+            pred, joint_det, edge_index, edge_labels, _, _ = model(imgs, keypoints, masks, factors, with_logits=False)
 
             result = pred.squeeze()
             result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
@@ -100,7 +103,6 @@ def main():
             draw_poses(img, persons, f"{output_dir}/{img_id}_{int(saving_cause.f1 * 100)}_{failures}.png")
             draw_poses(img, keypoints, f"{output_dir}/{img_id}_gt.png")
             draw_detection(img, joint_det, keypoints, fname=f"{output_dir}/{img_id}_det.png")
-
 
 
 if __name__ == "__main__":

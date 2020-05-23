@@ -35,13 +35,14 @@ def main():
     ##################################
     config = default_config
     config["cheat"] = False
-    config["use_gt"] = True
+    config["use_gt"] = False
     config["use_focal_loss"] = True
-    config["use_neighbours"] = True
-    config["mask_crowds"] = False
-    config["detect_threshold"] = 0.007  # default was 0.007
-    config["edge_label_method"] = 2
-    config["inclusion_radius"] = 5.0
+    config["use_neighbours"] = False
+    config["mask_crowds"] = True
+    config["detect_threshold"] = 0.005 # default was 0.007
+    config["edge_label_method"] = 4
+    config["inclusion_radius"] = 7.5
+    config["matching_radius"] = 0.1
     config["mpn_graph_type"] = "knn"
 
     ##################################
@@ -55,22 +56,28 @@ def main():
     img_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
 
     num_detections = []
+    num_edges = []
     num_det_failures = []
     imbalance = []
     deg = []
     # todo number of not detected keypoints
     for i in tqdm(range(100)):  # just test the first 100 images
         # split batch
-        imgs, masks, keypoints = img_set.get_tensor(i, device)
+        imgs, masks, keypoints, factors = img_set.get_tensor(i, device)
 
-        pred, joint_det, edge_index, edge_labels, _ = model(imgs, keypoints, masks)
+        pred, joint_det, edge_index, edge_labels, _ = model(imgs, keypoints, masks, factors)
         #deg.append(degree(edge_index[1], len(joint_det)).mean())
         imbalance.append(edge_labels.mean().item())
         num_non_detected, num_gt = num_non_detected_points(joint_det, keypoints, 6.0,
                                                            config["use_gt"])
 
         num_detections.append(len(joint_det))
+        num_edges.append(len(edge_labels))
         num_det_failures.append(float(num_non_detected) / num_gt)
+    print(f"Average number of detections:{np.mean(num_detections)}")
+    print(f"Std number of detections:{np.std(num_detections)}")
+    print(f"Average number of edges:{np.mean(num_edges)}")
+    print(f"Std number of edges:{np.std(num_edges)}")
     print(f"Average Imbalance: {np.mean(imbalance)}")
     print(f"Average detection failure: {np.mean(num_det_failures)}")
     #print(f"Average node degree: {np.mean(degree)}")

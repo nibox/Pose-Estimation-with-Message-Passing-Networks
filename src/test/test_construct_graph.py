@@ -37,14 +37,15 @@ def main():
     ##################################
     config = default_config
     config["cheat"] = False
-    config["use_gt"] = True
+    config["use_gt"] = False
     config["use_focal_loss"] = True
-    config["use_neighbours"] = True
-    config["mask_crowds"] = False
-    config["detect_threshold"] = 0.007  # default was 0.007
-    config["edge_label_method"] = 2
-    config["inclusion_radius"] = 5.0
-    config["mpn_graph_type"] = "fully"
+    config["use_neighbours"] = False
+    config["mask_crowds"] = True
+    config["detect_threshold"] = None  # default was 0.007
+    config["edge_label_method"] = 4
+    config["inclusion_radius"] = 7.5
+    config["matching_radius"] = 0.1
+    config["mpn_graph_type"] = "topk"
 
     cc_method = "GAEC"
     ##################################
@@ -61,9 +62,9 @@ def main():
         img_id = img_set.img_ids[i]
         print(f"Iter : {i}")
         print(f"img_idx: {img_set.img_ids[i]}")
-        imgs, masks, keypoints = img_set.get_tensor(i, device)
+        imgs, masks, keypoints, factor_list = img_set.get_tensor(i, device)
 
-        pred, joint_det, edge_index, _, _ = model(imgs, keypoints, masks)
+        pred, joint_det, edge_index, _, label_mask = model(imgs, keypoints, masks, factor_list)
 
         # construct poses
         persons_pred_cc, _ = pred_to_person(joint_det, edge_index, pred, cc_method)

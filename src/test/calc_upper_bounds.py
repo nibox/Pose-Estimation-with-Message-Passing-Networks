@@ -117,7 +117,7 @@ def main():
     device = torch.device("cuda") if torch.cuda.is_available() and False else torch.device("cpu")
     ######################################
     mini = True
-    eval_num = 100  # setting this to 100 results in worse
+    eval_num = 100 # setting this to 100 results in worse
     cc_method = "GAEC"
 
     dataset_path = "../../../storage/user/kistern/coco"
@@ -125,13 +125,15 @@ def main():
 
     config = default_config
     config["cheat"] = False
-    config["use_gt"] = True
+    config["use_gt"] = False
     config["use_focal_loss"] = True
     config["use_neighbours"] = False
-    config["mask_crowds"] = False
-    config["detect_threshold"] = 0.007  # default was 0.007
-    config["edge_label_method"] = 2
-    config["inclusion_radius"] = 0.0
+    config["mask_crowds"] = True
+    config["detect_threshold"] = None # default was 0.007
+    config["edge_label_method"] = 4
+    config["inclusion_radius"] = None
+    config["matching_radius"] = 0.1 # default for 3: 7.5, for 4: 0.1/0.25
+    config["mpn_graph_type"] = "fully"
     config["mpn_graph_type"] = "knn"
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
