@@ -363,20 +363,41 @@ class NaiveGraphConstructor:
         different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
         similarity[different_type] = 0.0
         similarity[similarity < self.matching_radius] = 0.0  # 0.1 worked well for threshold + knn graph
+
+        cost_mat = similarity.cpu().numpy()
+        sol = linear_sum_assignment(cost_mat, maximize=True)
+        row, col = sol
+        # remove mappings with cost 0.0
+        valid_match = cost_mat[row, col] != 0.0
+        row = row[valid_match]
+        col = col[valid_match]
+        person_idx_gt = person_idx_gt[row]
+
+        row_1 = np.arange(0, len(row), dtype=np.int64)
+        row_1, col_1 = torch.from_numpy(row_1).to(self.device), torch.from_numpy(col).to(self.device)
         if self.include_neighbouring_keypoints:
-            raise NotImplementedError
-        else:
-            cost_mat = similarity.cpu().numpy()
-            sol = linear_sum_assignment(cost_mat, maximize=True)
-            row, col = sol
-            # remove mappings with cost 0.0
-            valid_match = cost_mat[row, col] != 0.0
-            row = row[valid_match]
-            col = col[valid_match]
-            person_idx_gt = person_idx_gt[row]
-            row = np.arange(0, len(row), dtype=np.int64)
-            row, col = torch.from_numpy(row).to(self.device), torch.from_numpy(col).to(self.device)
-            sol = row, col
+            # remove already chosen keypoints from next selection
+            cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), col] = 0.0
+            # "remove" ambiguous cases
+            # identify them
+            ambiguous_dets = (cost_mat != 0.0).sum(axis=0) > 1.0
+            # remove them
+            cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), ambiguous_dets] = 0.0
+            row_2, col_2 = np.nonzero(cost_mat)
+            assert (set(list(row_2)).issubset(set(list(row))))
+
+            # some gt joints have no match and have to be removed for the next step
+            # create translation table for new indices in order to translate row_2
+            mapping = np.zeros(num_joints_gt, dtype=np.int64) - 1
+            mapping[row] = np.arange(0, len(row), dtype=np.int64)
+            row_2 = mapping[row_2]
+            assert (row_2 == -1).sum() == 0
+            row_2, col_2 = torch.from_numpy(row_2).to(self.device), torch.from_numpy(col_2).to(self.device)
+
+            row_1 = torch.cat([row_1, row_2], dim=0)
+            col_1 = torch.cat([col_1, col_2], dim=0)
+
+        sol = row_1, col_1
 
         edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol)
         return edge_labels
