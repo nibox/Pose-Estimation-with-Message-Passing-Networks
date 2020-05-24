@@ -376,6 +376,8 @@ class NaiveGraphConstructor:
         row_1 = np.arange(0, len(row), dtype=np.int64)
         row_1, col_1 = torch.from_numpy(row_1).to(self.device), torch.from_numpy(col).to(self.device)
         if self.include_neighbouring_keypoints:
+            # use inclusion radius to filter more agressivly
+            cost_mat[cost_mat < self.inclusion_radius] = 0.0
             # remove already chosen keypoints from next selection
             cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), col] = 0.0
             # "remove" ambiguous cases
