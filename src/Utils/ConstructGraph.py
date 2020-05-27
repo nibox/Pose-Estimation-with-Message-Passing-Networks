@@ -76,14 +76,15 @@ class NaiveGraphConstructor:
                     edge_labels = self._construct_edge_labels_2(joint_det, self.joints_gt[batch], edge_index)
             elif self.joints_gt is not None:
                 assert self.edge_label_method in [3, 4]
+
                 if self.edge_label_method == 3:
                     edge_labels = self._construct_edge_labels_3(joint_det, self.joints_gt[batch], edge_index)
+                    label_mask = torch.ones_like(edge_labels, device=self.device, dtype=torch.float)
                 elif self.edge_label_method == 4:
-                    edge_labels = self._construct_edge_labels_4(joint_det, self.joints_gt[batch], self.factor_list[batch], edge_index)
+                    edge_labels, label_mask = self._construct_edge_labels_4(joint_det, self.joints_gt[batch], self.factor_list[batch], edge_index)
 
-                label_mask = torch.ones_like(edge_labels)
                 if edge_labels.max() == 0:
-                    label_mask = label_mask - 1
+                    label_mask = torch.zeros_like(label_mask, device=self.device, dtype=torch.float)
                 label_mask_list.append(label_mask)
             x_list.append(x)
             batch_index.append(torch.ones_like(edge_labels, dtype=torch.long) * batch)
@@ -371,12 +372,14 @@ class NaiveGraphConstructor:
         valid_match = cost_mat[row, col] != 0.0
         row = row[valid_match]
         col = col[valid_match]
-        person_idx_gt = person_idx_gt[row]
+        person_idx_gt_1 = person_idx_gt[row]
 
         row_1 = np.arange(0, len(row), dtype=np.int64)
         row_1, col_1 = torch.from_numpy(row_1).to(self.device), torch.from_numpy(col).to(self.device)
+
+        ambiguous_dets = []
         if self.include_neighbouring_keypoints:
-            # use inclusion radius to filter more agressivly
+            # use inclusion radius to filter more aggressively
             cost_mat[cost_mat < self.inclusion_radius] = 0.0
             # remove already chosen keypoints from next selection
             cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), col] = 0.0
@@ -401,8 +404,16 @@ class NaiveGraphConstructor:
 
         sol = row_1, col_1
 
-        edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol)
-        return edge_labels
+        edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt_1, joint_det, edge_index, sol)
+        joint_det_idx = torch.arange(0, len(joint_det), dtype=torch.int64, device=self.device)
+        label_mask = NaiveGraphConstructor.create_loss_mask(joint_det_idx[ambiguous_dets], edge_index)
+
+        ############
+        # small hack to test node labels
+        # joint_det[col, 2] = joint_idx_gt[row]
+        # joint_det[col, :2] = joints_gt[person_idx_gt[row], joint_idx_gt[row], :2].round().long()
+        ###########
+        return edge_labels, label_mask
 
     @staticmethod
     def match_cc(a_to_clusters, nodes_b, edges_b, edges_a_to_b):
@@ -456,6 +467,7 @@ class NaiveGraphConstructor:
         """
         loss_mask = torch.ones(edge_index.shape[1], dtype=torch.float, device=edge_index.device)
         # mask all edges starting at points from joints
+        # todo next line consumes to much memory for topk selection
         source_edges = torch.eq(edge_index[0].unsqueeze(1), joints).sum(dim=1)
         assert source_edges.max() <= 1.0
         source_edges = source_edges == 1.0
@@ -464,6 +476,8 @@ class NaiveGraphConstructor:
         assert target_edges.max() <= 1.0
         target_edges = target_edges == 1.0
         loss_mask[source_edges | target_edges] = 0.0
+        if len(joints) == 0:
+            assert loss_mask.min() == 1.0
         return loss_mask
 
 
