@@ -48,18 +48,25 @@ def main():
     config["mpn_graph_type"] = "topk"
 
     cc_method = "GAEC"
+    use_subset = True
+    id_subset = [471913, 139124, 451781, 437856, 543272, 423250, 304336, 499425, 128905, 389185, 108762, 10925, 464037,
+                 121938, 389815, 1145, 1431, 4309, 5028, 5294, 6777, 7650, 10130, 401534]
     ##################################
 
     model = load_backbone(config, device, pretrained_path=pretrained_path)
     model.eval()
 
-    train_ids, _ = pickle.load(open("../tmp/mini_train_valid_split_4.p", "rb"))
-    img_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=train_ids)
+    train_ids, valid_ids = pickle.load(open("../tmp/mini_train_valid_split_4.p", "rb"))
+    ids = np.concatenate([train_ids, valid_ids])
+    img_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=ids)
 
     imgs_without_det = 0
-    for i in range(500):  # just test the first 100 images
+    for i in range(4000):  # just test the first 100 images
         # split batch
         img_id = img_set.img_ids[i]
+        if use_subset:
+            if img_id not in id_subset:
+                continue
         print(f"Iter : {i}")
         print(f"img_idx: {img_set.img_ids[i]}")
         imgs, masks, keypoints, factor_list = img_set.get_tensor(i, device)
