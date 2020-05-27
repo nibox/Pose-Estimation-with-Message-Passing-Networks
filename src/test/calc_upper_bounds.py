@@ -116,8 +116,8 @@ def fill_person_pred(persons):
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() and False else torch.device("cpu")
     ######################################
-    mini = True
-    eval_num = 100 # setting this to 100 results in worse
+    split_variant = "mini_real"  # mini, mini_real, real are the possibilities
+    eval_num = 500 # setting this to 100 results in worse
     cc_method = "GAEC"
 
     dataset_path = "../../../storage/user/kistern/coco"
@@ -137,12 +137,15 @@ def main():
     config["mpn_graph_type"] = "knn"
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
-    modus = "train" if mini else "valid"  # decides which validation set to use. "valid" means the coco2014 validation
-    if modus == "train":
+    if split_variant=="mini":
         train_ids, valid_ids = pickle.load(open("../tmp/mini_train_valid_split_4.p", "rb"))
         assert len(set(train_ids).intersection(set(valid_ids))) == 0
         eval_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
-    else:
+    elif split_variant=="mini_real":
+        train_ids, valid_ids = pickle.load(open("../tmp/mini_real_train_valid_split_1.p", "rb"))
+        assert len(set(train_ids).intersection(set(valid_ids))) == 0
+        eval_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="val", img_ids=valid_ids)
+    elif split_variant=="real":
         raise NotImplementedError
 
     model = load_model(config, device, pretrained_path)

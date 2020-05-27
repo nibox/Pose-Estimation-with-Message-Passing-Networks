@@ -25,12 +25,14 @@ class CocoKeypoints(Dataset):
         self.input_size = input_size
         self.output_size = output_size
         self.max_num_people = 30  # from github code
+        assert mode in ["train", "val"]
+        self.data_dir ="train2014" if mode == "train" else "val2014"
 
         self.cat_ids = self.coco.getCatIds(catNms=["person"])
         self.img_ids = img_ids if img_ids is not None else self.coco.getImgIds(catIds=self.cat_ids)
         assert len(self.img_ids) == len(set(self.img_ids))
         if filter_empty and img_ids is None:
-            filtered_ids_fname = "tmp/usable_ids.p"
+            filtered_ids_fname = f"tmp/usable_ids_{mode}.p"
             cached = os.path.exists(filtered_ids_fname) and True
             if cached:
                 print("loading cached filtered image ids")
@@ -73,7 +75,7 @@ class CocoKeypoints(Dataset):
 
         # load image
         # todo reading the image for each iteration is probably not efficient
-        with open(f"{self.root_path}/train2014/{img_info['file_name']}", "rb") as f:
+        with open(f"{self.root_path}/{self.data_dir}/{img_info['file_name']}", "rb") as f:
             img = np.array(Image.open(f).convert("RGB"))
 
         # load keypoints

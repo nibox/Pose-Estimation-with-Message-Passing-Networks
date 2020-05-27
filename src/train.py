@@ -18,12 +18,8 @@ def create_train_validation_split(data_root, batch_size, mini=False):
         print("Using mini dataset")
         tv_split_name = "tmp/mini_train_valid_split_4.p"
         if not os.path.exists(tv_split_name):
-            print(f"Creating train validation split {tv_split_name}")
-            data_set = CocoKeypoints(data_root, mini=True, seed=0, mode="train")
-            train, valid = torch.utils.data.random_split(data_set, [3500, 500])
-            assert len(data_set.img_ids) == len(set(data_set.img_ids))
-            train_valid_split = [train.dataset.img_ids[train.indices], valid.dataset.img_ids[valid.indices]]
-            pickle.dump(train_valid_split, open(tv_split_name, "wb"))
+            print(f"Split cannot be created {tv_split_name} is missing.")
+            raise FileNotFoundError
         else:
             print(f"Loading train validation split {tv_split_name}")
             train_ids, valid_ids = pickle.load(open(tv_split_name, "rb"))
@@ -32,8 +28,8 @@ def create_train_validation_split(data_root, batch_size, mini=False):
             train = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=train_ids)
             valid = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=valid_ids)
 
-        return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8), \
-               DataLoader(valid, batch_size=1, num_workers=8)
+            return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8), \
+                   DataLoader(valid, batch_size=1, num_workers=8)
     else:
         raise NotImplementedError
 

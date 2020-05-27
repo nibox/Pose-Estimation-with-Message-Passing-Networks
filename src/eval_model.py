@@ -105,7 +105,7 @@ def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
     dataset_path = "../../storage/user/kistern/coco"
     ######################################
-    mini = True
+    split_variant = "mini"
     eval_num = 500
     cc_method = "GAEC"
 
@@ -127,11 +127,20 @@ def main():
     config["inclusion_radius"] = None
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
-    modus = "train" if mini else "valid"  # decides which validation set to use. "valid" means the coco2014 validation
-    if modus == "train":
+
+    if split_variant == "mini":
         train_ids, valid_ids = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))
         assert len(set(train_ids).intersection(set(valid_ids))) == 0
         eval_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
+    elif split_variant == "mini_real":
+        train_ids, valid_ids = pickle.load(open("tmp/mini_real_train_valid_split_1.p", "rb"))
+        assert len(set(train_ids).intersection(set(valid_ids))) == 0
+        eval_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="val", img_ids=valid_ids)
+    elif split_variant == "princeton":
+        train_ids, valid_ids = pickle.load(open("tmp/princeton_split.p", "rb"))
+        assert len(set(train_ids).intersection(set(valid_ids))) == 0
+        eval_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
+
     else:
         raise NotImplementedError
 
@@ -153,8 +162,14 @@ def main():
     anns_intra_person = []
     imgs_fully_det = []  # save ids with perfect detections so i can eval performance on
     print("Eval on Labeled data")
+    skip_list = []  # [264, 217]
+    eval_ids = []
+    model.use_gt = False
     with torch.no_grad():
         for i in tqdm(range(eval_num)):
+            if i in skip_list:
+                continue
+            eval_ids.append(eval_set.img_ids[i])
 
             imgs, masks, keypoints, factors = eval_set.get_tensor(i, device)
             pred, joint_det, edge_index, edge_labels, _, _ = model(imgs, keypoints, masks, factors, with_logits=True)
@@ -188,8 +203,12 @@ def main():
         anns_full = []
         model.use_gt = False
         print("Eval on Real data")
+        eval_ids_real = []
         with torch.no_grad():
             for i in tqdm(range(eval_num)):
+                if i in skip_list:
+                    continue
+                eval_ids_real.append(eval_set.img_ids[i])
                 imgs, masks, keypoints, factors = eval_set.get_tensor(i, device)
                 pred, joint_det, edge_index, _, _, _ = model(imgs, keypoints, masks, factors, with_logits=True)
 
@@ -203,16 +222,16 @@ def main():
                     anns_full.append(ann)
         print("##################")
         print("General Evaluation")
-        coco_eval(eval_set.coco, anns, eval_set.img_ids[:eval_num].astype(np.int))
+        coco_eval(eval_set.coco, anns, np.array(eval_ids))
         print("##################")
         print("Inter Person Ability")
-        coco_eval(eval_set.coco, anns_inter_person, eval_set.img_ids[:eval_num].astype(np.int))
+        coco_eval(eval_set.coco, anns_inter_person, np.array(eval_ids))
         print("##################")
         print("Intra Person Ability")
-        coco_eval(eval_set.coco, anns_intra_person, eval_set.img_ids[:eval_num].astype(np.int))
+        coco_eval(eval_set.coco, anns_intra_person, np.array(eval_ids))
         print("##################")
         print("Real Evaluation")
-        coco_eval(eval_set.coco, anns_real, eval_set.img_ids[:eval_num].astype(np.int))
+        coco_eval(eval_set.coco, anns_real, np.array(eval_ids_real))
         print("##################")
         print("Real Evaluation on perfect images")
         print(f"Number of perfect images: {len(anns_full)}")
