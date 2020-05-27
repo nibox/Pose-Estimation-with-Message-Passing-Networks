@@ -92,7 +92,7 @@ def main():
 
         # draw images
         # best image
-        output_dir = f"output_{model_name}"
+        output_dir = f"tmp/output_{model_name}"
         os.makedirs(output_dir, exist_ok=True)
         for samples in image_to_draw:
             img_id, img, persons, joint_det, keypoints, saving_cause = samples
