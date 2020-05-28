@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from CocoKeypoints import CocoKeypoints
 import Models.PoseEstimation.PoseEstimation as pose
-from Models.MessagePassingNetwork.VanillaMPN2 import VanillaMPN2, default_config
+from Models.MessagePassingNetwork.VanillaMPN import VanillaMPN, default_config
 from Utils.Utils import load_model, draw_detection, draw_poses, pred_to_person
 import matplotlib
 matplotlib.use("Agg")
@@ -20,21 +20,25 @@ def main():
     mini = True
     sample_ids = False
 
-    model_name = "20"
-    model_path = f"../log/PoseEstimationBaseline/{model_name}/pose_estimation.pth"
+    model_name = "24"
+    model_path = f"../log/PoseEstimationBaseline/Real/{model_name}/pose_estimation.pth"
     config = pose.default_config
-    config["message_passing"] = VanillaMPN2
+    config["message_passing"] = VanillaMPN
     config["message_passing_config"] = default_config
-    # config["message_passing_config"]["aggr"] = "max"
+    config["message_passing_config"]["aggr"] = "max"
     config["message_passing_config"]["edge_input_dim"] = 2 + 17
+    config["message_passing_config"]["edge_feature_dim"] = 64
+    config["message_passing_config"]["node_feature_dim"] = 64
+    config["message_passing_config"]["steps"] = 10
+
     config["cheat"] = False
     config["use_gt"] = False
     config["use_focal_loss"] = True
     config["use_neighbours"] = False
-    config["mask_crowds"] = False
+    config["mask_crowds"] = True
     config["detect_threshold"] = 0.005  # default was 0.007
     config["edge_label_method"] = 4
-    config["inclusion_radius"] = None
+    config["inclusion_radius"] = 0.75
     config["matching_radius"] = 0.1
     config["mpn_graph_type"] = "knn"
     img_ids_to_use = [84015, 84381, 117772, 237976, 281133, 286645, 505421]
@@ -70,7 +74,7 @@ def main():
             if img_id not in img_ids_to_use:
                 continue
             imgs, masks, keypoints, factors = eval_set.get_tensor(i, device)
-            num_persons_gt = np.count_nonzero(keypoints[:, :, :, 2].sum(axis=1))
+            num_persons_gt = np.count_nonzero(keypoints[0, :, :, 2].sum(axis=1))
             pred, joint_det, edge_index, edge_labels, _, _ = model(imgs, keypoints, masks, factors, with_logits=False)
 
             result = pred.squeeze()

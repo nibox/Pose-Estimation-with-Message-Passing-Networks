@@ -6,7 +6,7 @@ from tqdm import tqdm
 from CocoKeypoints import CocoKeypoints
 from Utils.Utils import load_model, get_transform, kpt_affine, pred_to_person, num_non_detected_points
 import Models.PoseEstimation.PoseEstimation as pose
-from Models.MessagePassingNetwork.VanillaMPN2 import VanillaMPN2, default_config
+from Models.MessagePassingNetwork.VanillaMPN import VanillaMPN, default_config
 
 
 def specificity(pred, target, num_classes):
@@ -109,22 +109,26 @@ def main():
     eval_num = 500
     cc_method = "GAEC"
 
-    model_path = "../log/PoseEstimationBaseline/20/pose_estimation.pth"
+    model_path = "../log/PoseEstimationBaseline/Real/24/pose_estimation.pth"
     config = pose.default_config
-    config["message_passing"] = VanillaMPN2
+    config["message_passing"] = VanillaMPN
     config["message_passing_config"] = default_config
-    config["message_passing_config"]["aggr"] = "add"
+    config["message_passing_config"]["aggr"] = "max"
     config["message_passing_config"]["edge_input_dim"] = 2 + 17
+    config["message_passing_config"]["edge_feature_dim"] = 64
+    config["message_passing_config"]["node_feature_dim"] = 64
+    config["message_passing_config"]["steps"] = 10
+
     config["cheat"] = False
     config["use_gt"] = False
     config["use_focal_loss"] = True
     config["use_neighbours"] = False
     config["mask_crowds"] = True
-    config["detect_threshold"] = 0.005 # default was 0.007
+    config["detect_threshold"] = 0.005  # default was 0.007
     config["mpn_graph_type"] = "knn"
     config["edge_label_method"] = 4
     config["matching_radius"] = 0.1
-    config["inclusion_radius"] = None
+    config["inclusion_radius"] = 0.75
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
 
