@@ -4,7 +4,7 @@ from CocoKeypoints import CocoKeypoints
 import numpy as np
 import pickle
 import Models.PoseEstimation.PoseEstimation as pose
-from Models.MessagePassingNetwork.VanillaMPN2 import default_config, VanillaMPN2
+from Models.MessagePassingNetwork.VanillaMPN import default_config, VanillaMPN
 from torch_geometric.utils import recall, accuracy, precision, f1_score
 from torch.utils.tensorboard import SummaryWriter
 import os
@@ -63,7 +63,7 @@ def main():
     pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
     model_path = None  # "../log/PoseEstimationBaseline/13/pose_estimation.pth"
 
-    log_dir = "../log/PoseEstimationBaseline/20"
+    log_dir = "../log/PoseEstimationBaseline/Real/24"
     model_save_path = f"{log_dir}/pose_estimation.pth"
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
@@ -72,21 +72,24 @@ def main():
     num_epochs = 100
     batch_size = 8  # 16 is pretty much largest possible batch size
     config = pose.default_config
-    config["message_passing"] = VanillaMPN2
+    config["message_passing"] = VanillaMPN
     config["message_passing_config"] = default_config
-    config["message_passing_config"]["aggr"] = "add"
+    config["message_passing_config"]["aggr"] = "max"
     config["message_passing_config"]["edge_input_dim"] = 2 + 17
-    # config["message_passing_config"]["steps"] = 10
+    config["message_passing_config"]["edge_feature_dim"]= 64
+    config["message_passing_config"]["node_feature_dim"]= 64
+    config["message_passing_config"]["steps"] = 10
+
     config["cheat"] = False
     config["use_gt"] = False
     config["use_focal_loss"] = True
-    config["use_neighbours"] = False
+    config["use_neighbours"] = True
     config["mask_crowds"] = True
     config["detect_threshold"] = 0.005  # default was 0.007
     config["mpn_graph_type"] = "knn"
     config["edge_label_method"] = 4  # this only applies if use_gt==True
     config["matching_radius"] = 0.1
-    config["inclusion_radius"] = 7.5
+    config["inclusion_radius"] = 0.75
 
     use_label_mask = True
     use_batch_index = False

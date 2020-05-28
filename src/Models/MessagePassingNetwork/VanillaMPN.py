@@ -94,11 +94,11 @@ class VanillaMPN(torch.nn.Module):
         self.mpn = VanillaMPLayer(node_feature_dim, edge_feature_dim, aggr=aggr)
 
         non_linearity = nn.ReLU()
-        self.edge_embedding = nn.Sequential(nn.Linear(edge_input_dim, 256),  # 2 + 17*17,
+        self.edge_embedding = nn.Sequential(nn.Linear(edge_input_dim, 32),  # 2 + 17*17,
                                             non_linearity,
-                                            nn.Linear(256, 128),
+                                            nn.Linear(32, 64),
                                             non_linearity,
-                                            nn.Linear(128, 64),
+                                            nn.Linear(64, 64),
                                             non_linearity,
                                             nn.Linear(64, edge_feature_dim))
         self.node_embedding = nn.Sequential(nn.Linear(node_input_dim, 128),
@@ -107,9 +107,11 @@ class VanillaMPN(torch.nn.Module):
                                             non_linearity,
                                             nn.Linear(64, node_feature_dim))
 
-        self.classification = nn.Sequential(nn.Linear(edge_feature_dim, 16),
+        self.classification = nn.Sequential(nn.Linear(edge_feature_dim, 64),
                                             non_linearity,
-                                            nn.Linear(16, 1))
+                                            nn.Linear(64, 32),
+                                            non_linearity,
+                                            nn.Linear(32, 1))
 
         self.steps = steps
 
