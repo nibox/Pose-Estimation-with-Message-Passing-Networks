@@ -134,7 +134,6 @@ def main():
     config["inclusion_radius"] = None
     config["matching_radius"] = 0.1 # default for 3: 7.5, for 4: 0.1/0.25
     config["mpn_graph_type"] = "fully"
-    config["mpn_graph_type"] = "knn"
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
     if split_variant=="mini":
@@ -178,25 +177,17 @@ def main():
         test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_labels)
         sol = cluster_graph(test_graph, cc_method, complete=False)
         sparse_sol_cc, _ = dense_to_sparse(torch.from_numpy(sol))
-        sparse_sol_gt = torch.stack([edge_index[0, edge_labels==1], edge_index[1, edge_labels==1]])
         # construct solution by using only labeled edges (instead of corr clustering)
         # sparse_sol = torch.stack([edge_index[0, edge_labels==1], edge_index[1, edge_labels==1]])
         persons_pred_cc, _ = graph_cluster_to_persons(joint_det, sparse_sol_cc)  # might crash
-        persons_pred_gt, _ = graph_cluster_to_persons(joint_det, sparse_sol_gt)  # might crash
 
-        if len(persons_pred_gt.shape) == 1:  # this means none persons were detected
-            persons_pred_gt = np.zeros([1, 17, 3])
         if len(persons_pred_cc.shape) == 1:  # this means none persons were detected
             persons_pred_cc = np.zeros([1, 17, 3])
         img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
         persons_pred_orig_cc = reverse_affine_map(persons_pred_cc.copy(), (img_info["width"], img_info["height"]))
-        persons_pred_orig_gt = reverse_affine_map(persons_pred_gt.copy(), (img_info["width"], img_info["height"]))
 
         ann_cc = gen_ann_format(persons_pred_orig_cc, eval_set.img_ids[i])
-        ann_gt = gen_ann_format(persons_pred_orig_gt, eval_set.img_ids[i])
         anns_cc.append(ann_cc)
-        anns_gt.append(ann_gt)
-    coco_eval(eval_set.coco, anns_gt, eval_set.img_ids[:eval_num].astype(np.int))
     coco_eval(eval_set.coco, anns_cc, eval_set.img_ids[:eval_num].astype(np.int))
 
 

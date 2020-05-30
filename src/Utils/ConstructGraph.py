@@ -135,7 +135,9 @@ class NaiveGraphConstructor:
             edge_index = self.knn_mpn_graph(joint_det)
         elif graph_type == "topk":
             assert self.detect_threshold is None  # for now only this works
-            edge_index = self.top_k_mpn_graph(joint_det, k=20)
+            edge_index = self.top_k_mpn_graph(joint_det, k=10)
+        elif graph_type == "feature_knn":
+            edge_index = self.feature_knn_mpn_graph(joint_det, x)
         else:
             raise NotImplementedError
 
@@ -176,6 +178,12 @@ class NaiveGraphConstructor:
         edge_index, _ = gutils.remove_self_loops(edge_index)
         return edge_index
 
+    def feature_knn_mpn_graph(self, joint_det, features):
+        edge_index = torch_geometric.nn.knn_graph(features, k=50)
+        edge_index = gutils.to_undirected(edge_index, len(joint_det))
+        edge_index, _ = gutils.remove_self_loops(edge_index)
+        return edge_index
+
     def fully_connected_mpn_graph(self, joint_det):
         num_joints_det = len(joint_det)
         edge_index, _ = gutils.dense_to_sparse(torch.ones([num_joints_det, num_joints_det], dtype=torch.long))
@@ -192,12 +200,12 @@ class NaiveGraphConstructor:
             # code assumes that each joint type has same number of detections
             raise NotImplementedError
         _, indices = joint_det[:, 2].sort()
-        distance = torch.norm(joint_det[:, None, :2] - joint_det[indices][:, :2], dim=2).view(-1, 40)
+        distance = torch.norm(joint_det[:, None, :2] - joint_det[indices][:, :2], dim=2).view(-1, 30)
         # distance shape is (num_det * 17, num_det_per_type)
         _, top_k_idx = distance.topk(k=k, dim=1, largest=False)
         # top_k_idx shape (num_det * 17, k)
         top_k_idx = top_k_idx.view(len(joint_det), 17, k) + \
-                    torch.arange(0, 17, dtype=torch.long, device=self.device)[:, None] * 40
+                    torch.arange(0, 17, dtype=torch.long, device=self.device)[:, None] * 30
         top_k_idx = top_k_idx.view(-1)
         edge_index[1] = indices[top_k_idx]
 
@@ -490,7 +498,7 @@ def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
         scoremap = torch.where(scoremap < threshold, torch.zeros_like(scoremap), scoremap)
         joint_idx_det, joint_y, joint_x = scoremap.nonzero(as_tuple=True)
     else:
-        k = 40
+        k = 30
         scoremap_shape = scoremap.shape
         _, indices = scoremap.view(17, -1).topk(k=k, dim=1)
         container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.int).reshape(17, -1)
