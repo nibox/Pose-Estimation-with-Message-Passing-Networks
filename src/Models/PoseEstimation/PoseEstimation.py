@@ -74,10 +74,10 @@ class PoseEstimationBaseline(nn.Module):
 
         return pred, joint_det, edge_index, edge_labels, label_mask, batch_index
 
-    def loss(self, output, targets, with_logits=True, pos_weight=None, mask=None, batch_index=None) -> torch.Tensor:
+    def loss(self, output, targets, reduction, with_logits=True, pos_weight=None, mask=None, batch_index=None) -> torch.Tensor:
         if self.focal is not None:
             assert with_logits
-            loss = self.focal(output, targets, mask, batch_index)
+            loss = self.focal(output, targets, reduction, mask, batch_index)
             return loss
 
         assert mask is None
@@ -86,9 +86,13 @@ class PoseEstimationBaseline(nn.Module):
         else:
             return F.binary_cross_entropy(output, targets)
 
-    def freeze_backbone(self):
-        for param in self.backbone.parameters():
-            param.requires_grad = False
+    def freeze_backbone(self, partial):
+        if partial:  # todo not the best implementation
+            for param in self.backbone.pre.parameters():
+                param.requires_grad = False
+        else:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
 
 
 

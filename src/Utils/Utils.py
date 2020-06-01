@@ -64,14 +64,13 @@ def get_transform(center, scale, res, rot=0):
 
 
 class FocalLoss(nn.Module):
-    def __init__(self, alpha=1, gamma=2, logits=False, reduce=True):
+    def __init__(self, alpha=1, gamma=2, logits=False):
         super(FocalLoss, self).__init__()
         self.alpha = alpha
         self.gamma = gamma
         self.logits = logits
-        self.reduce = reduce
 
-    def forward(self, inputs, targets, mask=None, batch_index=None):
+    def forward(self, inputs, targets, reduction, mask=None, batch_index=None):
         if self.logits:
             BCE_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduce=False)
         else:
@@ -81,11 +80,15 @@ class FocalLoss(nn.Module):
         if mask is not None:
             F_loss = F_loss * mask
 
-        if self.reduce:
-            if batch_index is not None:
+        if reduction is not None:
+            if batch_index is not None and reduction == "mean":
                 F_loss = scatter_mean(F_loss, batch_index)
                 assert len(F_loss) == batch_index.max() + 1
-            return torch.mean(F_loss)
+                return torch.mean(F_loss)
+            elif reduction == "mean" and batch_index is None:
+                return torch.mean(F_loss)
+            elif reduction == "sum":
+                return torch.sum(F_loss)
         else:
             return F_loss
 
