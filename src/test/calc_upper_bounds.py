@@ -8,7 +8,8 @@ from torch_geometric.utils import dense_to_sparse, precision, recall
 from tqdm import tqdm
 
 from CocoKeypoints import CocoKeypoints
-from Utils.Utils import load_model, get_transform, kpt_affine, to_numpy, graph_cluster_to_persons
+from Utils.Utils import get_transform, kpt_affine, to_numpy, graph_cluster_to_persons
+from Models.PoseEstimation.PoseEstimation import load_model
 from Models.PoseEstimation.UpperBound import UpperBoundModel, default_config
 from Utils.dataset_utils import Graph
 from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph

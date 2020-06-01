@@ -3,12 +3,7 @@ from torch.utils.data import DataLoader
 from CocoKeypoints import CocoKeypoints
 import numpy as np
 import pickle
-import Models.PoseEstimation.PoseEstimation as pose
-from Models.MessagePassingNetwork.VanillaMPN2 import default_config, VanillaMPN2
-from torch_geometric.utils import recall, accuracy, precision, f1_score
-from torch.utils.tensorboard import SummaryWriter
 import os
-from Utils.Utils import load_model
 
 
 def create_train_validation_split(data_root, variant, force):

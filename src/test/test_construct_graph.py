@@ -4,7 +4,8 @@ import numpy as np
 import pickle
 from torch_geometric.utils import dense_to_sparse
 from Models.PoseEstimation.UpperBound import UpperBoundModel, default_config
-from Utils.Utils import load_model, draw_detection, draw_poses, draw_clusters, pred_to_person, graph_cluster_to_persons
+from Utils.Utils import draw_detection, draw_poses, draw_clusters, pred_to_person, graph_cluster_to_persons
+from Models.PoseEstimation.PoseEstimation import load_model
 from Utils.ConstructGraph import NaiveGraphConstructor
 from Utils.dataset_utils import Graph
 from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph

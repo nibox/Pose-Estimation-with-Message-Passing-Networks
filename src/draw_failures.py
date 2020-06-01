@@ -8,7 +8,8 @@ from tqdm import tqdm
 from CocoKeypoints import CocoKeypoints
 import Models.PoseEstimation.PoseEstimation as pose
 from Models.MessagePassingNetwork.VanillaMPN import VanillaMPN, default_config
-from Utils.Utils import load_model, draw_detection, draw_poses, pred_to_person
+from Utils.Utils import draw_detection, draw_poses, pred_to_person
+from Models.PoseEstimation.PoseEstimation import load_model
 import matplotlib
 matplotlib.use("Agg")
 

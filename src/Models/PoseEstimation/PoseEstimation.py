@@ -89,3 +89,24 @@ class PoseEstimationBaseline(nn.Module):
     def freeze_backbone(self):
         for param in self.backbone.parameters():
             param.requires_grad = False
+
+
+
+def load_model(path, model_class, config, device, pretrained_path=None):
+
+    assert not (path is not None and pretrained_path is not None)
+    def rename_key(key):
+        # assume structure is model.module.REAL_NAME
+        return ".".join(key.split(".")[2:])
+
+    #model = hourglass.PoseNet(kwargs["nstack"], kwargs["input_dim"], kwargs["output_size"])
+    model = model_class(config)
+    if path is not None:
+        state_dict = torch.load(path, map_location=device)
+        model.load_state_dict(state_dict["model_state_dict"])
+    elif pretrained_path is not None:
+        state_dict = torch.load(pretrained_path, map_location=device)
+        state_dict_new = {rename_key(k): v for k, v in state_dict["state_dict"].items()}
+        model.backbone.load_state_dict(state_dict_new)
+
+    return model

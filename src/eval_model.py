@@ -4,7 +4,8 @@ import numpy as np
 from torch_geometric.utils import precision, recall
 from tqdm import tqdm
 from CocoKeypoints import CocoKeypoints
-from Utils.Utils import load_model, get_transform, kpt_affine, pred_to_person, num_non_detected_points
+from Utils.Utils import get_transform, kpt_affine, pred_to_person, num_non_detected_points
+from Models.PoseEstimation.PoseEstimation import load_model
 import Models.PoseEstimation.PoseEstimation as pose
 from Models.MessagePassingNetwork.VanillaMPN import VanillaMPN, default_config
 

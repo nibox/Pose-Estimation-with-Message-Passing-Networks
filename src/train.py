@@ -8,7 +8,6 @@ from Models.MessagePassingNetwork.VanillaMPN import default_config, VanillaMPN
 from torch_geometric.utils import recall, accuracy, precision, f1_score
 from torch.utils.tensorboard import SummaryWriter
 import os
-from Utils.Utils import load_model
 
 
 def create_train_validation_split(data_root, batch_size, mini=False):
@@ -35,7 +34,7 @@ def create_train_validation_split(data_root, batch_size, mini=False):
 
 
 def load_checkpoint(path, model_class, model_config, device):
-    model = load_model(path, model_class, model_config, device)
+    model = pose.load_model(path, model_class, model_config, device)
     model.to(device)
     model.freeze_backbone()
 
@@ -103,7 +102,7 @@ def main():
                                                         pose.PoseEstimationBaseline, config, device)
         start_epoch += 1
     else:
-        model = load_model(model_path, pose.PoseEstimationBaseline, config, device,
+        model = pose.load_model(model_path, pose.PoseEstimationBaseline, config, device,
                            pretrained_path=pretrained_path)
         model.to(device)
         model.freeze_backbone()
