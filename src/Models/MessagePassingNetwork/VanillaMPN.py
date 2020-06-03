@@ -119,7 +119,9 @@ class VanillaMPN(torch.nn.Module):
         node_features = self.node_embedding(x)
         edge_features = self.edge_embedding(edge_attr)
 
+        preds = []
         for i in range(self.steps):
             node_features, edge_features = self.mpn(node_features, edge_features, edge_index)
+            preds.append(self.classification(edge_features).T)
 
-        return self.classification(edge_features)
+        return torch.cat(preds)

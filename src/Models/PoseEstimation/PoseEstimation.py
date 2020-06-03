@@ -32,6 +32,7 @@ class PoseEstimationBaseline(nn.Module):
         super().__init__()
         self.backbone = config["backbone"](**config["backbone_config"])
         self.mpn = config["message_passing"](**config["message_passing_config"])
+        self.num_aux_steps = config["num_aux_steps"]
         self.graph_constructor = config["graph_constructor"]
         self.feature_gather = nn.Conv2d(256, 128, 3, 1, 1, bias=True)
 
@@ -52,14 +53,14 @@ class PoseEstimationBaseline(nn.Module):
     def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None, factors=None, with_logits=True) -> torch.tensor:
         if self.mask_crowds:
             assert masks is not None
-        scoremap, features, early_features = self.backbone(imgs)
-        scoremap = scoremap[:, -1, :17]
+        scoremaps, features, early_features = self.backbone(imgs)
+        final_scoremap = scoremaps[:, -1, :17]
 
         features = self.feature_gather(features)
 
-        graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, factors, masks, use_gt=self.use_gt,
+        graph_constructor = self.graph_constructor(final_scoremap, features, keypoints_gt, factors, masks, use_gt=self.use_gt,
                                                    no_false_positives=self.cheat, use_neighbours=self.use_neighbours,
-                                                   device=scoremap.device, edge_label_method=self.edge_label_method,
+                                                   device=final_scoremap.device, edge_label_method=self.edge_label_method,
                                                    detect_threshold=self.config["detect_threshold"],
                                                    mask_crowds=self.mask_crowds,
                                                    inclusion_radius=self.config["inclusion_radius"],
@@ -68,23 +69,22 @@ class PoseEstimationBaseline(nn.Module):
 
         x, edge_attr, edge_index, edge_labels, joint_det, label_mask, batch_index = graph_constructor.construct_graph()
 
-        pred = self.mpn(x, edge_attr, edge_index).squeeze()
+        preds = self.mpn(x, edge_attr, edge_index).squeeze()
         if not with_logits:
-            pred = torch.sigmoid(pred)
+            preds = torch.sigmoid(preds)
 
-        return pred, joint_det, edge_index, edge_labels, label_mask, batch_index
+        return scoremaps, preds, joint_det, edge_index, edge_labels, label_mask, batch_index
 
-    def loss(self, output, targets, reduction, with_logits=True, pos_weight=None, mask=None, batch_index=None) -> torch.Tensor:
+    def loss(self, outputs, targets, reduction, with_logits=True, mask=None, batch_index=None) -> torch.Tensor:
         if self.focal is not None:
             assert with_logits
-            loss = self.focal(output, targets, reduction, mask, batch_index)
-            return loss
-
-        assert mask is None
-        if with_logits:
-            return F.binary_cross_entropy_with_logits(output, targets, pos_weight=pos_weight)
+            loss = 0.0
+            idx_offset = self.mpn.steps - self.num_aux_steps  # + i
+            for i in range(self.num_aux_steps):
+                loss += self.focal(outputs[idx_offset + i], targets, reduction, mask, batch_index)
+            return loss / self.num_aux_steps
         else:
-            return F.binary_cross_entropy(output, targets)
+            raise NotImplementedError
 
     def freeze_backbone(self, partial):
         if partial:  # todo not the best implementation

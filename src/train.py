@@ -61,6 +61,7 @@ def make_train_func(model, optimizer, **kwargs):
             masks = masks.to(kwargs["device"])
             keypoints = keypoints.to(kwargs["device"])
             factors = factors.to(kwargs["device"])
+
             loss = 0.0
             preds, labels = [], []
             batch_size = imgs.shape[0]
@@ -68,7 +69,7 @@ def make_train_func(model, optimizer, **kwargs):
             num_edges_in_batch = 0
             for i in range(batch_size):
 
-                pred, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs[None, i],
+                _, pred, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs[None, i],
                                                                                           keypoints[None, i],
                                                                                           masks[None, i],
                                                                                           factors[None, i])
@@ -78,22 +79,29 @@ def make_train_func(model, optimizer, **kwargs):
 
                 local_loss = model.loss(pred, edge_labels, reduction=kwargs["loss_reduction"],
                                         pos_weight=None, mask=label_mask, batch_index=batch_index)
-                if kwargs["loss_reduction"] == "mean":
-                    local_loss /= batch_size
+
                 num_edges_in_batch += len(edge_labels)
                 # in case of loss_reduction="sum" the scaling is done at the gradient directly
                 local_loss.backward()
                 loss += local_loss.item()
+
                 preds.append(pred.detach())
                 labels.append(edge_labels.detach())
-            pred = torch.cat(preds)
-            edge_labels = torch.cat(labels)
+
             if kwargs["loss_reduction"] == "sum":
-                loss /= num_edges_in_batch
-                for p in model.parameters():
-                    if p.grad is not None:
-                        p.grad.data /= num_edges_in_batch
+                norm_const = num_edges_in_batch
+            elif kwargs["loss_reduction"] == "mean":
+                norm_const = batch_size
+            else:
+                raise NotImplementedError
+            loss /= norm_const  # this is for logging
+            for p in model.parameters():
+                if p.grad is not None:
+                    p.grad.data /= norm_const
             optimizer.step()
+
+            preds = torch.cat(preds, 1)
+            edge_labels = torch.cat(labels)
         else:
             optimizer.zero_grad()
             # split batch
@@ -102,17 +110,18 @@ def make_train_func(model, optimizer, **kwargs):
             masks = masks.to(kwargs["device"])
             keypoints = keypoints.to(kwargs["device"])
             factors = factors.to(kwargs["device"])
-            pred, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
+
+            _, preds, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
 
             label_mask = label_mask if kwargs["use_label_mask"] else None
             batch_index = batch_index if kwargs["use_batch_index"] else None
 
-            loss = model.loss(pred, edge_labels, pos_weight=None, mask=label_mask, batch_index=batch_index)
+            loss = model.loss(preds, edge_labels, reduction="mean", mask=label_mask, batch_index=batch_index)
             loss.backward()
             optimizer.step()
             loss = loss.item()
 
-        return pred, edge_labels, loss
+        return preds[-1], edge_labels, loss
 
     return func
 
@@ -128,12 +137,13 @@ def main():
     pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
     model_path = None  # "../log/PoseEstimationBaseline/13/pose_estimation.pth"
 
-    log_dir = "../log/PoseEstimationBaseline/Real/24"
+    log_dir = "../log/PoseEstimationBaseline/Real/24_1"
     model_save_path = f"{log_dir}/pose_estimation.pth"
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
 
     learn_rate = 3e-4
+    hr_learn_rate = 3e-8
     num_epochs = 100
     batch_size = 8  # 16 is pretty much largest possible batch size
     config = pose.default_config
@@ -141,8 +151,8 @@ def main():
     config["message_passing_config"] = default_config
     config["message_passing_config"]["aggr"] = "max"
     config["message_passing_config"]["edge_input_dim"] = 2 + 17
-    config["message_passing_config"]["edge_feature_dim"]= 64
-    config["message_passing_config"]["node_feature_dim"]= 64
+    config["message_passing_config"]["edge_feature_dim"] = 64
+    config["message_passing_config"]["node_feature_dim"] = 64
     config["message_passing_config"]["steps"] = 10
 
     config["cheat"] = False
@@ -155,9 +165,10 @@ def main():
     config["edge_label_method"] = 4  # this only applies if use_gt==True
     config["matching_radius"] = 0.1
     config["inclusion_radius"] = 0.75
+    config["num_aux_steps"] = 1  # default is 1: only the last
 
-    end_to_end = True  # this also enables batching simulation where the gradient is accumulated for multiple batches
-    loss_reduction = "sum"  # default is "mean"
+    end_to_end = False  # this also enables batching simulation where the gradient is accumulated for multiple batches
+    loss_reduction = "mean"  # default is "mean"
 
     use_label_mask = True
     use_batch_index = False
@@ -236,15 +247,11 @@ def main():
                 masks = masks.to(device)
                 keypoints = keypoints.to(device)
                 factors = factors.to(device)
-                pred, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
+                _, preds, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
 
-                if len(edge_labels[edge_labels == 1]) != 0:
-                    pos_weight = torch.tensor(len(edge_labels[edge_labels == 0]) / len(edge_labels[edge_labels == 1]))
-                else:
-                    pos_weight = torch.tensor(1.0)
                 label_mask = label_mask if use_label_mask else None
-                loss = model.loss(pred, edge_labels, reduction="mean", pos_weight=pos_weight, mask=label_mask)
-                result = pred.sigmoid().squeeze()
+                loss = model.loss(preds, edge_labels, reduction="mean", mask=label_mask)
+                result = preds[-1].sigmoid().squeeze()
                 result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
 
                 valid_loss.append(loss.item())
