@@ -38,31 +38,35 @@ class PerInvMLP(nn.Module):
                   "edge_hidden_dim": 512}
                   """
 
-default_config = {"steps": 8,
+default_config = {"steps": 10,
                   "node_input_dim": 128,
-                  "edge_input_dim": 2 + 17 * 17,
-                  "node_feature_dim": 32,
-                  "edge_feature_dim": 32,
-                  "aggr": "add"
+                  "edge_input_dim": 17 + 2,
+                  "node_feature_dim": 64,
+                  "edge_feature_dim": 64,
+                  "aggr": "max",
+                  "skip": False
                   }
 
 
 class VanillaMPLayer(MessagePassing):
 
     # todo with or without inital feature skip connection
-    def __init__(self, node_feature_dim, edge_feature_dim, aggr):
+    def __init__(self, node_feature_dim, edge_feature_dim, aggr, skip=False):
         super(VanillaMPLayer, self).__init__(aggr=aggr)
         # todo better architecture
 
         non_lin = nn.ReLU()
-        self.mlp_edge = nn.Sequential(nn.Linear(node_feature_dim * 2 + edge_feature_dim, 64),
+        node_factor = 2 if skip else 1
+        edge_factor = 2 if skip else 1
+
+        self.mlp_edge = nn.Sequential(nn.Linear(node_feature_dim * 2 * node_factor + edge_feature_dim * edge_factor, 64),
                                       non_lin,
                                       nn.Linear(64, edge_feature_dim),
                                       non_lin,
                                       )
 
         # self.mlp_edge = PerInvMLP(node_feature_dim, edge_feature_dim)
-        self.mlp_node = nn.Sequential(nn.Linear(node_feature_dim + edge_feature_dim, node_feature_dim),
+        self.mlp_node = nn.Sequential(nn.Linear(node_feature_dim * node_factor + edge_feature_dim, node_feature_dim),
                                       non_lin,
                                       )
 
@@ -88,10 +92,11 @@ class VanillaMPLayer(MessagePassing):
 class VanillaMPN(torch.nn.Module):
 
     def __init__(self, steps, node_input_dim, edge_input_dim, node_feature_dim, edge_feature_dim,
-                 aggr):
+                 aggr, skip=False):
         super().__init__()
         # self.mpn = nn.ModuleList([VanillaMPLayer(node_feature_dim, edge_feature_dim) for i in range(steps)])
-        self.mpn = VanillaMPLayer(node_feature_dim, edge_feature_dim, aggr=aggr)
+        self.use_skip_connections = skip
+        self.mpn = VanillaMPLayer(node_feature_dim, edge_feature_dim, aggr=aggr, skip=skip)
 
         non_linearity = nn.ReLU()
         self.edge_embedding = nn.Sequential(nn.Linear(edge_input_dim, 32),  # 2 + 17*17,
@@ -119,8 +124,15 @@ class VanillaMPN(torch.nn.Module):
         node_features = self.node_embedding(x)
         edge_features = self.edge_embedding(edge_attr)
 
+        node_features_initial = node_features
+        edge_features_initial = edge_features
+
         preds = []
         for i in range(self.steps):
+            if self.use_skip_connections:
+                node_features = torch.cat([node_features_initial, node_features], dim=1)
+                edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
+
             node_features, edge_features = self.mpn(node_features, edge_features, edge_index)
             preds.append(self.classification(edge_features).T)
 
