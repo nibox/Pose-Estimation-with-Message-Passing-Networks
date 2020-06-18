@@ -1,13 +1,15 @@
 import pickle
 import torch
+import torchvision
 import numpy as np
 from torch_geometric.utils import precision, recall
 from tqdm import tqdm
-from CocoKeypoints import CocoKeypoints
-from Utils.Utils import get_transform, kpt_affine, pred_to_person, num_non_detected_points
-from Models.PoseEstimation.PoseEstimation import load_model
-import Models.PoseEstimation.PoseEstimation as pose
-from Models.MessagePassingNetwork.VanillaMPN import VanillaMPN, default_config
+
+from config import get_config, update_config
+from data import CocoKeypoints_hg, CocoKeypoints_hr
+from Utils import pred_to_person, num_non_detected_points, adjust, to_tensor
+from Models.PoseEstimation import get_pose_model
+from Utils.transformations import reverse_affine_map
 
 
 def specificity(pred, target, num_classes):
@@ -30,20 +32,14 @@ def specificity(pred, target, num_classes):
 
     return out
 
+
 def sprase_to_dense(edge_index, num_nodes):
     mat = torch.zeros(num_nodes, num_nodes, dtype=torch.long)
     mat[edge_index[0], edge_index[1]] = 1.0
     return mat
 
+"""
 def reverse_affine_map(keypoints, img_size_orig):
-    """
-    Reverses the transformation resulting from the input argument (using get_transform). Used to map output keypoints to
-    original space in order to evaluate them.
-    :param center:
-    :param scale:
-    :param res:
-    :return:
-    """
     gt_width = img_size_orig[0]
     gt_height = img_size_orig[1]
     scale = max(gt_height, gt_width) / 200
@@ -55,6 +51,7 @@ def reverse_affine_map(keypoints, img_size_orig):
     inv_mat = inv_mat[:2]
     keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], inv_mat)
     return keypoints
+"""
 
 
 def gen_ann_format(pred, image_id=0):
@@ -106,10 +103,12 @@ def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
     dataset_path = "../../storage/user/kistern/coco"
     ######################################
-    split_variant = "mini"
-    eval_num = 500
-    cc_method = "GAEC"
 
+    config_name = "model_20"
+    config = get_config()
+    config = update_config(config, f"../experiments/train/{config_name}.yaml")
+
+    """
     model_path = "../log/PoseEstimationBaseline/Real/24/pose_estimation.pth"
     config = pose.default_config
     config["message_passing"] = VanillaMPN
@@ -132,25 +131,43 @@ def main():
     config["inclusion_radius"] = 0.75
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################
+    """
 
-    if split_variant == "mini":
+    if config.TEST.SPLIT == "mini":
         train_ids, valid_ids = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))
         assert len(set(train_ids).intersection(set(valid_ids))) == 0
-        eval_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
-    elif split_variant == "mini_real":
+        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
+    elif config.TEST.SPLIT == "mini_real":
         train_ids, valid_ids = pickle.load(open("tmp/mini_real_train_valid_split_1.p", "rb"))
         assert len(set(train_ids).intersection(set(valid_ids))) == 0
-        eval_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="val", img_ids=valid_ids)
-    elif split_variant == "princeton":
+        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="val", img_ids=valid_ids)
+    elif config.TEST.SPLIT == "princeton":
         train_ids, valid_ids = pickle.load(open("tmp/princeton_split.p", "rb"))
         assert len(set(train_ids).intersection(set(valid_ids))) == 0
-        eval_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
-
+        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
     else:
         raise NotImplementedError
 
-    model = load_model(model_path, pose.PoseEstimationBaseline, config, device).to(device)
+    model = get_pose_model(config, device)
+    state_dict = torch.load(config.MODEL.PRETRAINED)
+    model.load_state_dict(state_dict["model_state_dict"])
+    model.to(device)
     model.eval()
+
+
+    if config.MODEL.KP == "hourglass":
+        transforms = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.ToTensor(),
+            ]
+        )
+    else:
+        transforms = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ]
+        )
 
     # baseline : predicting full connections
     # baseline: upper bound
@@ -171,17 +188,19 @@ def main():
     eval_ids = []
     model.use_gt = False
     with torch.no_grad():
-        for i in tqdm(range(eval_num)):
+        for i in tqdm(range(config.TEST.NUM_EVAL)):
             if i in skip_list:
                 continue
             eval_ids.append(eval_set.img_ids[i])
 
-            imgs, masks, keypoints, factors = eval_set.get_tensor(i, device)
-            pred, joint_det, edge_index, edge_labels, _, _ = model(imgs, keypoints, masks, factors, with_logits=True)
+            img, masks, keypoints, factors = eval_set[i]
+            img_transformed = transforms(img).to(device)[None]
+            masks, keypoints, factors = to_tensor(device, masks, keypoints, factors)
+            scoremaps, pred, joint_det, edge_index, edge_labels, _, _ = model(img_transformed, keypoints, masks, factors, with_logits=True)
 
             pred = pred.sigmoid().squeeze()
             result = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
-            n, _ = num_non_detected_points(joint_det.cpu(), keypoints.cpu(), 6.0, config["use_gt"])
+            n, _ = num_non_detected_points(joint_det.cpu(), keypoints.cpu(), 6.0, config.MODEL.GC.USE_GT)
 
             eval_prec_positive.append(precision(result, edge_labels, 2)[1])
             eval_prec_negative.append(precision(result, edge_labels, 2)[0])
@@ -194,9 +213,12 @@ def main():
             # pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
-            ann = perd_to_ann(joint_det, edge_index, pred, img_info, int(eval_set.img_ids[i]), cc_method)
-            ann_intra = perd_to_ann(joint_det, edge_index, pred_intra_person, img_info, int(eval_set.img_ids[i]), cc_method)
-            ann_inter = perd_to_ann(joint_det, edge_index, pred_inter_person, img_info, int(eval_set.img_ids[i]), cc_method)
+            ann = perd_to_ann(scoremaps[0], joint_det, edge_index, pred, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
+                              , config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
+            ann_intra = perd_to_ann(scoremaps[0], joint_det, edge_index, pred_intra_person, img_info, int(eval_set.img_ids[i]),
+                                    config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
+            ann_inter = perd_to_ann(scoremaps[0], joint_det, edge_index, pred_inter_person, img_info, int(eval_set.img_ids[i]),
+                                    config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
 
             anns.append(ann)
             anns_intra_person.append(ann_intra)
@@ -210,18 +232,21 @@ def main():
         print("Eval on Real data")
         eval_ids_real = []
         with torch.no_grad():
-            for i in tqdm(range(eval_num)):
+            for i in tqdm(range(config.TEST.NUM_EVAL)):
                 if i in skip_list:
                     continue
                 eval_ids_real.append(eval_set.img_ids[i])
-                imgs, masks, keypoints, factors = eval_set.get_tensor(i, device)
-                pred, joint_det, edge_index, _, _, _ = model(imgs, keypoints, masks, factors, with_logits=True)
+                img, masks, keypoints, factors = eval_set[i]
+                img_transformed = transforms(img).to(device)[None]
+                masks, keypoints, factors = to_tensor(device, masks, keypoints, factors)
+                scoremaps, pred, joint_det, edge_index, _, _, _ = model(img_transformed, keypoints, masks, factors, with_logits=True)
 
                 pred = pred.sigmoid().squeeze()
 
                 # pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
                 img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
-                ann = perd_to_ann(joint_det, edge_index, pred, img_info, int(eval_set.img_ids[i]), cc_method)
+                ann = perd_to_ann(scoremaps[0], joint_det, edge_index, pred, img_info, int(eval_set.img_ids[i]),
+                                  config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
                 anns_real.append(ann)
                 if int(eval_set.img_ids[i]) in imgs_fully_det:
                     anns_full.append(ann)
@@ -248,12 +273,17 @@ def main():
         print(f"Positive Specificity: {np.mean(eval_specificity_positive)}")
 
 
-def perd_to_ann(joint_det, edge_index, pred, img_info, img_id, cc_method):
+def perd_to_ann(scoremaps, joint_det, edge_index, pred, img_info, img_id, cc_method, scaling_type, adjustment):
     persons_pred, _ = pred_to_person(joint_det, edge_index, pred, cc_method)
 
     if len(persons_pred.shape) == 1:  # this means none persons were detected
         persons_pred = np.zeros([1, 17, 3])
-    persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
+    # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
+    if adjustment:
+        persons_pred = adjust(persons_pred, scoremaps)
+    persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]), scaling_type=scaling_type)
+
+
     ann = gen_ann_format(persons_pred_orig, img_id)
     return ann
 

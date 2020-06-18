@@ -26,43 +26,6 @@ def to_numpy(array: [torch.Tensor, np.array]):
         return array
 
 
-def kpt_affine(kpt, mat):
-    kpt = np.array(kpt)
-    shape = kpt.shape
-    kpt = kpt.reshape(-1, 2)
-    return np.dot(np.concatenate((kpt, kpt[:, 0:1] * 0 + 1), axis=1), mat.T).reshape(shape)
-
-def factor_affine(factors, mat):
-    return factors * mat[0, 0] * mat[1, 1]
-
-
-def get_transform(center, scale, res, rot=0):
-    # Generate transformation matrix
-    h = 200 * scale
-    t = np.zeros((3, 3))
-    t[0, 0] = float(res[1]) / h
-    t[1, 1] = float(res[0]) / h
-    t[0, 2] = res[1] * (-float(center[0]) / h + .5)
-    t[1, 2] = res[0] * (-float(center[1]) / h + .5)
-    t[2, 2] = 1
-    if not rot == 0:
-        rot = -rot  # To match direction of rotation from cropping
-        rot_mat = np.zeros((3, 3))
-        rot_rad = rot * np.pi / 180
-        sn, cs = np.sin(rot_rad), np.cos(rot_rad)
-        rot_mat[0, :2] = [cs, -sn]
-        rot_mat[1, :2] = [sn, cs]
-        rot_mat[2, 2] = 1
-        # Need to rotate around center
-        t_mat = np.eye(3)
-        t_mat[0, 2] = -res[1] / 2
-        t_mat[1, 2] = -res[0] / 2
-        t_inv = t_mat.copy()
-        t_inv[:2, 2] *= -1
-        t = np.dot(t_inv, np.dot(rot_mat, np.dot(t_mat, t)))
-    return t
-
-
 class FocalLoss(nn.Module):
     def __init__(self, alpha=1, gamma=2, logits=False):
         super(FocalLoss, self).__init__()
@@ -93,7 +56,7 @@ class FocalLoss(nn.Module):
             return F_loss
 
 
-def draw_detection(img, joint_det, joint_gt, fname=None):
+def draw_detection(img, joint_det, joint_gt, fname=None, output_size=128.0):
     """
     :param img: torcg.tensor. image
     :param joint_det: shape: (num_joints, 2) list of xy positions of detected joints (without classes or clustering)
@@ -101,15 +64,18 @@ def draw_detection(img, joint_det, joint_gt, fname=None):
     :return:
     """
 
+
     img = to_numpy(img)
-    img = img * 255.0
-    img = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_RGB2HSV)
+    if img.dtype != np.uint8:
+        img = img * 255.0
+        img = img.astype(np.uint8)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
     colors_joints = np.arange(0, 179, np.ceil(179 / 17), dtype=np.float)
     colors_joints[1::2] = colors_joints[-2::-2] # swap some colors to have clearer distinction between similar joint types
 
     for i in range(len(joint_det)):
         # scale up to 512 x 512
-        scale = 512.0 / 128.0
+        scale = 512.0 / output_size
         x, y = int(joint_det[i, 0] * scale), int(joint_det[i, 1] * scale)
         type = joint_det[i, 2]
         if type != -1:
@@ -119,7 +85,7 @@ def draw_detection(img, joint_det, joint_gt, fname=None):
         if np.sum(joint_gt[person]) > 0.0:
             for i in range(len(joint_gt[person])):
                 # scale up to 512 x 512
-                scale = 512.0 / 128.0
+                scale = 512.0 / output_size
                 x, y = int(joint_gt[person, i, 0] * scale), int(joint_gt[person, i, 1] * scale)
                 type = i
                 if type != -1:
@@ -135,7 +101,7 @@ def draw_detection(img, joint_det, joint_gt, fname=None):
         raise NotImplementedError
 
 
-def draw_poses(img: [torch.tensor, np.array], persons, fname=None):
+def draw_poses(img: [torch.tensor, np.array], persons, fname=None, output_size=128.0):
     """
 
     :param img:
@@ -144,8 +110,7 @@ def draw_poses(img: [torch.tensor, np.array], persons, fname=None):
     :return:
     """
     img = to_numpy(img)
-    assert img.shape[0] == 512
-    assert img.shape[1] == 512
+    assert img.shape[0] == 512 or img.shape[1] == 512
 
     if len(persons) == 0:
         fig = plt.figure()
@@ -164,11 +129,13 @@ def draw_poses(img: [torch.tensor, np.array], persons, fname=None):
     colors_joints = np.arange(0, 179, np.ceil(179 / 17), dtype=np.float)
     colors_joints[1::2] = colors_joints[-2::-2] # swap some colors to have clearer distinction between similar joint types
     # image to 8bit hsv (i dont know what hsv values opencv expects in 32bit case=)
-    img = img * 255.0
-    img = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_RGB2HSV)
+    if img.dtype != np.uint8:
+        img = img * 255.0
+        img = img.astype(np.uint8)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
     assert len(colors) == len(persons)
     for person in range(len(persons)):
-        scale = 512.0 / 128.0
+        scale = 512.0 / output_size
         color = (colors[person], 255., 255)
         valid_joints = persons[person, :, 2] > 0
         t = persons[person, valid_joints]
@@ -193,7 +160,7 @@ def draw_poses(img: [torch.tensor, np.array], persons, fname=None):
         raise NotImplementedError
 
 
-def draw_clusters(img: [torch.tensor, np.array], joints, joint_connections, fname=None):
+def draw_clusters(img: [torch.tensor, np.array], joints, joint_connections, fname=None, output_size=128.0):
     """
 
     :param img:
@@ -202,8 +169,7 @@ def draw_clusters(img: [torch.tensor, np.array], joints, joint_connections, fnam
     :return:
     """
     img = to_numpy(img)
-    assert img.shape[0] == 512
-    assert img.shape[1] == 512
+    assert img.shape[0] == 512 or img.shape[1] == 512
 
     from scipy.sparse import csr_matrix
     from scipy.sparse.csgraph import connected_components
@@ -224,11 +190,14 @@ def draw_clusters(img: [torch.tensor, np.array], joints, joint_connections, fnam
     colors_person = np.arange(0, 179, np.ceil(179 / num_cc))
     colors_joints = np.arange(0, 179, np.ceil(179 / 17), dtype=np.float)
     colors_joints[1::2] = colors_joints[-2::-2] # swap some colors to have clearer distinction between similar joint types
-    img = img * 255.0
-    img = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_RGB2HSV)
+
+    if img.dtype != np.uint8:
+        img = img * 255.0
+        img = img.astype(np.uint8)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
 
     color_i = 0
-    scale = 512.0 / 128.0
+    scale = 512.0 / output_size
     for i in range(n_components):
         person_joints = joints[person_labels == i]
         if len(person_joints) == 1:
@@ -315,7 +284,7 @@ def graph_cluster_to_persons(joints, joint_connections):
 def num_non_detected_points(joint_det, keypoints, threshold, use_gt):
 
     person_idx_gt, joint_idx_gt = keypoints[0, :, :, 2].nonzero(as_tuple=True)
-    joints_gt = keypoints[0, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
+    joints_gt = keypoints[0, person_idx_gt, joint_idx_gt, :2].round().long()
     joints_gt_loc = torch.cat([joints_gt, joint_idx_gt.unsqueeze(1)], 1)
     distance = torch.norm(joints_gt_loc[:, None, :2] - joint_det[:, :2].float(), dim=2)
 
@@ -331,3 +300,32 @@ def num_non_detected_points(joint_det, keypoints, threshold, use_gt):
     cost = np.sum(distance[sol[0], sol[1]])
     num_miss_detections = cost // 100000
     return num_miss_detections, len(person_idx_gt)
+
+
+def adjust(ans, det):
+    for people_id, i in enumerate(ans):
+        for joint_id, joint in enumerate(i):
+            if joint[2] > 0:
+                y, x = joint[0], joint[1]# joint[0:2]
+                xx, yy = int(x), int(y)
+                # print(batch_id, joint_id, det[batch_id].shape)
+                tmp = det[joint_id]
+                if tmp[xx, min(yy + 1, tmp.shape[1] - 1)] > tmp[xx, max(yy - 1, 0)]:
+                    y += 0.25
+                else:
+                    y -= 0.25
+
+                if tmp[min(xx + 1, tmp.shape[0] - 1), yy] > tmp[max(0, xx - 1), yy]:
+                    x += 0.25
+                else:
+                    x -= 0.25
+                ans[people_id, joint_id, 1] = x + 0.5
+                ans[people_id, joint_id, 0] = y + 0.5
+    return ans
+
+
+def to_tensor(device, *args):
+    out = []
+    for a in args:
+        out.append(torch.from_numpy(a).to(device).unsqueeze(0))
+    return out

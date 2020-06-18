@@ -44,18 +44,18 @@ def cluster_graph(graph, method, complete=True):
     # Updating the graph is only necessary for incomplete graphs --> Averages edge values
     input_edge_matrix = extract_edge_matrix(graph, update=not complete)
 
-    if method is 'RD':
+    if method == 'RD':
         if not complete:
             print(f'The clustering method \'{method}\' only works for complete graphs. Therefore, the method for complete graphs is used.')
 
         # Note: One could make a function that rounds an incomplete graph, but it wouldn't really make sense if it
         #       is an undirected graph because the same edge might get a different value depending on the direction.
         output_edge_matrix = cluster_round_complete(input_edge_matrix)
-    elif method is 'KL':
+    elif method == 'KL':
         output_edge_matrix = cluster_andres_graph(graph, andres_graph_wrapper.cluster_KL, complete)
-    elif method is 'GAEC':
+    elif method == 'GAEC':
         output_edge_matrix = cluster_andres_graph(graph, andres_graph_wrapper.cluster_GAEC, complete)
-    elif method is 'MUT':
+    elif method == 'MUT':
         output_edge_matrix = cluster_andres_graph(graph, andres_graph_wrapper.cluster_MUT, complete)
 
     # Overwrite existing edges in graph with the values in output_edge_matrix

@@ -1,10 +1,11 @@
 import torch
 from torch.utils.data import DataLoader
-from CocoKeypoints import CocoKeypoints
+from data import CocoKeypoints_hg
+from config import get_config, update_config
 import numpy as np
 import pickle
-import Models.PoseEstimation.PoseEstimation as pose
-from Models.MessagePassingNetwork.VanillaMPN import default_config, VanillaMPN
+from Models import get_pose_model
+from Models.MessagePassingNetwork.VanillaMPNNew import default_config, VanillaMPN
 from torch_geometric.utils import recall, accuracy, precision, f1_score
 from torch.utils.tensorboard import SummaryWriter
 import os
@@ -24,15 +25,15 @@ def create_train_validation_split(data_root, batch_size, mini=False):
             train_ids, valid_ids = pickle.load(open(tv_split_name, "rb"))
             print(set(train_ids).intersection(set(valid_ids)))
             assert len(set(train_ids).intersection(set(valid_ids))) == 0
-            train = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=train_ids)
-            valid = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=valid_ids)
+            train = CocoKeypoints_hg(data_root, mini=True, seed=0, mode="train", img_ids=train_ids)
+            valid = CocoKeypoints_hg(data_root, mini=True, seed=0, mode="train", img_ids=valid_ids)
 
             return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8), \
                    DataLoader(valid, batch_size=1, num_workers=8)
     else:
         raise NotImplementedError
 
-
+"""
 def load_checkpoint(path, model_class, model_config, device):
     model = pose.load_model(path, model_class, model_config, device)
     model.to(device)
@@ -42,13 +43,14 @@ def load_checkpoint(path, model_class, model_config, device):
 
     optimizer = torch.optim.Adam(model.parameters())
     optimizer.load_state_dict(state_dict["optimizer_state_dict"])
-    #"""
+   
     scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 60)
     if "lr_scheduler_state_dict" in state_dict:
         scheduler.load_state_dict(state_dict["lr_scheduler_state_dict"])
-    # """
+    
 
     return model, optimizer, state_dict["epoch"], scheduler
+"""
 
 
 def make_train_func(model, optimizer, **kwargs):
@@ -77,8 +79,8 @@ def make_train_func(model, optimizer, **kwargs):
                 label_mask = label_mask if kwargs["use_label_mask"] else None
                 batch_index = batch_index if kwargs["use_batch_index"] else None
 
-                local_loss = model.loss(pred, edge_labels, reduction=kwargs["loss_reduction"],
-                                        pos_weight=None, mask=label_mask, batch_index=batch_index)
+                local_loss = model.mpn_loss(pred, edge_labels, reduction=kwargs["loss_reduction"],
+                                            pos_weight=None, mask=label_mask, batch_index=batch_index)
 
                 num_edges_in_batch += len(edge_labels)
                 # in case of loss_reduction="sum" the scaling is done at the gradient directly
@@ -116,12 +118,12 @@ def make_train_func(model, optimizer, **kwargs):
             label_mask = label_mask if kwargs["use_label_mask"] else None
             batch_index = batch_index if kwargs["use_batch_index"] else None
 
-            loss = model.loss(preds, edge_labels, reduction="mean", mask=label_mask, batch_index=batch_index)
+            loss = model.mpn_loss(preds, edge_labels, reduction="mean", mask=label_mask, batch_index=batch_index)
             loss.backward()
             optimizer.step()
             loss = loss.item()
 
-        return preds[-1], edge_labels, loss
+        return preds, edge_labels, loss
 
     return func
 
@@ -133,19 +135,26 @@ def main():
     torch.manual_seed(seed)
 
     ##########################################################
+    config_name = "model_29"
+    config = get_config()
+    config = update_config(config, f"../experiments/train/{config_name}.yaml")
+
+    """
     dataset_path = "../../storage/user/kistern/coco"
     pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
     model_path = None  # "../log/PoseEstimationBaseline/13/pose_estimation.pth"
+    """
 
-    log_dir = "../log/PoseEstimationBaseline/Real/24_1"
-    model_save_path = f"{log_dir}/pose_estimation.pth"
-    os.makedirs(log_dir, exist_ok=True)
-    writer = SummaryWriter(log_dir)
+    # log_dir = "../log/PoseEstimationBaseline/Real/24_5"
+    # model_save_path = f"{log_dir}/pose_estimation.pth"
+    os.makedirs(config.LOG_DIR, exist_ok=True)
+    writer = SummaryWriter(config.LOG_DIR)
 
-    learn_rate = 3e-4
-    hr_learn_rate = 3e-8
-    num_epochs = 100
-    batch_size = 8  # 16 is pretty much largest possible batch size
+    # learn_rate = 3e-4
+    # hr_learn_rate = 3e-8
+    # num_epochs = 100
+    # batch_size = 8  # 16 is pretty much largest possible batch size
+    """
     config = pose.default_config
     config["message_passing"] = VanillaMPN
     config["message_passing_config"] = default_config
@@ -154,6 +163,9 @@ def main():
     config["message_passing_config"]["edge_feature_dim"] = 64
     config["message_passing_config"]["node_feature_dim"] = 64
     config["message_passing_config"]["steps"] = 10
+    config["message_passing_config"]["skip"] = True
+    config["message_passing_config"]["edge_from_node"] = True
+    #config["message_passing_config"]["bn"] = True
 
     config["cheat"] = False
     config["use_gt"] = False
@@ -166,18 +178,21 @@ def main():
     config["matching_radius"] = 0.1
     config["inclusion_radius"] = 0.75
     config["num_aux_steps"] = 1  # default is 1: only the last
+    """
 
-    end_to_end = False  # this also enables batching simulation where the gradient is accumulated for multiple batches
-    loss_reduction = "mean"  # default is "mean"
+    # end_to_end = False  # this also enables batching simulation where the gradient is accumulated for multiple batches
+    # loss_reduction = "mean"  # default is "mean"
 
-    use_label_mask = True
-    use_batch_index = False
+    # use_label_mask = True
+    # use_batch_index = False
 
     ##########################################################
-    if config["use_gt"]:
-        assert use_label_mask  # this ensures that images with no "persons"/clusters do not contribute to the loss
+    if not config.MODEL.GC.USE_GT:
+        assert config.TRAIN.USE_LABEL_MASK  # this ensures that images with no "persons"/clusters do not contribute to the loss
     print("Load model")
+    """
     if model_path is not None:
+        raise 
         model, optimizer, start_epoch, scheduler = load_checkpoint(model_path,
                                                         pose.PoseEstimationBaseline, config, device)
         start_epoch += 1
@@ -196,19 +211,39 @@ def main():
 
         scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [60, 150], 0.1)
         start_epoch = 0
-    print("Load dataset")
-    train_loader, valid_loader = create_train_validation_split(dataset_path, batch_size=batch_size, mini=True)
+    """
+    model = get_pose_model(config, device)
+    if config.TRAIN.END_TO_END:
+        model.freeze_backbone(partial=True)
+        optimizer = torch.optim.Adam([{"params": model.mpn.parameters(), "lr": config.TRAIN.LR},
+                                      {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR}])
+    else:
+        model.freeze_backbone(partial=False)
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR)
+    scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, config.TRAIN.LR_STEP, config.TRAIN.LR_FACTOR)
+    model.to(device)
 
-    update_model = make_train_func(model, optimizer, use_batch_index=use_batch_index, use_label_mask=use_label_mask,
-                                   device=device, end_to_end=end_to_end, batch_size=batch_size,
-                                   loss_reduction=loss_reduction)
+    if config.TRAIN.CONTINUE != "":
+        state_dict = torch.load(config.TRAIN.CONTINUE)
+        model.load_state_dict(state_dict["model_state_dict"])
+        optimizer.load_state_dict(state_dict["optimizer_state_dict"])
+        scheduler.load_state_dict(state_dict["lr_scheduler_state_dict"])
+
+    print("Load dataset")
+    train_loader, valid_loader = create_train_validation_split(config.DATASET.ROOT, batch_size=config.TRAIN.BATCH_SIZE,
+                                                               mini=True)
+
+    update_model = make_train_func(model, optimizer, use_batch_index=config.TRAIN.USE_BATCH_INDEX,
+                                   use_label_mask=config.TRAIN.USE_LABEL_MASK, device=device,
+                                   end_to_end=config.TRAIN.END_TO_END, batch_size=config.TRAIN.BATCH_SIZE,
+                                   loss_reduction=config.TRAIN.LOSS_REDUCTION)
 
     print("#####Begin Training#####")
     epoch_len = len(train_loader)
-    for epoch in range(num_epochs):
+    for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.END_EPOCH):
         model.train()
         for i, batch in enumerate(train_loader):
-            iter = i + (epoch_len * (start_epoch + epoch))
+            iter = i + (epoch_len * epoch)
 
             pred, edge_labels, loss = update_model(batch)
 
@@ -249,9 +284,9 @@ def main():
                 factors = factors.to(device)
                 _, preds, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
 
-                label_mask = label_mask if use_label_mask else None
-                loss = model.loss(preds, edge_labels, reduction="mean", mask=label_mask)
-                result = preds[-1].sigmoid().squeeze()
+                label_mask = label_mask if config.TRAIN.USE_LABEL_MASK else None
+                loss = model.mpn_loss(preds, edge_labels, reduction="mean", mask=label_mask)
+                result = preds.sigmoid().squeeze()
                 result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
 
                 valid_loss.append(loss.item())
@@ -259,21 +294,21 @@ def main():
                 valid_f1.append(f1_score(result, edge_labels, 2)[1])
                 valid_prec.append(precision(result, edge_labels, 2)[1])
                 valid_recall.append(recall(result, edge_labels, 2)[1])
-        print(f"Epoch: {epoch + start_epoch}, loss:{np.mean(valid_loss):6f}, "
+        print(f"Epoch: {epoch}, loss:{np.mean(valid_loss):6f}, "
               f"Accuracy: {np.mean(valid_acc)}, "
               f"Precision: {np.mean(valid_prec)}")
         scheduler.step()
 
-        writer.add_scalar("Loss/valid", np.mean(valid_loss), epoch + start_epoch)
-        writer.add_scalar("Metric/valid_acc", np.mean(valid_acc), epoch + start_epoch)
-        writer.add_scalar("Metric/valid_f1:", np.mean(valid_f1), epoch + start_epoch)
-        writer.add_scalar("Metric/valid_prec:", np.mean(valid_prec), epoch + start_epoch)
-        writer.add_scalar("Metric/valid_recall:", np.mean(valid_recall), epoch + start_epoch)
-        torch.save({"epoch": epoch + start_epoch,
+        writer.add_scalar("Loss/valid", np.mean(valid_loss), epoch)
+        writer.add_scalar("Metric/valid_acc", np.mean(valid_acc), epoch)
+        writer.add_scalar("Metric/valid_f1:", np.mean(valid_f1), epoch)
+        writer.add_scalar("Metric/valid_prec:", np.mean(valid_prec), epoch)
+        writer.add_scalar("Metric/valid_recall:", np.mean(valid_recall), epoch)
+        torch.save({"epoch": epoch,
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "lr_scheduler_state_dict": scheduler.state_dict()
-                    }, model_save_path)
+                    }, config.MODEL.PRETRAINED)
     writer.close()
 
 

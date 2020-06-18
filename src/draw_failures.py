@@ -2,61 +2,66 @@ import os
 import pickle
 import torch
 import numpy as np
-from torch_geometric.utils import dense_to_sparse, f1_score
+import torchvision
+from torch_geometric.utils import f1_score
 from tqdm import tqdm
+from config import get_config, update_config
 
-from CocoKeypoints import CocoKeypoints
-import Models.PoseEstimation.PoseEstimation as pose
-from Models.MessagePassingNetwork.VanillaMPN import VanillaMPN, default_config
-from Utils.Utils import draw_detection, draw_poses, pred_to_person
-from Models.PoseEstimation.PoseEstimation import load_model
+from data import CocoKeypoints_hg, CocoKeypoints_hr
+from Utils import draw_detection, draw_poses, pred_to_person, to_tensor
+from Utils.transformations import NormalizeInverse
+from Models import get_pose_model
 import matplotlib
 matplotlib.use("Agg")
 
 
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() and False else torch.device("cpu")
-    dataset_path = "../../storage/user/kistern/coco"
     ######################################
-    mini = True
-    sample_ids = False
+    config_name = "model_29"
+    config = get_config()
+    config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
-    model_name = "24"
-    model_path = f"../log/PoseEstimationBaseline/Real/{model_name}/pose_estimation.pth"
-    config = pose.default_config
-    config["message_passing"] = VanillaMPN
-    config["message_passing_config"] = default_config
-    config["message_passing_config"]["aggr"] = "max"
-    config["message_passing_config"]["edge_input_dim"] = 2 + 17
-    config["message_passing_config"]["edge_feature_dim"] = 64
-    config["message_passing_config"]["node_feature_dim"] = 64
-    config["message_passing_config"]["steps"] = 10
-
-    config["cheat"] = False
-    config["use_gt"] = False
-    config["use_focal_loss"] = True
-    config["use_neighbours"] = False
-    config["mask_crowds"] = True
-    config["detect_threshold"] = 0.005  # default was 0.007
-    config["edge_label_method"] = 4
-    config["inclusion_radius"] = 0.75
-    config["matching_radius"] = 0.1
-    config["mpn_graph_type"] = "knn"
     img_ids_to_use = [84015, 84381, 117772, 237976, 281133, 286645, 505421]
 
     ######################################
     # set is used, "train" means validation set corresponding to the mini train set is used )
-    modus = "train" if mini else "valid"  # decides which validation set to use. "valid" means the coco2014 validation
-    if modus == "train":
+    if config.TEST.SPLIT == "mini":
         train_ids, valid_ids = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))
         assert len(set(train_ids).intersection(set(valid_ids))) == 0
-        eval_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
+        eval_set = CocoKeypoints_hg(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=valid_ids)
+    elif config.TEST.SPLIT == "mini_real":
+        train_ids, valid_ids = pickle.load(open("tmp/mini_real_train_valid_split_1.p", "rb"))
+        assert len(set(train_ids).intersection(set(valid_ids))) == 0
+        eval_set = CocoKeypoints_hg(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids)
+    elif config.TEST.SPLIT == "princeton":
+        _, valid_ids = pickle.load(open("tmp/princeton_split.p", "rb"))
+        eval_set = CocoKeypoints_hg(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=valid_ids)
+    elif config.TEST.SPLIT == "coco_17_mini":
+        _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
+        eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
+                                    output_size=256)
     else:
         raise NotImplementedError
-    if sample_ids:
-        img_ids_to_use = np.random.choice(eval_set.img_ids, 100, replace=False)
 
-    model = load_model(model_path, pose.PoseEstimationBaseline, pose.default_config, device).to(device)
+    if config.MODEL.KP == "hourglass":
+        transforms = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.ToTensor(),
+            ]
+        )
+    else:
+        transforms = torchvision.transforms.Compose(
+            [
+                torchvision.transforms.ToTensor(),
+                torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            ]
+        )
+
+    model = get_pose_model(config, device)
+    state_dict = torch.load(config.MODEL.PRETRAINED)
+    model.load_state_dict(state_dict["model_state_dict"])
+    model.to(device)
     model.eval()
 
     # search for the best/worst samples and draw the prediction/gt
@@ -74,9 +79,11 @@ def main():
             img_id = eval_set.img_ids[i]
             if img_id not in img_ids_to_use:
                 continue
-            imgs, masks, keypoints, factors = eval_set.get_tensor(i, device)
+            img, masks, keypoints, factors = eval_set[i]
+            img_transformed = transforms(img).to(device)[None]
+            masks, keypoints, factors = to_tensor(device, masks, keypoints, factors)
             num_persons_gt = np.count_nonzero(keypoints[0, :, :, 2].sum(axis=1))
-            pred, joint_det, edge_index, edge_labels, _, _ = model(imgs, keypoints, masks, factors, with_logits=False)
+            _, pred, joint_det, edge_index, edge_labels, _, _ = model(img_transformed, keypoints, masks, factors, with_logits=False)
 
             result = pred.squeeze()
             result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
@@ -93,11 +100,11 @@ def main():
                 saving_cause = SavingCause(f1=f1_s, additional_p=num_persons_det > num_persons_gt,
                                            missing_p=num_persons_det < num_persons_gt, mutants=mutants)
                 image_to_draw.append(
-                    (eval_set.img_ids[i], imgs.squeeze(), persons_pred, joint_det, keypoints, saving_cause))
+                    (eval_set.img_ids[i], img, persons_pred, joint_det, keypoints, saving_cause))
 
         # draw images
         # best image
-        output_dir = f"tmp/output_{model_name}"
+        output_dir = f"tmp/output_{config_name}"
         os.makedirs(output_dir, exist_ok=True)
         for samples in image_to_draw:
             img_id, img, persons, joint_det, keypoints, saving_cause = samples

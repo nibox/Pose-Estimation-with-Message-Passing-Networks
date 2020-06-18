@@ -8,31 +8,32 @@ import cv2
 import pickle
 import os
 
-from Utils.Utils import kpt_affine, get_transform, factor_affine
+from Utils.transformations import kpt_affine, factor_affine, get_transform
 
 
 class CocoKeypoints(Dataset):
 
     def __init__(self, path, mini=False, input_size=512, output_size=128, mode="train", seed=0, filter_empty=True,
-                 img_ids=None):
+                 img_ids=None, year=14, transforms=None):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
         self.root_path = path
         # todo deal with different setups and with the different splits
-        ann_path = f"{self.root_path}/annotations/person_keypoints_{mode}2014.json"
+        ann_path = f"{self.root_path}/annotations/person_keypoints_{mode}20{year}.json"
         self.coco = COCO(ann_path)
         self.input_size = input_size
         self.output_size = output_size
+
         self.max_num_people = 30  # from github code
         assert mode in ["train", "val"]
-        self.data_dir ="train2014" if mode == "train" else "val2014"
+        self.data_dir =f"train20{year}" if mode == "train" else f"val20{year}"
 
         self.cat_ids = self.coco.getCatIds(catNms=["person"])
         self.img_ids = img_ids if img_ids is not None else self.coco.getImgIds(catIds=self.cat_ids)
         assert len(self.img_ids) == len(set(self.img_ids))
         if filter_empty and img_ids is None:
-            filtered_ids_fname = f"tmp/usable_ids_{mode}.p"
+            filtered_ids_fname = f"tmp/usable_ids_{mode}_{year}.p"
             cached = os.path.exists(filtered_ids_fname) and True
             if cached:
                 print("loading cached filtered image ids")
@@ -59,9 +60,11 @@ class CocoKeypoints(Dataset):
                 pickle.dump(self.img_ids, open(filtered_ids_fname, "wb"))
 
         if mini and img_ids is None:
-            self.img_ids = np.random.choice(self.img_ids, 4000, replace=False)
-
-            assert len(self.img_ids) == len(set(self.img_ids))
+            if year == 17 and mode == "val":
+                self.img_ids = np.random.choice(self.img_ids, 500, replace=False)
+            else:
+                self.img_ids = np.random.choice(self.img_ids, 4000, replace=False)
+            assert len(self.img_ids) == len(set(self.img_ids))  # assert that the ids are unique
 
     def __getitem__(self, idx):
         img_id = int(self.img_ids[idx])  # img_ids is array of numpy.int32
@@ -116,6 +119,7 @@ class CocoKeypoints(Dataset):
         # todo random horizontal flip
         center = np.array([img_width / 2, img_height / 2])  # probably for opencv?
         scale = max(img_height, img_width) / 200
+        scale = np.array([scale, scale])
 
         dx = 0
         dy = 0
@@ -140,19 +144,15 @@ class CocoKeypoints(Dataset):
     def __len__(self):
         return len(self.img_ids)
 
+"""
     def get_tensor(self, idx, device) -> torch.tensor:
-        """
-        Method that returns the idx sample with batch_size==1
-        :param idx:
-        :return:
-        """
         img, mask, keypoints, factor_list = self[idx]
-        img = torch.from_numpy(img).to(device).unsqueeze(0)
         mask = torch.from_numpy(mask).to(device).unsqueeze(0)
         keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
         factor_list = torch.from_numpy(factor_list).to(device).unsqueeze(0)
 
         return img, mask, keypoints, factor_list
+"""
 
 
 def pack_keypoints_for_batch(keypoints: np.array, max_num_people):

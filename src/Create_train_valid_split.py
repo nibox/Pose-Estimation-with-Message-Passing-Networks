@@ -41,7 +41,7 @@ def create_train_validation_split(data_root, variant, force):
     elif variant == "real":
         raise NotImplementedError
     elif variant == "princeton":
-        tv_split_name = "tmp/princeton_split.p"
+        tv_split_name = "tmp/princeton_split_real.p"
         if os.path.exists(tv_split_name):
             print("Princeton split already exists!")
         else:
@@ -53,13 +53,26 @@ def create_train_validation_split(data_root, variant, force):
             # what follows is a bit hacky but whatever
             # hacky: mini=True,
             valid_ids = np.loadtxt("tmp/valid_id")
-            set_intersection = set(list(valid_ids)).intersection(set(list(train_ids)))
+            """set_intersection = set(list(valid_ids)).intersection(set(list(train_ids)))
             valid_ids = set(list(valid_ids)).difference(set_intersection)
             valid_ids = np.array(list(valid_ids))
             assert len(valid_ids)==500-45
             assert len(set(list(valid_ids)).intersection(set(list(train_ids)))) == 0
+            """
             train_valid_split = [train_ids, valid_ids]
             pickle.dump(train_valid_split, open(tv_split_name, "wb"))
+    elif variant == "mini_17":
+        tv_split_name = "tmp/coco_17_mini_split.p"
+        if os.path.exists(tv_split_name):
+            print("Mini dataset already exists!")
+        else:
+            print(f"Mini: Creating train validation split {tv_split_name}")
+            train_set = CocoKeypoints(data_root, mini=True, seed=0, mode="train", year=17)
+            assert len(train_set.img_ids) == len(set(train_set.img_ids))
+            valid_set = CocoKeypoints(data_root, mini=True, seed=0, mode="val", year=17)
+            train_valid_split = [train_set.img_ids, valid_set.img_ids]
+            pickle.dump(train_valid_split, open(tv_split_name, "wb"))
+
 
 def main():
     seed = 0
@@ -67,7 +80,8 @@ def main():
     torch.manual_seed(seed)
 
     dataset_path = "../../storage/user/kistern/coco"
-    split_variant = "princeton"  # mini, mini_real, real, princeton
+    split_variant = "mini_17"  # mini, mini_real, real, princeton, mini_17
+    # mini_17 contains train images from coco17 train set and validation images from coco17 valid set (all of them)
 
     create_train_validation_split(dataset_path, variant=split_variant, force=False)
 

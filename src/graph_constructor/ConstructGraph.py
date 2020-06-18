@@ -8,9 +8,7 @@ from Utils.Utils import non_maximum_suppression
 
 class NaiveGraphConstructor:
 
-    def __init__(self, scoremaps, features, joints_gt, factor_list, masks, device, use_gt, no_false_positives,
-                 use_neighbours, edge_label_method, mask_crowds, detect_threshold, matching_radius,
-                 inclusion_radius, mpn_graph_type):
+    def __init__(self, scoremaps, features, joints_gt, factor_list, masks, device, config):
         self.scoremaps = scoremaps.to(device)
         self.features = features.to(device)
         self.joints_gt = joints_gt.to(device)
@@ -19,15 +17,16 @@ class NaiveGraphConstructor:
         self.masks = masks.to(device)
         self.batch_size = scoremaps.shape[0]
         self.device = device
-        self.use_gt = use_gt
-        self.no_false_positives = no_false_positives
-        self.include_neighbouring_keypoints = use_neighbours
-        self.edge_label_method = edge_label_method
-        self.mask_crowds = mask_crowds
-        self.detect_threshold = detect_threshold
-        self.matching_radius = matching_radius  # this is for the initial matching
-        self.inclusion_radius = inclusion_radius  # this is for the neighbouring matching
-        self.mpn_graph_type = mpn_graph_type
+
+        self.use_gt = config.USE_GT
+        self.no_false_positives = config.CHEAT
+        self.edge_label_method = config.EDGE_LABEL_METHOD
+        self.include_neighbouring_keypoints = config.USE_NEIGHBOURS
+        self.mask_crowds = config.MASK_CROWDS
+        self.detect_threshold = config.DETECT_THRESHOLD if config.DETECT_THRESHOLD <= 1.5 else None
+        self.matching_radius = config.MATCHING_RADIUS   # this is for the initial matching
+        self.inclusion_radius = config.INCLUSION_RADIUS  # this is for the neighbouring matching
+        self.mpn_graph_type = config.GRAPH_TYPE
 
     def construct_graph(self):
         x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list = [], [], [], [], []
@@ -36,10 +35,13 @@ class NaiveGraphConstructor:
         num_node_list = [0]
         for batch in range(self.batch_size):
             if self.mask_crowds:
-                joint_det = joint_det_from_scoremap(self.scoremaps[batch], threshold=self.detect_threshold,
+                joint_det, joint_scores = joint_det_from_scoremap(self.scoremaps[batch], threshold=self.detect_threshold,
                                                     mask=self.masks[batch])
             else:
-                joint_det = joint_det_from_scoremap(self.scoremaps[batch], threshold=self.detect_threshold)
+                joint_det, joint_scores = joint_det_from_scoremap(self.scoremaps[batch], threshold=self.detect_threshold)
+
+            # duplicate the detections
+            # joint_det = torch.cat([joint_det, joint_det], 0)
 
             # ##############cheating#################
             # extend joint_det with joints_gt in order to have a perfect matching at train time
@@ -64,7 +66,8 @@ class NaiveGraphConstructor:
                 if self.no_false_positives:
                     joint_det = joints_gt_position
 
-            x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch], self.mpn_graph_type)
+            x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch], self.mpn_graph_type,
+                                                                 joint_scores)
 
 
             # sol maps nodes to gt joints/  gt joints to nodes and connectivity maps between gt joints
@@ -112,9 +115,10 @@ class NaiveGraphConstructor:
 
         return x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list, label_mask_list, batch_index
 
-    def _construct_mpn_graph(self, joint_det, features, graph_type):
+    def _construct_mpn_graph(self, joint_det, features, graph_type, joint_scores):
         """
 
+        :param joint_scores:
         :param joint_det: Shape: (Num_dets, 3) x, y, type,
         :param features: Shape: (C, H, W)
         :return: x (Num_dets, feature_dim), edge_attr (Num_edges, feature_dim), edge_index (2, Num_dets)
@@ -138,6 +142,8 @@ class NaiveGraphConstructor:
             edge_index = self.top_k_mpn_graph(joint_det, k=10)
         elif graph_type == "feature_knn":
             edge_index = self.feature_knn_mpn_graph(joint_det, x)
+        elif graph_type == "score_based":
+            edge_index = self.score_based_graph(joint_det, joint_scores)
         else:
             raise NotImplementedError
 
@@ -212,6 +218,25 @@ class NaiveGraphConstructor:
         edge_index = gutils.to_undirected(edge_index, len(joint_det))
         edge_index, _ = gutils.remove_self_loops(edge_index)
         return edge_index
+
+    def score_based_graph(self, joint_det, joint_scores):
+        """
+        Idea: create a fully connected graph using high scoring joints called root joints
+        (assumption is that for each person at least one joint has a high score)
+        the rest of the joint are connected to all of these root joints
+        :param joint_det:
+        :param joint_scores:
+        :return:
+        """
+        num_joints = len(joint_det)
+        _, root_joint_idx = joint_scores.topk(k=75)
+        adj_mat = torch.zeros([num_joints, num_joints], dtype=torch.long)
+        adj_mat[root_joint_idx] = 1
+        edge_index, _ = gutils.dense_to_sparse(adj_mat)
+        edge_index = gutils.to_undirected(edge_index, len(joint_det))
+        edge_index, _ = gutils.remove_self_loops(edge_index)
+
+        return edge_index.to(self.device)
 
     @staticmethod
     def remove_ambigiuous_det(joint_det, joints_gt_loc, radius):
@@ -365,7 +390,8 @@ class NaiveGraphConstructor:
         person_idx_gt, joint_idx_gt = joints_gt[:, :, 2].nonzero(as_tuple=True)
         num_joints_gt = len(person_idx_gt)
 
-        distance = (joints_gt[person_idx_gt, joint_idx_gt, :2].unsqueeze(1).round().float().clamp(0, 127) - joint_det[:, :2].float()).pow(2).sum(dim=2)
+        clamp_max = max(self.scoremaps.shape[2], self.scoremaps.shape[3])
+        distance = (joints_gt[person_idx_gt, joint_idx_gt, :2].unsqueeze(1).round().float().clamp(0, clamp_max) - joint_det[:, :2].float()).pow(2).sum(dim=2)
         factor_per_joint = factors[person_idx_gt, joint_idx_gt]
         similarity = torch.exp(-distance / factor_per_joint[:, None])
 
@@ -458,7 +484,7 @@ class NaiveGraphConstructor:
         cluster_idx_ext_2 = torch.zeros(len(a_to_clusters) + 1, device=device) - 2
         cluster_idx_ext_1[1:] = a_to_clusters
         cluster_idx_ext_2[1:] = a_to_clusters
-        b_to_clusters_1= cluster_idx_ext_1[edges_b_to_a[edges_b[0]]]
+        b_to_clusters_1 = cluster_idx_ext_1[edges_b_to_a[edges_b[0]]]
         b_to_clusters_2 = cluster_idx_ext_2[edges_b_to_a[edges_b[1]]]
         edge_labels = torch.where(torch.eq(b_to_clusters_1, b_to_clusters_2), torch.ones(num_edges_b, device=device),
                                   torch.zeros(num_edges_b, device=device))
@@ -497,15 +523,17 @@ def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
     if threshold is not None:
         scoremap = torch.where(scoremap < threshold, torch.zeros_like(scoremap), scoremap)
         joint_idx_det, joint_y, joint_x = scoremap.nonzero(as_tuple=True)
+        joint_scores = scoremap[joint_idx_det, joint_y, joint_x]
     else:
         k = 30
         scoremap_shape = scoremap.shape
-        _, indices = scoremap.view(17, -1).topk(k=k, dim=1)
-        container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.int).reshape(17, -1)
-        container[np.arange(0, 17).reshape(17, 1), indices] = 1
+        scores, indices = scoremap.view(17, -1).topk(k=k, dim=1)
+        container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.float).reshape(17, -1)
+        container[np.arange(0, 17).reshape(17, 1), indices] = scores
         container = container.reshape(scoremap_shape)
         joint_idx_det, joint_y, joint_x = container.nonzero(as_tuple=True)
+        joint_scores = container[joint_idx_det, joint_y, joint_x]
         assert len(joint_idx_det) == k * 17
 
     joint_positions_det = torch.stack([joint_x, joint_y, joint_idx_det], 1)
-    return joint_positions_det
+    return joint_positions_det, joint_scores

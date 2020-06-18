@@ -1,26 +1,13 @@
 import torch
-from CocoKeypoints import CocoKeypoints
+import torchvision
+from data import CocoKeypoints_hr
 import numpy as np
 import pickle
-from Models.PoseEstimation.UpperBound import UpperBoundModel, default_config
-from Utils.Utils import num_non_detected_points
+from config import get_config, update_config
+from Models import get_upper_bound_model
+from Utils import num_non_detected_points, to_tensor
 from tqdm import tqdm
 
-
-def load_backbone(config, device, pretrained_path=None):
-
-    def rename_key(key):
-        # assume structure is model.module.REAL_NAME
-        return ".".join(key.split(".")[2:])
-
-    model = UpperBoundModel(config)
-
-    state_dict = torch.load(pretrained_path, map_location=device)
-    state_dict_new = {rename_key(k): v for k, v in state_dict["state_dict"].items()}
-    model.backbone.load_state_dict(state_dict_new)
-    model.to(device)
-
-    return model
 
 
 def main():
@@ -29,31 +16,24 @@ def main():
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    dataset_path = "../../../storage/user/kistern/coco"
-    pretrained_path = "../../PretrainedModels/pretrained/checkpoint.pth.tar"
+    config = get_config()
+    config = update_config(config, "../experiments/upper_bound/hrnet.yaml")
 
-    ##################################
-    config = default_config
-    config["cheat"] = False
-    config["use_gt"] = False
-    config["use_focal_loss"] = True
-    config["use_neighbours"] = False
-    config["mask_crowds"] = True
-    config["detect_threshold"] = 0.005 # default was 0.007
-    config["edge_label_method"] = 4
-    config["inclusion_radius"] = 7.5
-    config["matching_radius"] = 0.1
-    config["mpn_graph_type"] = "knn"
+    transforms = torchvision.transforms.Compose(
+        [
+            torchvision.transforms.ToTensor(),
+            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ]
+    )
 
-    ##################################
-
-    model = load_backbone(config, device, pretrained_path=pretrained_path)
+    model = get_upper_bound_model(config, device=device)
     model.eval()
 
-    train_ids, valid_ids = pickle.load(open("../tmp/mini_train_valid_split_4.p", "rb"))
+    train_ids, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))
     ids = np.concatenate([train_ids, valid_ids])
     valid_ids = np.random.choice(valid_ids, 100, replace=False)
-    img_set = CocoKeypoints(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
+    img_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
+                                output_size=256)
 
     num_detections = []
     num_edges = []
@@ -63,13 +43,14 @@ def main():
     # todo number of not detected keypoints
     for i in tqdm(range(100)):  # just test the first 100 images
         # split batch
-        imgs, masks, keypoints, factors = img_set.get_tensor(i, device)
-
-        pred, joint_det, edge_index, edge_labels, _ = model(imgs, keypoints, masks, factors)
+        img, masks, keypoints, factors = img_set[i]
+        img_transformed = transforms(img).to(device)[None]
+        masks, keypoints, factors = to_tensor(device, masks, keypoints, factors)
+        _, pred, joint_det, edge_index, edge_labels, _ = model(img_transformed, keypoints, masks, factors)
         #deg.append(degree(edge_index[1], len(joint_det)).mean())
         imbalance.append(edge_labels.mean().item())
         num_non_detected, num_gt = num_non_detected_points(joint_det, keypoints, 6.0,
-                                                           config["use_gt"])
+                                                           config.MODEL.GC.USE_GT)
 
         num_detections.append(len(joint_det))
         num_edges.append(len(edge_labels))

@@ -1,0 +1,167 @@
+import os
+
+from yacs.config import CfgNode as CN
+
+_C = CN()
+
+_C.OUTPUT_DIR = ''
+_C.LOG_DIR = ''
+_C.DATA_DIR = ''
+_C.GPUS = (0,)
+_C.WORKERS = 4
+_C.PRINT_FREQ = 20
+_C.AUTO_RESUME = False
+_C.PIN_MEMORY = True
+_C.RANK = 0
+_C.VERBOSE = True
+_C.DIST_BACKEND = 'nccl'
+_C.MULTIPROCESSING_DISTRIBUTED = True
+
+
+
+_C.MODEL = CN()
+_C.MODEL.KP = "hrnet"
+_C.MODEL.PRETRAINED = ""  # means the path were the trained model is saved to and where the trained model is loaded from
+_C.MODEL.FOCAL_LOSS = True
+_C.MODEL.AUX_STEPS = 1
+# common params for Hourglass keypoint detector (for reproducibility of the old experiments)
+_C.MODEL.HG = CN()
+_C.MODEL.HG.NAME = "hourglass"
+_C.MODEL.HG.PRETRAINED = "../PretrainedModels/pretrained/checkpoint.pth.tar"
+_C.MODEL.HG.NSTACK = 4
+_C.MODEL.HG.INPUT_DIM = 256
+_C.MODEL.HG.OUTPUT_DIM = 68
+
+# common params for HRNet keypoint detector
+_C.MODEL.HRNET = CN()
+_C.MODEL.HRNET.NAME = 'pose_multi_resolution_net_v16'
+_C.MODEL.HRNET.PRETRAINED = '../PretrainedModels/pose_higher_hrnet_w32_512.pth'
+_C.MODEL.HRNET.NUM_JOINTS = 17
+_C.MODEL.HRNET.TAG_PER_JOINT = True
+_C.MODEL.HRNET.SYNC_BN = False
+
+
+# adapted from yaml file
+_C.MODEL.HRNET.LOSS = CN()
+_C.MODEL.HRNET.LOSS.NUM_STAGES = 2
+_C.MODEL.HRNET.LOSS.WITH_HEATMAPS_LOSS = (True, True)
+_C.MODEL.HRNET.LOSS.HEATMAPS_LOSS_FACTOR = (1.0, 1.0)
+_C.MODEL.HRNET.LOSS.WITH_AE_LOSS = (True, False)
+_C.MODEL.HRNET.LOSS.AE_LOSS_TYPE = 'exp'
+_C.MODEL.HRNET.LOSS.PUSH_LOSS_FACTOR = (0.001, 0.001)
+_C.MODEL.HRNET.LOSS.PULL_LOSS_FACTOR = (0.001, 0.001)
+
+_C.MODEL.HRNET.EXTRA = CN()
+_C.MODEL.HRNET.EXTRA.PRETRAINED_LAYERS = ['*']
+_C.MODEL.HRNET.EXTRA.STEM_INPLANES = 64
+_C.MODEL.HRNET.EXTRA.FINAL_CONV_KERNEL = 1
+
+_C.MODEL.HRNET.EXTRA.STAGE2 = CN()
+_C.MODEL.HRNET.EXTRA.STAGE2.NUM_MODULES = 1
+_C.MODEL.HRNET.EXTRA.STAGE2.NUM_BRANCHES = 2
+_C.MODEL.HRNET.EXTRA.STAGE2.NUM_BLOCKS = [4, 4]
+_C.MODEL.HRNET.EXTRA.STAGE2.NUM_CHANNELS = [32, 64]
+_C.MODEL.HRNET.EXTRA.STAGE2.BLOCK = 'BASIC'
+_C.MODEL.HRNET.EXTRA.STAGE2.FUSE_METHOD = 'SUM'
+
+_C.MODEL.HRNET.EXTRA.STAGE3 = CN()
+_C.MODEL.HRNET.EXTRA.STAGE3.NUM_MODULES = 4
+_C.MODEL.HRNET.EXTRA.STAGE3.NUM_BRANCHES = 3
+_C.MODEL.HRNET.EXTRA.STAGE3.NUM_BLOCKS = [4, 4, 4]
+_C.MODEL.HRNET.EXTRA.STAGE3.NUM_CHANNELS = [32, 64, 128]
+_C.MODEL.HRNET.EXTRA.STAGE3.BLOCK = 'BASIC'
+_C.MODEL.HRNET.EXTRA.STAGE3.FUSE_METHOD = 'SUM'
+
+_C.MODEL.HRNET.EXTRA.STAGE4 = CN()
+_C.MODEL.HRNET.EXTRA.STAGE4.NUM_MODULES = 3
+_C.MODEL.HRNET.EXTRA.STAGE4.NUM_BRANCHES = 4
+_C.MODEL.HRNET.EXTRA.STAGE4.NUM_BLOCKS = [4, 4, 4, 4]
+_C.MODEL.HRNET.EXTRA.STAGE4.NUM_CHANNELS = [32, 64, 128, 256]
+_C.MODEL.HRNET.EXTRA.STAGE4.BLOCK = 'BASIC'
+_C.MODEL.HRNET.EXTRA.STAGE4.FUSE_METHOD = 'SUM'
+
+_C.MODEL.HRNET.EXTRA.DECONV = CN()
+_C.MODEL.HRNET.EXTRA.DECONV.NUM_DECONVS = 1
+_C.MODEL.HRNET.EXTRA.DECONV.NUM_CHANNELS = [32]
+_C.MODEL.HRNET.EXTRA.DECONV.NUM_BASIC_BLOCKS = 4
+_C.MODEL.HRNET.EXTRA.DECONV.KERNEL_SIZE = [4]
+_C.MODEL.HRNET.EXTRA.DECONV.CAT_OUTPUT = [True]
+
+_C.MODEL.MPN = CN()
+_C.MODEL.MPN.NAME = "VanillaMPN"
+_C.MODEL.MPN.STEPS = 10
+_C.MODEL.MPN.NODE_INPUT_DIM = 128
+_C.MODEL.MPN.EDGE_INPUT_DIM = 17 + 2
+_C.MODEL.MPN.EDGE_FEATURE_DIM = 64
+_C.MODEL.MPN.NODE_FEATURE_DIM = 64
+_C.MODEL.MPN.AGGR = "max"
+_C.MODEL.MPN.SKIP = False
+
+
+# configuration for the Graph Constructor
+_C.MODEL.GC = CN()
+_C.MODEL.GC.NAME = "NaiveGraphConstructor"
+_C.MODEL.GC.CHEAT = False
+_C.MODEL.GC.USE_GT = False
+_C.MODEL.GC.USE_NEIGHBOURS = False
+_C.MODEL.GC.EDGE_LABEL_METHOD = 4
+_C.MODEL.GC.MASK_CROWDS = True
+_C.MODEL.GC.DETECT_THRESHOLD = 0.005
+_C.MODEL.GC.MATCHING_RADIUS = 0.1
+_C.MODEL.GC.INCLUSION_RADIUS = 0.75
+_C.MODEL.GC.GRAPH_TYPE = "knn"
+_C.MODEL.GC.CC_METHOD = "GAEC"
+
+# parameters for Upper Bound model (to calculate the upper bound of the constructed labels)
+_C.UB = CN()
+_C.UB.KP = "hrnet"
+_C.UB.GC = "NaiveGraphConstructor"
+_C.UB.NUM_EVAL = 500
+_C.UB.ADJUST = True
+_C.UB.SPLIT = "coco_17_mini"
+
+_C.TEST = CN()
+_C.TEST.SPLIT = "coco_17_mini"
+_C.TEST.NUM_EVAL = 500
+_C.TEST.ADJUST = True
+
+# DATASET and preprocessing related params
+_C.DATASET = CN()
+_C.DATASET.ROOT = '../../storage/user/kistern/coco'
+_C.DATASET.MAX_NUM_PEOPLE = 30
+_C.DATASET.SCALING_TYPE = "short"
+
+# train
+_C.TRAIN = CN()
+
+_C.TRAIN.LR_FACTOR = 0.1
+_C.TRAIN.LR_STEP = [60, 150]
+_C.TRAIN.LR = 3e-4
+_C.TRAIN.KP_LR = 1e-5
+
+_C.TRAIN.START_EPOCH = 0
+_C.TRAIN.END_EPOCH = 100
+_C.TRAIN.CONTINUE = ""
+
+_C.TRAIN.BATCH_SIZE = 8
+_C.TRAIN.END_TO_END = False
+_C.TRAIN.LOSS_REDUCTION = "mean"
+_C.TRAIN.USE_LABEL_MASK = True
+_C.TRAIN.USE_BATCH_INDEX = False
+
+
+
+def get_config():
+    return _C.clone()
+
+
+def update_config(cfg, config_file):
+    cfg.defrost()
+    cfg.merge_from_file(config_file)
+    cfg.freeze()
+    return cfg
+
+if __name__ == '__main__':
+    import sys
+    with open(sys.argv[1], 'w') as f:
+        print(_C, file=f)

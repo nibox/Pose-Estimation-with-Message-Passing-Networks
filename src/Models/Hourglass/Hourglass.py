@@ -61,8 +61,8 @@ class PoseNet(nn.Module):
         self.heatmapLoss = HeatmapLoss()
 
     def forward(self, imgs):
-        x = imgs.permute(0, 3, 1, 2).contiguous()
-        x = self.pre(x)
+        # x = imgs.permute(0, 3, 1, 2).contiguous()
+        x = self.pre(imgs)
         preds = []
         feature = None
         early_features = x.clone()
@@ -83,3 +83,9 @@ class PoseNet(nn.Module):
         detection_loss = torch.stack(detection_loss, dim=1)
 
         return detection_loss
+
+
+def hg_process_output(output):
+    scoremaps = output[0]
+    scoremaps = scoremaps[:, -1, :17]
+    return scoremaps, output[1]

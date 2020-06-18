@@ -53,44 +53,42 @@ class VanillaMPLayer2(MessagePassing):
 
 class VanillaMPN2(torch.nn.Module):
 
-    def __init__(self, steps, node_input_dim, edge_input_dim, node_feature_dim, edge_feature_dim,
-                 node_hidden_dim=256,
-                 edge_hidden_dim=512, aggr="add"):
+    def __init__(self, config, node_hidden_dim=128, edge_hidden_dim=128):
         super().__init__()
-        self.mpn = nn.ModuleList([VanillaMPLayer2(node_feature_dim, node_feature_dim,
-                                                  edge_feature_dim, edge_feature_dim, aggr=aggr),
-                                  VanillaMPLayer2(node_feature_dim, node_feature_dim,
-                                                  edge_feature_dim, edge_feature_dim, aggr=aggr),
-                                  VanillaMPLayer2(node_feature_dim, node_feature_dim,
-                                                  edge_feature_dim, edge_feature_dim, aggr=aggr),
-                                  VanillaMPLayer2(node_feature_dim, node_feature_dim,
-                                                  edge_feature_dim, edge_feature_dim, aggr=aggr)])
+        self.mpn = nn.ModuleList([VanillaMPLayer2(config.NODE_FEATURE_DIM, config.NODE_FEATURE_DIM,
+                                                  config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR),
+                                  VanillaMPLayer2(config.NODE_FEATURE_DIM, config.NODE_FEATURE_DIM,
+                                                  config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR),
+                                  VanillaMPLayer2(config.NODE_FEATURE_DIM, config.NODE_FEATURE_DIM,
+                                                  config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR),
+                                  VanillaMPLayer2(config.NODE_FEATURE_DIM, config.NODE_FEATURE_DIM,
+                                                  config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR)])
 
         non_linearity = nn.ReLU()
-        self.edge_embedding = nn.Sequential(nn.Linear(edge_input_dim, edge_input_dim),  # 2 + 17*17,
+        self.edge_embedding = nn.Sequential(nn.Linear(config.EDGE_INPUT_DIM, config.EDGE_INPUT_DIM),  # 2 + 17*17,
                                             non_linearity,
-                                            nn.BatchNorm1d(edge_input_dim),
-                                            nn.Linear(edge_input_dim, edge_input_dim),
+                                            nn.BatchNorm1d(config.EDGE_INPUT_DIM),
+                                            nn.Linear(config.EDGE_INPUT_DIM, config.EDGE_INPUT_DIM),
                                             non_linearity,
-                                            nn.BatchNorm1d(edge_input_dim),
-                                            nn.Linear(edge_input_dim, edge_hidden_dim),
+                                            nn.BatchNorm1d(config.EDGE_INPUT_DIM),
+                                            nn.Linear(config.EDGE_INPUT_DIM, edge_hidden_dim),
                                             non_linearity,
                                             nn.BatchNorm1d(edge_hidden_dim),
-                                            nn.Linear(edge_hidden_dim, edge_feature_dim))
-        self.node_embedding = nn.Sequential(nn.Linear(node_input_dim, node_input_dim),
+                                            nn.Linear(edge_hidden_dim, config.EDGE_FEATURE_DIM))
+        self.node_embedding = nn.Sequential(nn.Linear(config.NODE_INPUT_DIM, config.NODE_INPUT_DIM),
                                             non_linearity,
-                                            nn.BatchNorm1d(node_input_dim),
-                                            nn.Linear(node_input_dim, node_input_dim),
+                                            nn.BatchNorm1d(config.NODE_INPUT_DIM),
+                                            nn.Linear(config.NODE_INPUT_DIM, config.NODE_INPUT_DIM),
                                             non_linearity,
-                                            nn.BatchNorm1d(node_input_dim),
-                                            nn.Linear(node_input_dim, node_hidden_dim),
+                                            nn.BatchNorm1d(config.NODE_INPUT_DIM),
+                                            nn.Linear(config.NODE_INPUT_DIM, node_hidden_dim),
                                             non_linearity,
                                             nn.BatchNorm1d(node_hidden_dim),
-                                            nn.Linear(node_hidden_dim, node_feature_dim))
+                                            nn.Linear(node_hidden_dim, config.NODE_FEATURE_DIM))
 
-        self.classification = nn.Sequential(nn.Linear(edge_feature_dim, 1))
+        self.classification = nn.Sequential(nn.Linear(config.EDGE_FEATURE_DIM, 1))
 
-        self.steps = steps
+        self.steps = config.STEPS
 
     def forward(self, x, edge_attr, edge_index):
         node_features = self.node_embedding(x)
@@ -98,5 +96,5 @@ class VanillaMPN2(torch.nn.Module):
 
         for mpn in self.mpn:
             node_features, edge_features = mpn(node_features, edge_features, edge_index)
-
         return self.classification(edge_features)
+

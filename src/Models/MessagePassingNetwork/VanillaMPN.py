@@ -91,34 +91,33 @@ class VanillaMPLayer(MessagePassing):
 
 class VanillaMPN(torch.nn.Module):
 
-    def __init__(self, steps, node_input_dim, edge_input_dim, node_feature_dim, edge_feature_dim,
-                 aggr, skip=False):
+    def __init__(self, config):
         super().__init__()
         # self.mpn = nn.ModuleList([VanillaMPLayer(node_feature_dim, edge_feature_dim) for i in range(steps)])
-        self.use_skip_connections = skip
-        self.mpn = VanillaMPLayer(node_feature_dim, edge_feature_dim, aggr=aggr, skip=skip)
+        self.use_skip_connections = config.SKIP
+        self.mpn = VanillaMPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR, skip=config.SKIP)
 
         non_linearity = nn.ReLU()
-        self.edge_embedding = nn.Sequential(nn.Linear(edge_input_dim, 32),  # 2 + 17*17,
+        self.edge_embedding = nn.Sequential(nn.Linear(config.EDGE_INPUT_DIM, 32),  # 2 + 17*17,
                                             non_linearity,
                                             nn.Linear(32, 64),
                                             non_linearity,
                                             nn.Linear(64, 64),
                                             non_linearity,
-                                            nn.Linear(64, edge_feature_dim))
-        self.node_embedding = nn.Sequential(nn.Linear(node_input_dim, 128),
+                                            nn.Linear(64, config.EDGE_FEATURE_DIM))
+        self.node_embedding = nn.Sequential(nn.Linear(config.NODE_INPUT_DIM, 128),
                                             non_linearity,
                                             nn.Linear(128, 64),
                                             non_linearity,
-                                            nn.Linear(64, node_feature_dim))
+                                            nn.Linear(64, config.NODE_FEATURE_DIM))
 
-        self.classification = nn.Sequential(nn.Linear(edge_feature_dim, 64),
+        self.classification = nn.Sequential(nn.Linear(config.EDGE_FEATURE_DIM, 64),
                                             non_linearity,
                                             nn.Linear(64, 32),
                                             non_linearity,
                                             nn.Linear(32, 1))
 
-        self.steps = steps
+        self.steps = config.STEPS
 
     def forward(self, x, edge_attr, edge_index):
         node_features = self.node_embedding(x)
@@ -127,13 +126,11 @@ class VanillaMPN(torch.nn.Module):
         node_features_initial = node_features
         edge_features_initial = edge_features
 
-        preds = []
         for i in range(self.steps):
             if self.use_skip_connections:
                 node_features = torch.cat([node_features_initial, node_features], dim=1)
                 edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
 
             node_features, edge_features = self.mpn(node_features, edge_features, edge_index)
-            preds.append(self.classification(edge_features).T)
 
-        return torch.cat(preds)
+        return self.classification(edge_features)

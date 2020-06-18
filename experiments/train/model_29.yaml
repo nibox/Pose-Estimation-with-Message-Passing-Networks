@@ -1,0 +1,123 @@
+DATASET:
+  ROOT: '../../storage/user/kistern/coco'
+  MAX_NUM_PEOPLE: 30
+  SCALING_TYPE: short_long
+
+LOG_DIR: "../log/PoseEstimationBaseline/Real/29"
+
+MODEL:
+  KP: hourglass
+  PRETRAINED: "../log/PoseEstimationBaseline/Real/29/pose_estimation_continue.pth"
+  FOCAL_LOSS: True
+  AUX_STEPS: 1
+  HG:
+    NAME: hourglass
+    PRETRAINED: "../PretrainedModels/pretrained/checkpoint.pth.tar"
+    NSTACK: 4
+    INPUT_DIM: 256
+    OUTPUT_DIM: 68
+  HRNET:
+    LOSS:
+      NUM_STAGES: 2
+      AE_LOSS_TYPE: exp
+      WITH_AE_LOSS: [True, False]
+      PUSH_LOSS_FACTOR: [0.001, 0.001]
+      PULL_LOSS_FACTOR: [0.001, 0.001]
+      WITH_HEATMAPS_LOSS: [True, True]
+      HEATMAPS_LOSS_FACTOR: [1.0, 1.0]
+    EXTRA:
+      FINAL_CONV_KERNEL: 1
+      PRETRAINED_LAYERS: ['*']
+      STEM_INPLANES: 64
+      STAGE2:
+        NUM_MODULES: 1
+        NUM_BRANCHES: 2
+        BLOCK: BASIC
+        NUM_BLOCKS:
+        - 4
+        - 4
+        NUM_CHANNELS:
+        - 32
+        - 64
+        FUSE_METHOD: SUM
+      STAGE3:
+        NUM_MODULES: 4
+        NUM_BRANCHES: 3
+        BLOCK: BASIC
+        NUM_BLOCKS:
+        - 4
+        - 4
+        - 4
+        NUM_CHANNELS:
+        - 32
+        - 64
+        - 128
+        FUSE_METHOD: SUM
+      STAGE4:
+        NUM_MODULES: 3
+        NUM_BRANCHES: 4
+        BLOCK: BASIC
+        NUM_BLOCKS:
+        - 4
+        - 4
+        - 4
+        - 4
+        NUM_CHANNELS:
+        - 32
+        - 64
+        - 128
+        - 256
+        FUSE_METHOD: SUM
+      DECONV:
+        NUM_DECONVS: 1
+        NUM_CHANNELS:
+        - 32
+        KERNEL_SIZE:
+        - 4
+        NUM_BASIC_BLOCKS: 4
+        CAT_OUTPUT:
+        - True
+    NAME: pose_higher_hrnet
+    NUM_JOINTS: 17
+    PRETRAINED: '../PretrainedModels/pose_higher_hrnet_w32_512.pth'
+    TAG_PER_JOINT: True
+  MPN:
+    NAME: VanillaMPN
+    STEPS: 10
+    NODE_INPUT_DIM: 128
+    EDGE_INPUT_DIM: 17 + 2
+    NODE_FEATURE_DIM: 64
+    EDGE_FEATURE_DIM: 64
+    AGGR: max
+    SKIP: False
+  GC:
+    NAME: naive_graph_constructor
+    CHEAT: False
+    USE_GT: False
+    USE_NEIGHBOURS: True
+    EDGE_LABEL_METHOD: 4
+    MASK_CROWDS: True
+    DETECT_THRESHOLD: 2.0
+    MATCHING_RADIUS: 0.1
+    INCLUSION_RADIUS: 0.75
+    GRAPH_TYPE: score_based
+    CC_METHOD: GAEC
+TEST:
+  NUM_EVAL: 500
+  SPLIT: mini
+  ADJUST: True
+
+TRAIN:
+  LR: 3e-4
+  LR_FACTOR: 0.1
+  LR_STEP:
+    - 60
+    - 150
+  BATCH_SIZE: 8
+  START_EPOCH: 70
+  END_EPOCH: 120
+  END_TO_END: False
+  USE_LABEL_MASK: True
+  USE_BATCH_INDEX: False
+  LOSS_REDUCTION: mean
+  CONTINUE: "../log/PoseEstimationBaseline/Real/29/pose_estimation.pth"
