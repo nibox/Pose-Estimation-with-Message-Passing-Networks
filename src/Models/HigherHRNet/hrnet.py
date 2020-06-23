@@ -250,6 +250,7 @@ class PoseHigherResolutionNet(nn.Module):
     def __init__(self, cfg, **kwargs):
         self.inplanes = 64
         extra = cfg.MODEL.HRNET.EXTRA
+        self.feature_fusion = cfg.MODEL.HRNET.FEATURE_FUSION
         super(PoseHigherResolutionNet, self).__init__()
 
         # stem net
@@ -502,7 +503,8 @@ class PoseHigherResolutionNet(nn.Module):
 
         final_outputs = []
         x = y_list[0]
-        y = self.final_layers[0](x)
+        features_small = x
+        y = self.final_layers[0](x)  # y is heatmap 128 by ...
         final_outputs.append(y)
 
         for i in range(self.num_deconvs):
@@ -513,7 +515,21 @@ class PoseHigherResolutionNet(nn.Module):
             y = self.final_layers[i+1](x)
             final_outputs.append(y)
 
-        return final_outputs
+        features_big = x
+        features_small = torch.nn.functional.interpolate(
+            features_small,
+            size=(features_big.shape[2], features_big.shape[3]),
+            mode='bilinear',
+            align_corners=False
+        )
+        if self.feature_fusion == "pool":
+            features = torch.max(features_small, features_big)
+        elif self.feature_fusion =="avg":
+            features = (features_big + features_small) / 2
+        else:
+            raise NotImplementedError
+
+        return final_outputs, features
 
     def init_weights(self, pretrained):
         for m in self.modules():
@@ -557,7 +573,7 @@ def get_pose_net(cfg, is_train, **kwargs):
     return model
 
 def hr_process_output(output):
-    scoremap_1, scoremap_2 = output
+    (scoremap_1, scoremap_2), features = output
 
     scoremap_1 = torch.nn.functional.interpolate(
         scoremap_1,
@@ -565,7 +581,8 @@ def hr_process_output(output):
         mode='bilinear',
         align_corners=False
     )
-    # scoremaps = (scoremap_2 + scoremap_1[:, :17]) / 2
-    scoremaps = scoremap_2
-    features = torch.zeros(1, 256, scoremaps.shape[2], scoremaps.shape[3], dtype=torch.float32)
+    scoremaps = (scoremap_2 + scoremap_1[:, :17]) / 2
+    # scoremaps = torch.max(scoremap_1[:, :17], scoremap_2)
+    # scoremaps = scoremap_2
+    #features = torch.zeros(1, 256, scoremaps.shape[2], scoremaps.shape[3], dtype=torch.float32)
     return scoremaps, features

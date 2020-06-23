@@ -22,8 +22,10 @@ class CocoKeypoints(Dataset):
         # todo deal with different setups and with the different splits
         ann_path = f"{self.root_path}/annotations/person_keypoints_{mode}20{year}.json"
         self.coco = COCO(ann_path)
-        self.input_size = input_size
-        self.output_size = output_size
+        self.transforms = transforms
+        assert self.transforms is not None
+        # self.input_size = input_size
+        # self.output_size = output_size
 
         self.max_num_people = 30  # from github code
         assert mode in ["train", "val"]
@@ -109,10 +111,9 @@ class CocoKeypoints(Dataset):
                 if len(inst_mask.shape) == 3:
                     inst_mask = maskapi.decode(encoding).sum(axis=2)
                 mask += inst_mask
-
-
         mask = (mask < 0.5).astype(np.float32)
 
+        """
         # img processing
         # todo random scaling
         # todo random rotation
@@ -138,8 +139,18 @@ class CocoKeypoints(Dataset):
 
         factors = factor_affine(factors, mat_mask)
         factors = pack_for_batch(factors, self.max_num_people)
+        """
+        mask_list = [mask.copy()]
+        keypoint_list = [keypoints.copy()]
+        heatmaps = []
 
-        return img, mask, keypoints, factors
+        if self.transforms is not None:
+            img, mask, keypoint_list, factors = self.transforms(img, mask_list, keypoint_list, factors)
+
+        factors = pack_for_batch(factors, 30)
+        keypoints = pack_for_batch(keypoint_list[-1], 30)
+
+        return img, heatmaps, mask, keypoints, factors
 
     def __len__(self):
         return len(self.img_ids)

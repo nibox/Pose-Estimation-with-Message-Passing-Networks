@@ -1,12 +1,21 @@
 DATASET:
   ROOT: '../../storage/user/kistern/coco'
   MAX_NUM_PEOPLE: 30
-  SCALING_TYPE: long
-LOG_DIR: "../log/PoseEstimationBaseline/Real/24_6"
+  SCALING_TYPE: short_eval
+  # training data augmentation
+  MAX_ROTATION : 0
+  MIN_SCALE : 1.0
+  MAX_SCALE : 1.0
+  MAX_TRANSLATE : 40
+  FLIP : 0.0
+
+LOG_DIR: "../log/PoseEstimationBaseline/Real/30_1"
+
 MODEL:
-  KP: hourglass
-  PRETRAINED: "../log/PoseEstimationBaseline/Real/24_6/pose_estimation.pth"
-  KP_OUTPUT_DIM: 256 # 256 for hg, 32 for HR
+  KP: hrnet
+  PRETRAINED: "../log/PoseEstimationBaseline/Real/30_1/pose_estimation.pth"
+  AUX_STEPS: 1
+  KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
     NAME: hourglass
     PRETRAINED: "../PretrainedModels/pretrained/checkpoint.pth.tar"
@@ -78,6 +87,7 @@ MODEL:
     NUM_JOINTS: 17
     PRETRAINED: '../PretrainedModels/pose_higher_hrnet_w32_512.pth'
     TAG_PER_JOINT: True
+    FEATURE_FUSION: avg
   MPN:
     NAME: VanillaMPN
     STEPS: 10
@@ -91,23 +101,23 @@ MODEL:
     NAME: naive_graph_constructor
     CHEAT: False
     USE_GT: False
-    USE_NEIGHBOURS: True
+    USE_NEIGHBOURS: False
     EDGE_LABEL_METHOD: 4
-    MASK_CROWDS: True
-    DETECT_THRESHOLD: 0.005
+    MASK_CROWDS: False
+    DETECT_THRESHOLD: 2.0
     MATCHING_RADIUS: 0.1
     INCLUSION_RADIUS: 0.75
-    GRAPH_TYPE: knn
+    GRAPH_TYPE: score_based
     CC_METHOD: GAEC
   LOSS:
     USE_FOCAL: True
 TEST:
   NUM_EVAL: 500
   SPLIT: mini
-  ADJUST: False
+  ADJUST: True
 
 TRAIN:
-  SPLIT: mini
+  SPLIT: coco_17_mini
   LR: 3e-4
   LR_FACTOR: 0.1
   LR_STEP:
@@ -120,3 +130,4 @@ TRAIN:
   USE_LABEL_MASK: True
   USE_BATCH_INDEX: False
   LOSS_REDUCTION: mean
+  CONTINUE: ""

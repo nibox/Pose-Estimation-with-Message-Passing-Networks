@@ -1,5 +1,4 @@
 from ..MessagePassingNetwork.VanillaMPN import VanillaMPN
-from Utils.Utils import FocalLoss
 from Models.HigherHRNet import get_pose_net, hr_process_output
 from Models.Hourglass import PoseNet, hg_process_output
 from graph_constructor import get_graph_constructor
@@ -88,10 +87,8 @@ class PoseEstimationBaseline(nn.Module):
         if config["use_focal_loss"]:
             self.focal = FocalLoss(logits=True)
         """
-        if config.MODEL.FOCAL_LOSS:
-            self.focal = FocalLoss(logits=True)
         self.pool = nn.MaxPool2d(3, 1, 1)  # not sure if used
-        self.feature_gather = nn.Conv2d(256, 128, 3, 1, 1, bias=True)
+        self.feature_gather = nn.Conv2d(config.MODEL.KP_OUTPUT_DIM, config.MODEL.MPN.NODE_INPUT_DIM, 3, 1, 1, bias=True)
         self.num_aux_steps = config.MODEL.AUX_STEPS
 
     def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None, factors=None, with_logits=True) -> torch.tensor:
@@ -132,16 +129,17 @@ class PoseEstimationBaseline(nn.Module):
 
         return scoremaps, preds, joint_det, edge_index, edge_labels, label_mask, batch_index
 
+    """
     def mpn_loss(self, outputs, targets, reduction, with_logits=True, mask=None, batch_index=None) -> torch.Tensor:
 
         if self.focal is not None:
             assert with_logits
-            """
+            
             for i in range(self.num_aux_steps):
                 loss += self.focal(outputs[idx_offset + i], targets, reduction, mask, batch_index)
             
             return loss / self.num_aux_steps
-            """
+            
             loss = 0.0
             idx_offset = self.mpn.steps - self.num_aux_steps
             loss = self.focal(outputs, targets, reduction, mask, batch_index)
@@ -149,14 +147,11 @@ class PoseEstimationBaseline(nn.Module):
 
         else:
             raise NotImplementedError
+    """
 
     def freeze_backbone(self, partial):
-        if partial:  # todo not the best implementation
-            for param in self.backbone.pre.parameters():
-                param.requires_grad = False
-        else:
-            for param in self.backbone.parameters():
-                param.requires_grad = False
+        for param in self.backbone.parameters():
+            param.requires_grad = False
 
 
 """

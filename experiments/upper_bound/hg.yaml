@@ -1,7 +1,7 @@
 DATASET:
   ROOT: '../../storage/user/kistern/coco'
   MAX_NUM_PEOPLE: 30
-  SCALING_TYPE: short_long
+  SCALING_TYPE: long
 
 MODEL:
   HG:

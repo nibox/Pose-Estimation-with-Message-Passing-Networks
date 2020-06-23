@@ -1,11 +1,9 @@
 import cv2
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import numpy as np
 from matplotlib import pyplot as plt
 from torch_geometric.utils import dense_to_sparse
-from torch_scatter import scatter_mean
 
 from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
 from Utils.dataset_utils import Graph
@@ -24,36 +22,6 @@ def to_numpy(array: [torch.Tensor, np.array]):
         return array.cpu().numpy()
     else:
         return array
-
-
-class FocalLoss(nn.Module):
-    def __init__(self, alpha=1, gamma=2, logits=False):
-        super(FocalLoss, self).__init__()
-        self.alpha = alpha
-        self.gamma = gamma
-        self.logits = logits
-
-    def forward(self, inputs, targets, reduction, mask=None, batch_index=None):
-        if self.logits:
-            BCE_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduce=False)
-        else:
-            BCE_loss = F.binary_cross_entropy(inputs, targets, reduce=False)
-        pt = torch.exp(-BCE_loss)
-        F_loss = self.alpha * (1 - pt) ** self.gamma * BCE_loss
-        if mask is not None:
-            F_loss = F_loss * mask
-
-        if reduction is not None:
-            if batch_index is not None and reduction == "mean":
-                F_loss = scatter_mean(F_loss, batch_index)
-                assert len(F_loss) == batch_index.max() + 1
-                return torch.mean(F_loss)
-            elif reduction == "mean" and batch_index is None:
-                return torch.mean(F_loss)
-            elif reduction == "sum":
-                return torch.sum(F_loss)
-        else:
-            return F_loss
 
 
 def draw_detection(img, joint_det, joint_gt, fname=None, output_size=128.0):
@@ -329,3 +297,11 @@ def to_tensor(device, *args):
     for a in args:
         out.append(torch.from_numpy(a).to(device).unsqueeze(0))
     return out
+
+
+def to_device(device, *args):
+    out = []
+    for a in args:
+        out.append(a.to(device).unsqueeze(0))
+    return out
+

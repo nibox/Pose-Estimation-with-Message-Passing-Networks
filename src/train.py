@@ -1,20 +1,22 @@
 import torch
 from torch.utils.data import DataLoader
-from data import CocoKeypoints_hg
+from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
+from Utils.transforms import transforms_hr_eval, transforms_hr_train, transforms_hg_eval
+from Utils.loss import MPNLossFactory
 from config import get_config, update_config
 import numpy as np
 import pickle
 from Models import get_pose_model
-from Models.MessagePassingNetwork.VanillaMPNNew import default_config, VanillaMPN
 from torch_geometric.utils import recall, accuracy, precision, f1_score
 from torch.utils.tensorboard import SummaryWriter
 import os
 
 
-def create_train_validation_split(data_root, batch_size, mini=False):
+def create_train_validation_split(config):
+    batch_size = config.TRAIN.BATCH_SIZE
     # todo connect the preprosseing with the model selection (input size etc)
     # todo add validation
-    if mini:
+    if config.TRAIN.SPLIT == "mini":
         print("Using mini dataset")
         tv_split_name = "tmp/mini_train_valid_split_4.p"
         if not os.path.exists(tv_split_name):
@@ -25,11 +27,23 @@ def create_train_validation_split(data_root, batch_size, mini=False):
             train_ids, valid_ids = pickle.load(open(tv_split_name, "rb"))
             print(set(train_ids).intersection(set(valid_ids)))
             assert len(set(train_ids).intersection(set(valid_ids))) == 0
-            train = CocoKeypoints_hg(data_root, mini=True, seed=0, mode="train", img_ids=train_ids)
-            valid = CocoKeypoints_hg(data_root, mini=True, seed=0, mode="train", img_ids=valid_ids)
+            transforms = transforms_hg_eval(config)
+            train = CocoKeypoints_hg(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=train_ids, transforms=transforms)
+            valid = CocoKeypoints_hg(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=valid_ids, transforms=transforms)
 
             return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8), \
                    DataLoader(valid, batch_size=1, num_workers=8)
+    elif config.TRAIN.SPLIT == "coco_17_mini":
+        train_ids, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
+        heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
+        transforms = transforms_hr_train(config)
+        train = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=train_ids, year=17,
+                                    transforms=transforms, heatmap_generator=heatmap_generator)
+        valid = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
+                                 transforms=transforms, heatmap_generator=heatmap_generator)
+        return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8), \
+               DataLoader(valid, batch_size=1, num_workers=8)
+
     else:
         raise NotImplementedError
 
@@ -53,7 +67,7 @@ def load_checkpoint(path, model_class, model_config, device):
 """
 
 
-def make_train_func(model, optimizer, **kwargs):
+def make_train_func(model, optimizer, loss_func, **kwargs):
     def func(batch):
         if kwargs["end_to_end"]:
             optimizer.zero_grad()
@@ -107,9 +121,9 @@ def make_train_func(model, optimizer, **kwargs):
         else:
             optimizer.zero_grad()
             # split batch
-            imgs, masks, keypoints, factors = batch
+            imgs, _, masks, keypoints, factors = batch
             imgs = imgs.to(kwargs["device"])
-            masks = masks.to(kwargs["device"])
+            masks = masks[-1].to(kwargs["device"])
             keypoints = keypoints.to(kwargs["device"])
             factors = factors.to(kwargs["device"])
 
@@ -118,7 +132,7 @@ def make_train_func(model, optimizer, **kwargs):
             label_mask = label_mask if kwargs["use_label_mask"] else None
             batch_index = batch_index if kwargs["use_batch_index"] else None
 
-            loss = model.mpn_loss(preds, edge_labels, reduction="mean", mask=label_mask, batch_index=batch_index)
+            loss = loss_func(preds, edge_labels, label_mask=label_mask)
             loss.backward()
             optimizer.step()
             loss = loss.item()
@@ -135,7 +149,7 @@ def main():
     torch.manual_seed(seed)
 
     ##########################################################
-    config_name = "model_29"
+    config_name = "model_24_7"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
@@ -220,6 +234,7 @@ def main():
     else:
         model.freeze_backbone(partial=False)
         optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR)
+        loss_func = MPNLossFactory(config)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, config.TRAIN.LR_STEP, config.TRAIN.LR_FACTOR)
     model.to(device)
 
@@ -230,10 +245,9 @@ def main():
         scheduler.load_state_dict(state_dict["lr_scheduler_state_dict"])
 
     print("Load dataset")
-    train_loader, valid_loader = create_train_validation_split(config.DATASET.ROOT, batch_size=config.TRAIN.BATCH_SIZE,
-                                                               mini=True)
+    train_loader, valid_loader = create_train_validation_split(config)
 
-    update_model = make_train_func(model, optimizer, use_batch_index=config.TRAIN.USE_BATCH_INDEX,
+    update_model = make_train_func(model, optimizer, loss_func, use_batch_index=config.TRAIN.USE_BATCH_INDEX,
                                    use_label_mask=config.TRAIN.USE_LABEL_MASK, device=device,
                                    end_to_end=config.TRAIN.END_TO_END, batch_size=config.TRAIN.BATCH_SIZE,
                                    loss_reduction=config.TRAIN.LOSS_REDUCTION)
@@ -277,15 +291,15 @@ def main():
         with torch.no_grad():
             for batch in valid_loader:
                 # split batch
-                imgs, masks, keypoints, factors = batch
+                imgs, _, masks, keypoints, factors = batch
                 imgs = imgs.to(device)
-                masks = masks.to(device)
+                masks = masks[-1].to(device)
                 keypoints = keypoints.to(device)
                 factors = factors.to(device)
                 _, preds, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
 
                 label_mask = label_mask if config.TRAIN.USE_LABEL_MASK else None
-                loss = model.mpn_loss(preds, edge_labels, reduction="mean", mask=label_mask)
+                loss = loss_func(preds, edge_labels, label_mask)
                 result = preds.sigmoid().squeeze()
                 result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
 

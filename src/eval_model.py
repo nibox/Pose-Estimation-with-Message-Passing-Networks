@@ -10,6 +10,7 @@ from data import CocoKeypoints_hg, CocoKeypoints_hr
 from Utils import pred_to_person, num_non_detected_points, adjust, to_tensor
 from Models.PoseEstimation import get_pose_model
 from Utils.transformations import reverse_affine_map
+from Utils.transforms import transforms_hg_eval, transforms_hr_eval
 
 
 def specificity(pred, target, num_classes):
@@ -108,35 +109,13 @@ def main():
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
-    """
-    model_path = "../log/PoseEstimationBaseline/Real/24/pose_estimation.pth"
-    config = pose.default_config
-    config["message_passing"] = VanillaMPN
-    config["message_passing_config"] = default_config
-    config["message_passing_config"]["aggr"] = "max"
-    config["message_passing_config"]["edge_input_dim"] = 2 + 17
-    config["message_passing_config"]["edge_feature_dim"] = 64
-    config["message_passing_config"]["node_feature_dim"] = 64
-    config["message_passing_config"]["steps"] = 10
-
-    config["cheat"] = False
-    config["use_gt"] = False
-    config["use_focal_loss"] = True
-    config["use_neighbours"] = False
-    config["mask_crowds"] = True
-    config["detect_threshold"] = 0.005  # default was 0.007
-    config["mpn_graph_type"] = "knn"
-    config["edge_label_method"] = 4
-    config["matching_radius"] = 0.1
-    config["inclusion_radius"] = 0.75
-    # set is used, "train" means validation set corresponding to the mini train set is used )
-    ######################################
-    """
-
     if config.TEST.SPLIT == "mini":
         train_ids, valid_ids = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))
         assert len(set(train_ids).intersection(set(valid_ids))) == 0
-        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
+
+        transforms = transforms_hg_eval(config)
+        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="train",
+                                    img_ids=valid_ids, transforms=transforms)
     elif config.TEST.SPLIT == "mini_real":
         train_ids, valid_ids = pickle.load(open("tmp/mini_real_train_valid_split_1.p", "rb"))
         assert len(set(train_ids).intersection(set(valid_ids))) == 0
@@ -153,21 +132,6 @@ def main():
     model.load_state_dict(state_dict["model_state_dict"])
     model.to(device)
     model.eval()
-
-
-    if config.MODEL.KP == "hourglass":
-        transforms = torchvision.transforms.Compose(
-            [
-                torchvision.transforms.ToTensor(),
-            ]
-        )
-    else:
-        transforms = torchvision.transforms.Compose(
-            [
-                torchvision.transforms.ToTensor(),
-                torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ]
-        )
 
     # baseline : predicting full connections
     # baseline: upper bound
@@ -193,10 +157,10 @@ def main():
                 continue
             eval_ids.append(eval_set.img_ids[i])
 
-            img, masks, keypoints, factors = eval_set[i]
-            img_transformed = transforms(img).to(device)[None]
-            masks, keypoints, factors = to_tensor(device, masks, keypoints, factors)
-            scoremaps, pred, joint_det, edge_index, edge_labels, _, _ = model(img_transformed, keypoints, masks, factors, with_logits=True)
+            img, _, masks, keypoints, factors = eval_set[i]
+            img = img.to(device)[None]
+            masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
+            scoremaps, pred, joint_det, edge_index, edge_labels, _, _ = model(img, keypoints, masks, factors, with_logits=True)
 
             pred = pred.sigmoid().squeeze()
             result = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
@@ -236,10 +200,10 @@ def main():
                 if i in skip_list:
                     continue
                 eval_ids_real.append(eval_set.img_ids[i])
-                img, masks, keypoints, factors = eval_set[i]
-                img_transformed = transforms(img).to(device)[None]
-                masks, keypoints, factors = to_tensor(device, masks, keypoints, factors)
-                scoremaps, pred, joint_det, edge_index, _, _, _ = model(img_transformed, keypoints, masks, factors, with_logits=True)
+                img, _, masks, keypoints, factors = eval_set[i]
+                img = img.to(device)[None]
+                masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
+                scoremaps, pred, joint_det, edge_index, _, _, _ = model(img, keypoints, masks, factors, with_logits=True)
 
                 pred = pred.sigmoid().squeeze()
 

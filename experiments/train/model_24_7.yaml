@@ -2,10 +2,10 @@ DATASET:
   ROOT: '../../storage/user/kistern/coco'
   MAX_NUM_PEOPLE: 30
   SCALING_TYPE: long
-LOG_DIR: "../log/PoseEstimationBaseline/Real/24_6"
+LOG_DIR: "../log/PoseEstimationBaseline/Real/24_7"
 MODEL:
   KP: hourglass
-  PRETRAINED: "../log/PoseEstimationBaseline/Real/24_6/pose_estimation.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real/24_7/pose_estimation.pth"
   KP_OUTPUT_DIM: 256 # 256 for hg, 32 for HR
   HG:
     NAME: hourglass
@@ -101,6 +101,7 @@ MODEL:
     CC_METHOD: GAEC
   LOSS:
     USE_FOCAL: True
+    FOCAL_GAMMA: 4.0
 TEST:
   NUM_EVAL: 500
   SPLIT: mini

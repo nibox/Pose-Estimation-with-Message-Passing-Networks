@@ -3,8 +3,9 @@ import torchvision
 import numpy as np
 import pickle
 from config import get_config, update_config
-from data import CocoKeypoints_hg, CocoKeypoints_hr
-from Utils import draw_detection, draw_clusters, draw_poses, pred_to_person, graph_cluster_to_persons, to_tensor
+from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
+from Utils.transforms import transforms_hr_train, transforms_hr_eval, transforms_hg_eval
+from Utils import draw_detection, draw_clusters, draw_poses, pred_to_person, graph_cluster_to_persons, to_device, to_tensor
 from Models import get_upper_bound_model
 import matplotlib;matplotlib.use("Agg")
 
@@ -25,6 +26,8 @@ def main():
             torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ]
     )
+    transforms, transforms_inv = transforms_hr_eval(config)
+
 
     id_subset = [471913, 139124, 451781, 437856, 543272, 423250, 304336, 499425, 128905, 389185, 108762, 10925, 464037,
                  121938, 389815, 1145, 1431, 4309, 5028, 5294, 6777, 7650, 10130, 401534]
@@ -34,7 +37,9 @@ def main():
     model.eval()
 
     train_ids, _ = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))  # mini_train_valid_split_4 old one
-    img_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=train_ids, year=17, output_size=256)
+    heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
+    img_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=train_ids, year=17,
+                               transforms=transforms, heatmap_generator=heatmap_generator)
 
     imgs_without_det = 0
     for i in range(3500):  # just test the first 100 images
@@ -45,10 +50,10 @@ def main():
                 continue
         print(f"Iter : {i}")
         print(f"img_idx: {img_set.img_ids[i]}")
-        img, masks, keypoints, factor_list  = img_set[i]
-        img_transformed = transforms(img).to(device)[None]
-        masks, keypoints, factor_list = to_tensor(device, masks, keypoints, factor_list)
-        _, pred, joint_det, edge_index, _, label_mask = model(img_transformed, keypoints, masks, factor_list)
+        img, _, masks, keypoints, factor_list = img_set[i]
+        mask, keypoints, factor_list = to_tensor(device, masks[-1], keypoints, factor_list)
+        img = img.to(device)[None]
+        _, pred, joint_det, edge_index, _, label_mask = model(img, keypoints, mask, factor_list)
 
         # construct poses
         persons_pred_cc, _ = pred_to_person(joint_det, edge_index, pred, config.MODEL.GC.CC_METHOD)
@@ -62,19 +67,20 @@ def main():
         joint_det = joint_det.cpu().numpy().squeeze()
         keypoints = keypoints.cpu().numpy().squeeze()
 
+        img = np.array(transforms_inv(img.cpu().squeeze()))
         draw_detection(img, joint_det, keypoints,
                        fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_det.png",
-                       output_size=img_set.output_size)
+                       output_size=256)
         draw_poses(img, keypoints, fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt.png",
-                   output_size=img_set.output_size)
+                   output_size=256)
         if (pred==1).sum() == 0:
             imgs_without_det += 1
             continue
         draw_clusters(img, joint_det, sparse_sol_gt, fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt_full.png",
-                      output_size=img_set.output_size)
+                      output_size=256)
         # draw_poses(imgs, persons_pred_cc, fname=f"../tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_cc.png")
         draw_poses(img, persons_pred_gt, fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt_labels.png",
-                   output_size=img_set.output_size)
+                   output_size=256)
 
         # """
     print(f"num images without detection :{imgs_without_det}")

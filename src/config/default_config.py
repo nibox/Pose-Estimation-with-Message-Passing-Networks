@@ -22,8 +22,12 @@ _C.MULTIPROCESSING_DISTRIBUTED = True
 _C.MODEL = CN()
 _C.MODEL.KP = "hrnet"
 _C.MODEL.PRETRAINED = ""  # means the path were the trained model is saved to and where the trained model is loaded from
-_C.MODEL.FOCAL_LOSS = True
+_C.MODEL.LOSS = CN()
+_C.MODEL.LOSS.USE_FOCAL = True
+_C.MODEL.LOSS.FOCAL_ALPHA = 1.0
+_C.MODEL.LOSS.FOCAL_GAMMA = 2.0
 _C.MODEL.AUX_STEPS = 1
+_C.MODEL.KP_OUTPUT_DIM = 32  # 256 for hg, 32 for HR
 # common params for Hourglass keypoint detector (for reproducibility of the old experiments)
 _C.MODEL.HG = CN()
 _C.MODEL.HG.NAME = "hourglass"
@@ -39,6 +43,9 @@ _C.MODEL.HRNET.PRETRAINED = '../PretrainedModels/pose_higher_hrnet_w32_512.pth'
 _C.MODEL.HRNET.NUM_JOINTS = 17
 _C.MODEL.HRNET.TAG_PER_JOINT = True
 _C.MODEL.HRNET.SYNC_BN = False
+_C.MODEL.HRNET.INPUT_SIZE = 512
+_C.MODEL.HRNET.OUTPUT_SIZE = [128, 256]
+_C.MODEL.HRNET.FEATURE_FUSION = "avg"
 
 
 # adapted from yaml file
@@ -112,6 +119,21 @@ _C.MODEL.GC.INCLUSION_RADIUS = 0.75
 _C.MODEL.GC.GRAPH_TYPE = "knn"
 _C.MODEL.GC.CC_METHOD = "GAEC"
 
+# DATASET and preprocessing related params
+_C.DATASET = CN()
+_C.DATASET.ROOT = '../../storage/user/kistern/coco'
+_C.DATASET.MAX_NUM_PEOPLE = 30
+_C.DATASET.SCALING_TYPE = "short"
+# training data augmentation
+_C.DATASET.MAX_ROTATION = 30
+_C.DATASET.MIN_SCALE = 0.75
+_C.DATASET.MAX_SCALE = 1.25
+_C.DATASET.SCALE_TYPE = 'short'
+_C.DATASET.MAX_TRANSLATE = 40
+_C.DATASET.INPUT_SIZE = 512
+_C.DATASET.OUTPUT_SIZE = [128, 256]
+_C.DATASET.FLIP = 0.5
+
 # parameters for Upper Bound model (to calculate the upper bound of the constructed labels)
 _C.UB = CN()
 _C.UB.KP = "hrnet"
@@ -125,15 +147,11 @@ _C.TEST.SPLIT = "coco_17_mini"
 _C.TEST.NUM_EVAL = 500
 _C.TEST.ADJUST = True
 
-# DATASET and preprocessing related params
-_C.DATASET = CN()
-_C.DATASET.ROOT = '../../storage/user/kistern/coco'
-_C.DATASET.MAX_NUM_PEOPLE = 30
-_C.DATASET.SCALING_TYPE = "short"
 
 # train
 _C.TRAIN = CN()
 
+_C.TRAIN.SPLIT = "coco_17_mini"
 _C.TRAIN.LR_FACTOR = 0.1
 _C.TRAIN.LR_STEP = [60, 150]
 _C.TRAIN.LR = 3e-4

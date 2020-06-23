@@ -13,8 +13,8 @@ from Utils.transformations import kpt_affine, factor_affine, get_transform, get_
 
 class CocoKeypoints(Dataset):
 
-    def __init__(self, path, mini=False, input_size=512, output_size=128, mode="train", seed=0, filter_empty=True,
-                 img_ids=None, year=14, transforms=None):
+    def __init__(self, path, mini=False, mode="train", seed=0, filter_empty=True,
+                 img_ids=None, year=14, transforms=None, heatmap_generator=None):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
@@ -22,9 +22,13 @@ class CocoKeypoints(Dataset):
         # todo deal with different setups and with the different splits
         ann_path = f"{self.root_path}/annotations/person_keypoints_{mode}20{year}.json"
         self.coco = COCO(ann_path)
-        self.input_size = input_size
-        self.output_size = output_size
         self.transforms = transforms
+        assert self.transforms is not None
+
+        assert isinstance(heatmap_generator, (list, tuple)) or heatmap_generator is None
+        self.num_scales = len(heatmap_generator) if heatmap_generator is not None else 0
+
+        self.heatmap_generator = heatmap_generator
 
         self.max_num_people = 30  # from github code
         assert mode in ["train", "val"]
@@ -98,26 +102,23 @@ class CocoKeypoints(Dataset):
         # in the code keypoints2 is created (seems to include only persons with atleast one visible keypoint)
         # not sure if it is necessary
 
-        # load mask
+        # load mask ( as in github repo)
         mask = np.zeros([img_height, img_width])
         for j in ann:
             if j["iscrowd"]:
-                assert j["num_keypoints"] == 0
+                rle = maskapi.frPyObjects(
+                    j['segmentation'], img_info['height'], img_info['width'])
+                mask += maskapi.decode(rle)
             # testing for the number of keypoints should be sufficient if the assertion above is true
-            if j["num_keypoints"] == 0:
-                encoding = maskapi.frPyObjects(j["segmentation"], img_height, img_width)
-                inst_mask = maskapi.decode(encoding)
-                if len(inst_mask.shape) == 3:
-                    inst_mask = maskapi.decode(encoding).sum(axis=2)
-                mask += inst_mask
-
+            elif j["num_keypoints"] == 0:
+                rles = maskapi.frPyObjects(
+                    j['segmentation'], img_info['height'], img_info['width'])
+                for rle in rles:
+                    mask += maskapi.decode(rle)
 
         mask = (mask < 0.5).astype(np.float32)
 
-        # img processing
-        # todo random scaling
-        # todo random rotation
-        # todo random horizontal flip
+        """
         center = np.array([img_width / 2, img_height / 2])  # probably for opencv?
         scale = max(img_height, img_width) / 200
         scale = np.array([scale, scale])
@@ -145,37 +146,47 @@ class CocoKeypoints(Dataset):
 
         factors = factor_affine(factors, mat_mask)
         factors = pack_for_batch(factors, self.max_num_people)
+        # """
+
+        mask_list = [mask.copy() for _ in range(self.num_scales)]
+        keypoint_list = [keypoints.copy() for _ in range(self.num_scales)]
+        heatmaps = []
 
         if self.transforms is not None:
-            img = self.transforms(img)
+            img, mask, keypoint_list, factors = self.transforms(img, mask_list, keypoint_list, factors)
 
-        return img, mask, keypoints, factors
+        if self.heatmap_generator is not None:
+            for scale_idx in range(self.num_scales):
+                heatmap = self.heatmap_generator[scale_idx](keypoint_list[scale_idx])
+                keypoint_list[scale_idx] = _filter_visible(keypoint_list[scale_idx], heatmap.shape[1:])
+
+                heatmaps.append(heatmap.astype(np.float32))
+                mask_list[scale_idx] = mask_list[scale_idx].astype(np.float32)
+                keypoint_list[scale_idx] = pack_for_batch(keypoint_list[scale_idx].astype(np.float32), 30)
+
+        factors = pack_for_batch(factors, 30)
+
+        return img, heatmaps, mask, keypoint_list[-1], factors
 
     def __len__(self):
         return len(self.img_ids)
-
-    def get_tensor(self, idx, device) -> torch.tensor:
-        """
-        Method that returns the idx sample with batch_size==1
-        :param idx:
-        :return:
-        """
-        img, mask, keypoints, factor_list = self[idx]
-        if self.transforms is None:  # because otherwise the img is already in the correct format
-            img = torch.from_numpy(img).to(device).unsqueeze(0)
-        else:
-            img = img.to(device).unsqueeze(0)
-        mask = torch.from_numpy(mask).to(device).unsqueeze(0)
-        keypoints = torch.from_numpy(keypoints).to(device).unsqueeze(0)
-        factor_list = torch.from_numpy(factor_list).to(device).unsqueeze(0)
-
-        return img, mask, keypoints, factor_list
 
 
 def pack_keypoints_for_batch(keypoints: np.array, max_num_people):
     out = np.zeros([max_num_people, 17, 3])
     out[:len(keypoints)] = keypoints
     return out
+
+def _filter_visible(keypoints, output_shape):
+    out_w = output_shape[1]
+    out_h = output_shape[0]
+    vis_keypoints = keypoints.copy()
+    for i in range(len(keypoints)):
+        for j in range(17):
+            x, y = keypoints[i, j, :2]
+            if x < 0 or x >= out_w or y < 0 or y >= out_h:
+                vis_keypoints[i, j] = 0.0
+    return vis_keypoints
 
 
 def pack_for_batch(array, max_num_people):
@@ -185,6 +196,43 @@ def pack_for_batch(array, max_num_people):
     out[:len(array)] = array
     return out
 
+
+class HeatmapGenerator():
+    def __init__(self, output_res, num_joints, sigma=-1):
+        self.output_res = output_res
+        self.num_joints = num_joints
+        if sigma < 0:
+            sigma = self.output_res/64
+        self.sigma = sigma
+        size = 6*sigma + 3
+        x = np.arange(0, size, 1, float)
+        y = x[:, np.newaxis]
+        x0, y0 = 3*sigma + 1, 3*sigma + 1
+        self.g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
+
+    def __call__(self, joints):
+        hms = np.zeros((self.num_joints, self.output_res, self.output_res),
+                       dtype=np.float32)
+        sigma = self.sigma
+        for p in joints:
+            for idx, pt in enumerate(p):
+                if pt[2] > 0:
+                    x, y = int(pt[0]), int(pt[1])
+                    if x < 0 or y < 0 or \
+                            x >= self.output_res or y >= self.output_res:
+                        continue
+
+                    ul = int(np.round(x - 3 * sigma - 1)), int(np.round(y - 3 * sigma - 1))
+                    br = int(np.round(x + 3 * sigma + 2)), int(np.round(y + 3 * sigma + 2))
+
+                    c, d = max(0, -ul[0]), min(br[0], self.output_res) - ul[0]
+                    a, b = max(0, -ul[1]), min(br[1], self.output_res) - ul[1]
+
+                    cc, dd = max(0, ul[0]), min(br[0], self.output_res)
+                    aa, bb = max(0, ul[1]), min(br[1], self.output_res)
+                    hms[idx, aa:bb, cc:dd] = np.maximum(
+                        hms[idx, aa:bb, cc:dd], self.g[a:b, c:d])
+        return hms
 
 if __name__ == "__main__":
     dataset_path = "../../storage/user/kistern/coco"
