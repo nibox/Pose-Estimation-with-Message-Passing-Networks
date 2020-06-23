@@ -521,9 +521,23 @@ def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
         joint_map = joint_map * mask.unsqueeze(0)
     scoremap = scoremap * joint_map
     if threshold is not None:
+        # use atleast the top 5 keypoints per type
+        k = 5
+        scoremap_shape = scoremap.shape
+        scores, indices = scoremap.view(17, -1).topk(k=k, dim=1)
+        container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.float).reshape(17, -1)
+        container[np.arange(0, 17).reshape(17, 1), indices] = scores
+        container = container.reshape(scoremap_shape)
+        top_joint_idx_det, top_joint_y, top_joint_x = container.nonzero(as_tuple=True)
+        # top_joint_scores = container[top_joint_idx_det, top_joint_y, top_joint_x]
+
         scoremap = torch.where(scoremap < threshold, torch.zeros_like(scoremap), scoremap)
         joint_idx_det, joint_y, joint_x = scoremap.nonzero(as_tuple=True)
-        joint_scores = scoremap[joint_idx_det, joint_y, joint_x]
+
+        top_joint_pos = torch.stack([top_joint_x, top_joint_y, top_joint_idx_det], 1)
+        thresh_joint_pos = torch.stack([joint_x, joint_y, joint_idx_det], 1)
+        joint_positions_det = cat_unique(top_joint_pos, thresh_joint_pos)
+        joint_scores = scoremap[joint_positions_det[:, 2], joint_positions_det[:, 1], joint_positions_det[:, 0]]
     else:
         k = 30
         scoremap_shape = scoremap.shape
@@ -535,5 +549,18 @@ def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
         joint_scores = container[joint_idx_det, joint_y, joint_x]
         assert len(joint_idx_det) == k * 17
 
-    joint_positions_det = torch.stack([joint_x, joint_y, joint_idx_det], 1)
+        joint_positions_det = torch.stack([joint_x, joint_y, joint_idx_det], 1)
     return joint_positions_det, joint_scores
+
+
+def cat_unique(tensor_1, tensor_2):
+    # tensor_1/2 have shape (N, D) D is dim of vector and N is number of vectors
+    assert len(tensor_1.shape) == 2 and len(tensor_2.shape) == 2
+    vector_dim = tensor_1.shape[1]
+    unique_elements = torch.eq(tensor_1.unsqueeze(1), tensor_2)
+    unique_elements = unique_elements.int().sum(dim=2)
+    unique_elements = unique_elements == vector_dim
+    unique_elements = unique_elements.sum(dim=0)
+    unique_elements = unique_elements == 0
+
+    return torch.cat([tensor_1, tensor_2[unique_elements]], 0)

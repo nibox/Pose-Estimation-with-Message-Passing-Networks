@@ -158,7 +158,7 @@ class CocoKeypoints(Dataset):
         if self.heatmap_generator is not None:
             for scale_idx in range(self.num_scales):
                 heatmap = self.heatmap_generator[scale_idx](keypoint_list[scale_idx])
-                keypoint_list[scale_idx] = _filter_visible(keypoint_list[scale_idx], heatmap.shape[1:])
+                keypoint_list[scale_idx] = _filter_visible(keypoint_list[scale_idx], mask[scale_idx].shape)
 
                 heatmaps.append(heatmap.astype(np.float32))
                 mask_list[scale_idx] = mask_list[scale_idx].astype(np.float32)

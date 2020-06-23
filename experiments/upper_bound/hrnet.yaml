@@ -2,6 +2,12 @@ DATASET:
   ROOT: '../../storage/user/kistern/coco'
   MAX_NUM_PEOPLE: 30
   SCALING_TYPE: short
+  # training data augmentation
+  MAX_ROTATION : 0
+  MIN_SCALE : 1.0
+  MAX_SCALE : 1.0
+  MAX_TRANSLATE : 40
+  FLIP : 0.0
 
 MODEL:
   HG:
@@ -85,16 +91,16 @@ MODEL:
     USE_GT: False
     USE_NEIGHBOURS: False
     EDGE_LABEL_METHOD: 4
-    MASK_CROWDS: False
-    DETECT_THRESHOLD: 2.0
+    MASK_CROWDS: True
+    DETECT_THRESHOLD: 0.005
     MATCHING_RADIUS: 0.1
     INCLUSION_RADIUS: 0.75
-    GRAPH_TYPE: score_based
+    GRAPH_TYPE: knn
     CC_METHOD: GAEC
 UB:
   KP: hrnet
   GC: NaiveGraphConstructor
-  NUM_EVAL: 10
+  NUM_EVAL: 500
   SPLIT: coco_17_mini
   ADJUST: True
 

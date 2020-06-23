@@ -85,19 +85,6 @@ def main():
     config = get_config()
     config = update_config(config, f"../experiments/upper_bound/{config_name}.yaml")
 
-    if config.UB.KP == "hourglass":
-        transforms = torchvision.transforms.Compose(
-            [
-                torchvision.transforms.ToTensor(),
-            ]
-        )
-    else:
-        transforms = torchvision.transforms.Compose(
-            [
-                torchvision.transforms.ToTensor(),
-                torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-            ]
-        )
 
     # set is used, "train" means validation set corresponding to the mini train set is used )
     ######################################

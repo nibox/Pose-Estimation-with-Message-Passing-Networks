@@ -42,48 +42,49 @@ def main():
                                transforms=transforms, heatmap_generator=heatmap_generator)
 
     imgs_without_det = 0
-    for i in range(3500):  # just test the first 100 images
-        # split batch
-        img_id = img_set.img_ids[i]
-        if use_subset:
-            if img_id not in id_subset:
-                continue
-        print(f"Iter : {i}")
-        print(f"img_idx: {img_set.img_ids[i]}")
-        img, _, masks, keypoints, factor_list = img_set[i]
-        mask, keypoints, factor_list = to_tensor(device, masks[-1], keypoints, factor_list)
-        img = img.to(device)[None]
-        _, pred, joint_det, edge_index, _, label_mask = model(img, keypoints, mask, factor_list)
+    with torch.no_grad():
+        for i in range(3500):  # just test the first 100 images
+            # split batch
+            img_id = img_set.img_ids[i]
+            if use_subset:
+                if img_id not in id_subset:
+                    continue
+            print(f"Iter : {i}")
+            print(f"img_idx: {img_set.img_ids[i]}")
+            img, _, masks, keypoints, factor_list = img_set[i]
+            mask, keypoints, factor_list = to_tensor(device, masks[-1], keypoints, factor_list)
+            img = img.to(device)[None]
+            _, pred, joint_det, edge_index, _, label_mask = model(img, keypoints, mask, factor_list)
 
-        # construct poses
-        persons_pred_cc, _ = pred_to_person(joint_det, edge_index, pred, config.MODEL.GC.CC_METHOD)
-        # construct solution by using only labeled edges (instead of corr clustering)
-        sparse_sol_gt = torch.stack([edge_index[0, pred == 1], edge_index[1, pred == 1]])
-        persons_pred_gt, _ = graph_cluster_to_persons(joint_det, sparse_sol_gt)  # might crash
-        print(f"Num detection: {len(joint_det)}")
-        print(f"Num edges : {len(edge_index[0])}")
-        print(f"Num active edges: {(pred==1).sum()}")
+            # construct poses
+            persons_pred_cc, _ = pred_to_person(joint_det, edge_index, pred, config.MODEL.GC.CC_METHOD)
+            # construct solution by using only labeled edges (instead of corr clustering)
+            sparse_sol_gt = torch.stack([edge_index[0, pred == 1], edge_index[1, pred == 1]])
+            persons_pred_gt, _ = graph_cluster_to_persons(joint_det, sparse_sol_gt)  # might crash
+            print(f"Num detection: {len(joint_det)}")
+            print(f"Num edges : {len(edge_index[0])}")
+            print(f"Num active edges: {(pred==1).sum()}")
 
-        joint_det = joint_det.cpu().numpy().squeeze()
-        keypoints = keypoints.cpu().numpy().squeeze()
+            joint_det = joint_det.cpu().numpy().squeeze()
+            keypoints = keypoints.cpu().numpy().squeeze()
 
-        img = np.array(transforms_inv(img.cpu().squeeze()))
-        draw_detection(img, joint_det, keypoints,
-                       fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_det.png",
+            img = np.array(transforms_inv(img.cpu().squeeze()))
+            draw_detection(img, joint_det, keypoints,
+                           fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_det.png",
+                           output_size=256)
+            draw_poses(img, keypoints, fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt.png",
                        output_size=256)
-        draw_poses(img, keypoints, fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt.png",
-                   output_size=256)
-        if (pred==1).sum() == 0:
-            imgs_without_det += 1
-            continue
-        draw_clusters(img, joint_det, sparse_sol_gt, fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt_full.png",
-                      output_size=256)
-        # draw_poses(imgs, persons_pred_cc, fname=f"../tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_cc.png")
-        draw_poses(img, persons_pred_gt, fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt_labels.png",
-                   output_size=256)
+            if (pred==1).sum() == 0:
+                imgs_without_det += 1
+                continue
+            draw_clusters(img, joint_det, sparse_sol_gt, fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt_full.png",
+                          output_size=256)
+            # draw_poses(imgs, persons_pred_cc, fname=f"../tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_cc.png")
+            draw_poses(img, persons_pred_gt, fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt_labels.png",
+                       output_size=256)
 
-        # """
-    print(f"num images without detection :{imgs_without_det}")
+            # """
+        print(f"num images without detection :{imgs_without_det}")
 
 
 if __name__ == "__main__":

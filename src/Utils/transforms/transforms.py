@@ -261,7 +261,7 @@ class HRNetMineTransformation(object):
                 center, scale, (new_width, new_height))[:2]
             mask[i] = cv2.warpAffine(
                 (mask[i]*255).astype(np.uint8), mat_output,
-                (_output_size, _output_size)
+                (new_width, new_height)
             ) / 255
 
             mask[i] = (mask[i] > 0.5).astype(np.float32)
@@ -270,7 +270,7 @@ class HRNetMineTransformation(object):
                 joints[i][:, :, 0:2], mat_output
             )
             matrices.append(mat_output)
-            factor = factor / 2
+            factor = factor * 2
 
         factors = self._affine_factors(factors, matrices[0])
 

@@ -43,8 +43,10 @@ def transforms_hr_train(config):
             T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ]
     )
+    transforms_inv = torchvision.transforms.Compose([T.NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                                                     torchvision.transforms.ToPILImage()])
 
-    return transforms
+    return transforms, transforms_inv
 
 
 def transforms_hg_eval(config):
