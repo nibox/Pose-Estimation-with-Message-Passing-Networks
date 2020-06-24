@@ -87,7 +87,7 @@ MODEL:
     NUM_JOINTS: 17
     PRETRAINED: '../PretrainedModels/pose_higher_hrnet_w32_512.pth'
     TAG_PER_JOINT: True
-    FEATURE_FUSION: avg
+    FEATURE_FUSION: pool
   MPN:
     NAME: VanillaMPN
     STEPS: 10
@@ -142,7 +142,7 @@ TRAIN:
   LR_STEP:
     - 60
     - 150
-  BATCH_SIZE: 8
+  BATCH_SIZE: 4
   START_EPOCH: 0
   END_EPOCH: 100
   END_TO_END: False
