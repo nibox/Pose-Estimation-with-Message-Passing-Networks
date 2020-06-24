@@ -153,6 +153,16 @@ class PoseEstimationBaseline(nn.Module):
         for param in self.backbone.parameters():
             param.requires_grad = False
 
+    def train(self, mode=True, freeze_bn=False):
+        super().train()
+        if freeze_bn:
+            self.backbone.apply(set_bn_eval)
+
+
+def set_bn_eval(module):
+    if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+        module.eval()
+
 
 """
 def load_model(path, model_class, config, device, pretrained_path=None):

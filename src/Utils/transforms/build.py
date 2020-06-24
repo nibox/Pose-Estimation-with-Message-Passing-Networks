@@ -23,7 +23,7 @@ def transforms_hr_train(config):
     input_size = config.DATASET.INPUT_SIZE
     output_size = config.DATASET.OUTPUT_SIZE
     flip = config.DATASET.FLIP
-    scale_type = config.DATASET.SCALE_TYPE
+    scale_type = config.DATASET.SCALING_TYPE
 
     coco_flip_index = T.FLIP_CONFIG["COCO"]
 

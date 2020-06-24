@@ -36,7 +36,7 @@ def create_train_validation_split(config):
     elif config.TRAIN.SPLIT == "coco_17_mini":
         train_ids, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
         heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
-        transforms = transforms_hr_train(config)
+        transforms, _ = transforms_hr_train(config)
         train = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=train_ids, year=17,
                                     transforms=transforms, heatmap_generator=heatmap_generator)
         valid = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
@@ -46,26 +46,6 @@ def create_train_validation_split(config):
 
     else:
         raise NotImplementedError
-
-"""
-def load_checkpoint(path, model_class, model_config, device):
-    model = pose.load_model(path, model_class, model_config, device)
-    model.to(device)
-    model.freeze_backbone()
-
-    state_dict = torch.load(path)
-
-    optimizer = torch.optim.Adam(model.parameters())
-    optimizer.load_state_dict(state_dict["optimizer_state_dict"])
-   
-    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 60)
-    if "lr_scheduler_state_dict" in state_dict:
-        scheduler.load_state_dict(state_dict["lr_scheduler_state_dict"])
-    
-
-    return model, optimizer, state_dict["epoch"], scheduler
-"""
-
 
 def make_train_func(model, optimizer, loss_func, **kwargs):
     def func(batch):
@@ -153,79 +133,13 @@ def main():
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
-    """
-    dataset_path = "../../storage/user/kistern/coco"
-    pretrained_path = "../PretrainedModels/pretrained/checkpoint.pth.tar"
-    model_path = None  # "../log/PoseEstimationBaseline/13/pose_estimation.pth"
-    """
-
-    # log_dir = "../log/PoseEstimationBaseline/Real/24_5"
-    # model_save_path = f"{log_dir}/pose_estimation.pth"
     os.makedirs(config.LOG_DIR, exist_ok=True)
     writer = SummaryWriter(config.LOG_DIR)
-
-    # learn_rate = 3e-4
-    # hr_learn_rate = 3e-8
-    # num_epochs = 100
-    # batch_size = 8  # 16 is pretty much largest possible batch size
-    """
-    config = pose.default_config
-    config["message_passing"] = VanillaMPN
-    config["message_passing_config"] = default_config
-    config["message_passing_config"]["aggr"] = "max"
-    config["message_passing_config"]["edge_input_dim"] = 2 + 17
-    config["message_passing_config"]["edge_feature_dim"] = 64
-    config["message_passing_config"]["node_feature_dim"] = 64
-    config["message_passing_config"]["steps"] = 10
-    config["message_passing_config"]["skip"] = True
-    config["message_passing_config"]["edge_from_node"] = True
-    #config["message_passing_config"]["bn"] = True
-
-    config["cheat"] = False
-    config["use_gt"] = False
-    config["use_focal_loss"] = True
-    config["use_neighbours"] = True
-    config["mask_crowds"] = True
-    config["detect_threshold"] = 0.005  # default was 0.007
-    config["mpn_graph_type"] = "knn"
-    config["edge_label_method"] = 4  # this only applies if use_gt==True
-    config["matching_radius"] = 0.1
-    config["inclusion_radius"] = 0.75
-    config["num_aux_steps"] = 1  # default is 1: only the last
-    """
-
-    # end_to_end = False  # this also enables batching simulation where the gradient is accumulated for multiple batches
-    # loss_reduction = "mean"  # default is "mean"
-
-    # use_label_mask = True
-    # use_batch_index = False
 
     ##########################################################
     if not config.MODEL.GC.USE_GT:
         assert config.TRAIN.USE_LABEL_MASK  # this ensures that images with no "persons"/clusters do not contribute to the loss
     print("Load model")
-    """
-    if model_path is not None:
-        raise 
-        model, optimizer, start_epoch, scheduler = load_checkpoint(model_path,
-                                                        pose.PoseEstimationBaseline, config, device)
-        start_epoch += 1
-    else:
-        model = pose.load_model(model_path, pose.PoseEstimationBaseline, config, device,
-                           pretrained_path=pretrained_path)
-        model.to(device)
-
-        if end_to_end:
-            model.freeze_backbone(partial=True)
-            optimizer = torch.optim.Adam([{"params": model.mpn.parameters(), "lr": learn_rate},
-                                          {"params": model.backbone.parameters(), "lr": hr_learn_rate}])
-        else:
-            model.freeze_backbone(partial=False)
-            optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
-
-        scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, [60, 150], 0.1)
-        start_epoch = 0
-    """
     model = get_pose_model(config, device)
     if config.TRAIN.END_TO_END:
         model.freeze_backbone(partial=True)
@@ -255,7 +169,7 @@ def main():
     print("#####Begin Training#####")
     epoch_len = len(train_loader)
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.END_EPOCH):
-        model.train()
+        model.train(freeze_bn=config.TRAIN.FREEZE_BN)
         for i, batch in enumerate(train_loader):
             iter = i + (epoch_len * epoch)
 

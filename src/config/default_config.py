@@ -166,7 +166,7 @@ _C.TRAIN.END_TO_END = False
 _C.TRAIN.LOSS_REDUCTION = "mean"
 _C.TRAIN.USE_LABEL_MASK = True
 _C.TRAIN.USE_BATCH_INDEX = False
-
+_C.TRAIN.FREEZE_BN = True
 
 
 def get_config():
