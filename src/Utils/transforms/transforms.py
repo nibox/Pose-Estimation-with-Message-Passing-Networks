@@ -107,7 +107,7 @@ class HRNetEvalTransform(object):
         self.output_size = [int(input_size / 4), int(input_size / 2)]
 
         self.scale_type = scale_type
-        assert scale_type == "short_eval"
+        assert scale_type == "short"
 
     def _get_multi_scale_size(self, image, input_size, current_scale, min_scale):
         h, w, _ = image.shape
@@ -232,7 +232,7 @@ class HRNetMineTransformation(object):
         self.output_size = [int(input_size / 4), int(input_size / 2)]
 
         self.scale_type = scale_type
-        assert scale_type == "short"
+        assert scale_type == "short_mine"
 
     def _affine_joints(self, joints, mat):
         joints = np.array(joints)

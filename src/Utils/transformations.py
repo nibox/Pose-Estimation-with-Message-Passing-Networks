@@ -17,10 +17,10 @@ def reverse_affine_map(keypoints, img_size_orig, scaling_type):
             the content
     :return: keypoints with respect to original image coordinates
     """
-    if scaling_type == "short":
+    if scaling_type == "short_mine":
         resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], 512, 1., 1.)
         mat = get_transform(center, scale, (int(resized_img[0]/2), int(resized_img[1]/2)))
-    elif scaling_type == "short_eval":
+    elif scaling_type == "short":
         resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], 512, 1., 1.)
         o_size =(int(resized_img[0]/2), int(resized_img[1]/2))
         mat = get_affine_transform(center, scale, o_size)
