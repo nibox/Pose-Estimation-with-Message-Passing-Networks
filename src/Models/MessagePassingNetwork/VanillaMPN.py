@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import add_self_loops, degree
+from .layers import _make_mlp
 
 
 class PerInvMLP(nn.Module):
@@ -97,7 +98,13 @@ class VanillaMPN(torch.nn.Module):
         self.use_skip_connections = config.SKIP
         self.mpn = VanillaMPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR, skip=config.SKIP)
 
+        # """
+        self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, False)
+        self.node_embedding = _make_mlp(config.NODE_INPUT_DIM, config.NODE_EMB.OUTPUT_SIZES, False)
+        self.classification = _make_mlp(config.EDGE_FEATURE_DIM, config.CLASS.OUTPUT_SIZES, False)
+        # """
         non_linearity = nn.ReLU()
+        """
         self.edge_embedding = nn.Sequential(nn.Linear(config.EDGE_INPUT_DIM, 32),  # 2 + 17*17,
                                             non_linearity,
                                             nn.Linear(32, 64),
@@ -116,6 +123,7 @@ class VanillaMPN(torch.nn.Module):
                                             nn.Linear(64, 32),
                                             non_linearity,
                                             nn.Linear(32, 1))
+        # """
 
         self.steps = config.STEPS
 

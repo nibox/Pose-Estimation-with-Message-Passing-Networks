@@ -3,6 +3,7 @@ import torch.nn as nn
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import add_self_loops, degree
+from .layers import _make_mlp
 
 default_config = {"steps": 4,
                   "node_input_dim": 128,
@@ -56,6 +57,14 @@ class VanillaMPN2(torch.nn.Module):
     def __init__(self, config, node_hidden_dim=128, edge_hidden_dim=128):
         super().__init__()
         self.mpn = nn.ModuleList([VanillaMPLayer2(config.NODE_FEATURE_DIM, config.NODE_FEATURE_DIM,
+                                                  config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR)
+                                  for _ in range(config.STEPS)])
+        self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, bn=config.BN)
+        self.node_embedding = _make_mlp(config.NODE_INPUT_DIM, config.NODE_EMB.OUTPUT_SIZES, bn=config.BN)
+        self.classification = _make_mlp(config.EDGE_FEATURE_DIM, config.CLASS.OUTPUT_SIZES, bn=config.BN)
+
+        """
+        self.mpn = nn.ModuleList([VanillaMPLayer2(config.NODE_FEATURE_DIM, config.NODE_FEATURE_DIM,
                                                   config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR),
                                   VanillaMPLayer2(config.NODE_FEATURE_DIM, config.NODE_FEATURE_DIM,
                                                   config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR),
@@ -63,6 +72,7 @@ class VanillaMPN2(torch.nn.Module):
                                                   config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR),
                                   VanillaMPLayer2(config.NODE_FEATURE_DIM, config.NODE_FEATURE_DIM,
                                                   config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR)])
+
 
         non_linearity = nn.ReLU()
         self.edge_embedding = nn.Sequential(nn.Linear(config.EDGE_INPUT_DIM, config.EDGE_INPUT_DIM),  # 2 + 17*17,
@@ -87,6 +97,7 @@ class VanillaMPN2(torch.nn.Module):
                                             nn.Linear(node_hidden_dim, config.NODE_FEATURE_DIM))
 
         self.classification = nn.Sequential(nn.Linear(config.EDGE_FEATURE_DIM, 1))
+        # """
 
         self.steps = config.STEPS
 
