@@ -154,7 +154,7 @@ class PoseEstimationBaseline(nn.Module):
             param.requires_grad = False
 
     def train(self, mode=True, freeze_bn=False):
-        super().train()
+        super().train(mode)
         if freeze_bn:
             self.backbone.apply(set_bn_eval)
 
