@@ -14,7 +14,7 @@ from Utils.transformations import kpt_affine, factor_affine, get_transform, get_
 class CocoKeypoints(Dataset):
 
     def __init__(self, path, mini=False, mode="train", seed=0, filter_empty=True,
-                 img_ids=None, year=14, transforms=None, heatmap_generator=None):
+                 img_ids=None, year=14, transforms=None, heatmap_generator=None, mask_crowds=True):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
@@ -22,6 +22,7 @@ class CocoKeypoints(Dataset):
         # todo deal with different setups and with the different splits
         ann_path = f"{self.root_path}/annotations/person_keypoints_{mode}20{year}.json"
         self.coco = COCO(ann_path)
+        self.mask_crowds = mask_crowds
         self.transforms = transforms
         assert self.transforms is not None
 
@@ -104,17 +105,18 @@ class CocoKeypoints(Dataset):
 
         # load mask ( as in github repo)
         mask = np.zeros([img_height, img_width])
-        for j in ann:
-            if j["iscrowd"]:
-                rle = maskapi.frPyObjects(
-                    j['segmentation'], img_info['height'], img_info['width'])
-                mask += maskapi.decode(rle)
-            # testing for the number of keypoints should be sufficient if the assertion above is true
-            elif j["num_keypoints"] == 0:
-                rles = maskapi.frPyObjects(
-                    j['segmentation'], img_info['height'], img_info['width'])
-                for rle in rles:
+        if self.mask_crowds:
+            for j in ann:
+                if j["iscrowd"]:
+                    rle = maskapi.frPyObjects(
+                        j['segmentation'], img_info['height'], img_info['width'])
                     mask += maskapi.decode(rle)
+                # testing for the number of keypoints should be sufficient if the assertion above is true
+                elif j["num_keypoints"] == 0:
+                    rles = maskapi.frPyObjects(
+                        j['segmentation'], img_info['height'], img_info['width'])
+                    for rle in rles:
+                        mask += maskapi.decode(rle)
 
         mask = (mask < 0.5).astype(np.float32)
 

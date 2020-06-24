@@ -6,7 +6,7 @@ from torch_geometric.utils import precision, recall
 from tqdm import tqdm
 
 from config import get_config, update_config
-from data import CocoKeypoints_hg, CocoKeypoints_hr
+from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
 from Utils import pred_to_person, num_non_detected_points, adjust, to_tensor
 from Models.PoseEstimation import get_pose_model
 from Utils.transformations import reverse_affine_map
@@ -105,7 +105,7 @@ def main():
     dataset_path = "../../storage/user/kistern/coco"
     ######################################
 
-    config_name = "model_20"
+    config_name = "model_31_1"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
@@ -124,6 +124,12 @@ def main():
         train_ids, valid_ids = pickle.load(open("tmp/princeton_split.p", "rb"))
         assert len(set(train_ids).intersection(set(valid_ids))) == 0
         eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
+    elif config.TEST.SPLIT == "coco_17_mini":
+        _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
+        heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
+        transforms, _ = transforms_hr_eval(config)
+        eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
+                                    transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False)
     else:
         raise NotImplementedError
 

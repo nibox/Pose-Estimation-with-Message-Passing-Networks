@@ -83,7 +83,7 @@ def transforms_hr_eval(config):
     input_size = 512
     scale_type = config.DATASET.SCALING_TYPE
 
-    affine_transform = T.HRNetMineTransformation if scale_type == "short" else T.HRNetEvalTransform
+    affine_transform = T.HRNetMineTransformation if scale_type == "short_mine" else T.HRNetEvalTransform
 
     transforms = T.Compose(
         [
