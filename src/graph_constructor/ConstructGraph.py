@@ -27,6 +27,7 @@ class NaiveGraphConstructor:
         self.matching_radius = config.MATCHING_RADIUS   # this is for the initial matching
         self.inclusion_radius = config.INCLUSION_RADIUS  # this is for the neighbouring matching
         self.mpn_graph_type = config.GRAPH_TYPE
+        self.normalize_node_distance = config.NORM_NODE_DISTANCE
 
     def construct_graph(self):
         x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list = [], [], [], [], []
@@ -170,8 +171,14 @@ class NaiveGraphConstructor:
         connection_label_2[list(range(0, num_edges)), joint_type[edge_index[1]]] = 1
         # """
 
-        edge_attr_y = joint_y[edge_index[1]] - joint_y[edge_index[0]]
-        edge_attr_x = joint_x[edge_index[1]] - joint_x[edge_index[0]]
+        if self.normalize_node_distance:
+            norm_factor_x = self.scoremaps.shape[3]
+            norm_factor_y = self.scoremaps.shape[2]
+        else:
+            norm_factor_y, norm_factor_x = 1, 1
+
+        edge_attr_y = (joint_y[edge_index[1]] - joint_y[edge_index[0]]) / norm_factor_y
+        edge_attr_x = (joint_x[edge_index[1]] - joint_x[edge_index[0]]) / norm_factor_x
 
         edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1), connection_label_2], dim=1).float()
 
