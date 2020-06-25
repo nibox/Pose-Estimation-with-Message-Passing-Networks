@@ -1,45 +1,52 @@
 import torch
-from torch.utils.data import DataLoader
-from CocoKeypoints import CocoKeypoints
 import numpy as np
 import pickle
-import Models.PoseEstimation.PoseEstimation as pose
-from Models.MessagePassingNetwork.VanillaMPN import default_config, VanillaMPN
+from config import get_config, update_config
 from torch_geometric.utils import recall, accuracy, precision, f1_score
-from torch.utils.tensorboard import SummaryWriter
-import os
+from Utils.transforms import transforms_hr_train
+from Utils.loss import MPNLossFactory
+from Models import get_cached_model
+from data import CocoKeypoints_hr, HeatmapGenerator
 
 
-def load_data(data_root, batch_size, device):
-    tv_split_name = "../tmp/mini_train_valid_split_4.p"
+def load_data(config, batch_size, device):
+    tv_split_name = "tmp/coco_17_mini_split.p"
     train_ids, _ = pickle.load(open(tv_split_name, "rb"))
     train_ids = np.random.choice(train_ids, batch_size, replace=False)
-    train = CocoKeypoints(data_root, mini=True, seed=0, mode="train", img_ids=train_ids)
+    transforms, _ = transforms_hr_train(config)
+    heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
+    train = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=train_ids, year=17,
+                             transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=True)
 
     imgs = []
     masks = []
     keypoints = []
     factors = []
+    target_scoremaps = []
     for i in range(len(train)):
-        sample = train.get_tensor(i, device)
-        imgs.append(sample[0])
-        masks.append(sample[1])
-        keypoints.append(sample[2])
-        factors.append(sample[3])
-    batch = (torch.cat(imgs), torch.cat(masks), torch.cat(keypoints), torch.cat(factors))
+        img, _, mask, keypoint, factor = train[i]
+        img = img.to(device)
+        mask = torch.from_numpy(mask[-1]).to(device)
+        keypoint = torch.from_numpy(keypoint).to(device)
+        factor = torch.from_numpy(factor).to(device)
 
-    return batch
+        imgs.append(img[None])
+        masks.append(mask[None])
+        keypoints.append(keypoint[None])
+        factors.append(factor[None])
+    return torch.cat(imgs), torch.cat(masks), torch.cat(keypoints), torch.cat(factors)
 
-def make_train_func(model, optimizer, **kwargs):
+def make_train_func(model, optimizer, loss_func, **kwargs):
     def func(batch):
         if kwargs["end_to_end"]:
             optimizer.zero_grad()
             # split batch
-            imgs, masks, keypoints, factors = batch
+            imgs, masks, keypoints, factors, target_scoremaps = batch
             imgs = imgs.to(kwargs["device"])
             masks = masks.to(kwargs["device"])
             keypoints = keypoints.to(kwargs["device"])
             factors = factors.to(kwargs["device"])
+            target_scoremaps = target_scoremaps.to(kwargs["device"])
 
             loss = 0.0
             preds, labels = [], []
@@ -56,8 +63,9 @@ def make_train_func(model, optimizer, **kwargs):
                 label_mask = label_mask if kwargs["use_label_mask"] else None
                 batch_index = batch_index if kwargs["use_batch_index"] else None
 
-                local_loss = model.loss(pred, edge_labels, reduction=kwargs["loss_reduction"],
-                                        mask=label_mask, batch_index=batch_index)
+                local_loss = model.mpn_loss(pred, edge_labels, reduction=kwargs["loss_reduction"],
+                                            mask=label_mask, batch_index=batch_index)
+                # scoremap_loss = model.scoremap_loss(scoremaps, target_scoremaps[i], masks[None, i])
                 num_edges_in_batch += len(edge_labels)
                 # in case of loss_reduction="sum" the scaling is done at the gradient directly
                 local_loss.backward()
@@ -94,12 +102,12 @@ def make_train_func(model, optimizer, **kwargs):
             label_mask = label_mask if kwargs["use_label_mask"] else None
             batch_index = batch_index if kwargs["use_batch_index"] else None
 
-            loss = model.loss(preds, edge_labels, reduction=kwargs["loss_reduction"], mask=label_mask, batch_index=batch_index)
+            loss = loss_func(preds, edge_labels, label_mask=label_mask)
             loss.backward()
             optimizer.step()
             loss = loss.item()
 
-        return preds[-1], edge_labels, loss
+        return preds[label_mask==1], edge_labels[label_mask==1], loss
 
     return func
 
@@ -111,66 +119,37 @@ def main():
     torch.manual_seed(seed)
 
     ##########################################################
-    dataset_path = "../../../storage/user/kistern/coco"
-    pretrained_path = "../../PretrainedModels/pretrained/checkpoint.pth.tar"
+    config_name = "model_35"
+    config = get_config()
+    config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
-    learn_rate = 3e-4
-    hr_learn_rate = 3e-8
-    max_num_iter = 100
-    batch_size = 8  # 16 is pretty much largest possible batch size
-    config = pose.default_config
-    config["message_passing"] = VanillaMPN
-    config["message_passing_config"] = default_config
-    config["message_passing_config"]["aggr"] = "max"
-    config["message_passing_config"]["edge_input_dim"] = 2 + 17
-    config["message_passing_config"]["edge_feature_dim"] = 64
-    config["message_passing_config"]["node_feature_dim"] = 64
-    config["message_passing_config"]["steps"] = 10
-
-    config["num_aux_steps"] = 6
-    config["cheat"] = False
-    config["use_gt"] = False
-    config["use_focal_loss"] = True
-    config["use_neighbours"] = True
-    config["mask_crowds"] = True
-    config["detect_threshold"] = 0.005  # default was 0.007
-    config["mpn_graph_type"] = "knn"
-    config["edge_label_method"] = 4  # this only applies if use_gt==True
-    config["matching_radius"] = 0.1
-    config["inclusion_radius"] = 0.75
-
-    end_to_end = True  # this also enables batching simulation where the gradient is accumulated for multiple batches
-    loss_reduction = "sum" if end_to_end else "mean"
-    loss_reduction = "mean"
-
-    use_label_mask = True
-    use_batch_index = False
 
     ##########################################################
-    if config["use_gt"]:
-        assert use_label_mask  # this ensures that images with no "persons"/clusters do not contribute to the loss
+    if not config.MODEL.GC.USE_GT:
+        assert config.TRAIN.USE_LABEL_MASK  # this ensures that images with no "persons"/clusters do not contribute to the loss
     print("Load model")
-    model = pose.load_model(None, pose.PoseEstimationBaseline, config, device,
-                            pretrained_path=pretrained_path)
+    model = get_cached_model(config, device)
+    if config.TRAIN.END_TO_END:
+        model.freeze_backbone(partial=True)
+        optimizer = torch.optim.Adam([{"params": model.mpn.parameters(), "lr": config.TRAIN.LR},
+                                      {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR}])
+    else:
+        model.freeze_backbone()
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR)
+        loss_func = MPNLossFactory(config)
     model.to(device)
 
-    if end_to_end:
-        model.freeze_backbone(partial=True)
-        optimizer = torch.optim.Adam([{"params": model.mpn.parameters(), "lr": learn_rate},
-                                      {"params": model.backbone.parameters(), "lr": hr_learn_rate}])
-    else:
-        model.freeze_backbone(partial=False)
-        optimizer = torch.optim.Adam(model.parameters(), lr=learn_rate)
-
-    print("Load dataset")
-
-    update_model = make_train_func(model, optimizer, use_batch_index=use_batch_index, use_label_mask=use_label_mask,
-                                   device=device, end_to_end=end_to_end, batch_size=batch_size,
-                                   loss_reduction=loss_reduction)
+    update_model = make_train_func(model, optimizer, loss_func, use_batch_index=config.TRAIN.USE_BATCH_INDEX,
+                                   use_label_mask=config.TRAIN.USE_LABEL_MASK, device=device,
+                                   end_to_end=config.TRAIN.END_TO_END, batch_size=config.TRAIN.BATCH_SIZE,
+                                   loss_reduction=config.TRAIN.LOSS_REDUCTION)
     print("#####Begin Training#####")
-    batch = load_data(dataset_path, batch_size, device)
+    batch = load_data(config, config.TRAIN.BATCH_SIZE, device)
+
     model.train()
-    for iter in range(max_num_iter):
+    if config.TRAIN.FREEZE_BN:
+            model.stop_backbone_bn()
+    for iter in range(10000):
 
         pred, edge_labels, loss = update_model(batch)
 

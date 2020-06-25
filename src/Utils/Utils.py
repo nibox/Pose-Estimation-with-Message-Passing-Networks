@@ -305,3 +305,7 @@ def to_device(device, *args):
         out.append(a.to(device).unsqueeze(0))
     return out
 
+
+def set_bn_eval(module):
+    if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+        module.eval()

@@ -1,4 +1,4 @@
-from ..MessagePassingNetwork.VanillaMPN import VanillaMPN
+from Utils.Utils import set_bn_eval
 from Models.HigherHRNet import get_pose_net, hr_process_output
 from Models.Hourglass import PoseNet, hg_process_output
 from graph_constructor import get_graph_constructor
@@ -6,7 +6,6 @@ from Models.MessagePassingNetwork import get_mpn_model
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 """
 default_config = {"backbone": PoseNet,
@@ -153,15 +152,8 @@ class PoseEstimationBaseline(nn.Module):
         for param in self.backbone.parameters():
             param.requires_grad = False
 
-    def train(self, mode=True, freeze_bn=False):
-        super().train(mode)
-        if freeze_bn:
-            self.backbone.apply(set_bn_eval)
-
-
-def set_bn_eval(module):
-    if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
-        module.eval()
+    def stop_backbone_bn(self):
+        self.backbone.apply(set_bn_eval)
 
 
 """

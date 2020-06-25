@@ -84,7 +84,7 @@ class NaiveGraphConstructor:
                     edge_labels = self._construct_edge_labels_3(joint_det, self.joints_gt[batch], edge_index)
                     label_mask = torch.ones_like(edge_labels, device=self.device, dtype=torch.float)
                 elif self.edge_label_method == 4:
-                    edge_labels, label_mask = self._construct_edge_labels_4(joint_det, self.joints_gt[batch], self.factor_list[batch], edge_index)
+                    edge_labels, label_mask = self._construct_edge_labels_4(joint_det.detach(), self.joints_gt[batch], self.factor_list[batch], edge_index.detach())
 
                 if edge_labels.max() == 0:
                     label_mask = torch.zeros_like(label_mask, device=self.device, dtype=torch.float)
@@ -531,8 +531,8 @@ def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
         top_joint_idx_det, top_joint_y, top_joint_x = container.nonzero(as_tuple=True)
         # top_joint_scores = container[top_joint_idx_det, top_joint_y, top_joint_x]
 
-        scoremap = torch.where(scoremap < threshold, torch.zeros_like(scoremap), scoremap)
-        joint_idx_det, joint_y, joint_x = scoremap.nonzero(as_tuple=True)
+        scoremap_zero = torch.where(scoremap < threshold, torch.zeros_like(scoremap), scoremap)
+        joint_idx_det, joint_y, joint_x = scoremap_zero.nonzero(as_tuple=True)
 
         top_joint_pos = torch.stack([top_joint_x, top_joint_y, top_joint_idx_det], 1)
         thresh_joint_pos = torch.stack([joint_x, joint_y, joint_idx_det], 1)
@@ -543,7 +543,7 @@ def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
         scoremap_shape = scoremap.shape
         scores, indices = scoremap.view(17, -1).topk(k=k, dim=1)
         container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.float).reshape(17, -1)
-        container[np.arange(0, 17).reshape(17, 1), indices] = scores
+        container[np.arange(0, 17).reshape(17, 1), indices] = scores + 1e-10  #
         container = container.reshape(scoremap_shape)
         joint_idx_det, joint_y, joint_x = container.nonzero(as_tuple=True)
         joint_scores = container[joint_idx_det, joint_y, joint_x]

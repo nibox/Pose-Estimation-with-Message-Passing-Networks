@@ -117,7 +117,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             optimizer.step()
             loss = loss.item()
 
-        return preds, edge_labels, loss
+        return preds, edge_labels, loss, label_mask
 
     return func
 
@@ -169,14 +169,19 @@ def main():
     print("#####Begin Training#####")
     epoch_len = len(train_loader)
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.END_EPOCH):
-        model.train(freeze_bn=config.TRAIN.FREEZE_BN)
+        model.train()
+        if config.TRAIN.FREEZE_BN:
+            model.stop_backbone_bn()
         for i, batch in enumerate(train_loader):
             iter = i + (epoch_len * epoch)
 
-            pred, edge_labels, loss = update_model(batch)
+            pred, edge_labels, loss, label_mask = update_model(batch)
 
             result = pred.sigmoid().squeeze()
             result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
+
+            result = result[label_mask]
+            edge_labels = edge_labels[label_mask]
 
             # metrics
             # edge_labels[edge_labels<0.99] = 0.0  # some edge labels might be
@@ -216,6 +221,10 @@ def main():
                 loss = loss_func(preds, edge_labels, label_mask)
                 result = preds.sigmoid().squeeze()
                 result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
+
+                # remove masked connections from score calculation
+                result = result[label_mask]
+                edge_labels = edge_labels[label_mask]
 
                 valid_loss.append(loss.item())
                 valid_acc.append(accuracy(result, edge_labels))
