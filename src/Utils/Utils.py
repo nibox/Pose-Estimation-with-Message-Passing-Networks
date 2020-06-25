@@ -93,8 +93,8 @@ def draw_poses(img: [torch.tensor, np.array], persons, fname=None, output_size=1
         [6, 7], [12, 13], [6, 12], [7, 13]
     ]
     bones = np.array(pair_ref) - 1
-    colors = np.arange(0, 179, np.ceil(179 / len(persons)))
-    colors_joints = np.arange(0, 179, np.ceil(179 / 17), dtype=np.float)
+    colors = np.linspace(0, 179, len(persons))
+    colors_joints = np.linspace(0, 179, 17, dtype=np.float)
     colors_joints[1::2] = colors_joints[-2::-2] # swap some colors to have clearer distinction between similar joint types
     # image to 8bit hsv (i dont know what hsv values opencv expects in 32bit case=)
     if img.dtype != np.uint8:

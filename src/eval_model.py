@@ -103,6 +103,8 @@ def coco_eval(coco, dt, image_ids, tmp_dir="tmp", log=True):
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
     dataset_path = "../../storage/user/kistern/coco"
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     ######################################
 
     config_name = "model_31_1"

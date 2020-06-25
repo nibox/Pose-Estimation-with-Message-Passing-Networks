@@ -124,6 +124,8 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
 
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     seed = 0
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -180,8 +182,8 @@ def main():
             result = pred.sigmoid().squeeze()
             result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
 
-            result = result[label_mask]
-            edge_labels = edge_labels[label_mask]
+            result = result[label_mask==1.0]
+            edge_labels = edge_labels[label_mask==1.0]
 
             # metrics
             # edge_labels[edge_labels<0.99] = 0.0  # some edge labels might be
@@ -223,8 +225,10 @@ def main():
                 result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
 
                 # remove masked connections from score calculation
-                result = result[label_mask]
-                edge_labels = edge_labels[label_mask]
+                result = result[label_mask == 1.0]
+                edge_labels = edge_labels[label_mask == 1.0]
+                if len(result) == 0:
+                    continue
 
                 valid_loss.append(loss.item())
                 valid_acc.append(accuracy(result, edge_labels))

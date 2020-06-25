@@ -526,6 +526,8 @@ class PoseHigherResolutionNet(nn.Module):
             features = torch.max(features_small, features_big)
         elif self.feature_fusion =="avg":
             features = (features_big + features_small) / 2
+        elif self.feature_fusion == "small":
+            features = features_small
         else:
             raise NotImplementedError
 
