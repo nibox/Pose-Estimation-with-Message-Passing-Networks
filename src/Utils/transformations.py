@@ -47,8 +47,6 @@ def reverse_affine_map(keypoints, img_size_orig, scaling_type):
     inv_mat[0, 2], inv_mat[1, 2] = -mat[0, 2] / mat[0, 0], -mat[1, 2] / mat[1, 1]
     inv_mat = inv_mat[:2]
     inv_mat = np.linalg.inv(mat)[:2]  # might this lead to numerical errors?
-    if scaling_type == "short_eval":
-        inv_mat = get_affine_transform(center, scale, (int(resized_img[0] / 2), int(resized_img[1] / 2)), inv=True)
     keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], inv_mat)
     return keypoints
 
