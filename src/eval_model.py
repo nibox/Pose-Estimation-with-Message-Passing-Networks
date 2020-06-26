@@ -125,7 +125,9 @@ def main():
     elif config.TEST.SPLIT == "princeton":
         train_ids, valid_ids = pickle.load(open("tmp/princeton_split.p", "rb"))
         assert len(set(train_ids).intersection(set(valid_ids))) == 0
-        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids)
+        transforms = transforms_hg_eval(config)
+        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids,
+                                    transforms=transforms, mask_crowds=False)
     elif config.TEST.SPLIT == "coco_17_mini":
         _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
         heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]

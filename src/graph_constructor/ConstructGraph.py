@@ -174,13 +174,15 @@ class NaiveGraphConstructor:
         if self.normalize_node_distance:
             norm_factor_x = self.scoremaps.shape[3]
             norm_factor_y = self.scoremaps.shape[2]
+            norm_factor = max(self.scoremaps.shape[3], self.scoremaps.shape[2])
         else:
             norm_factor_y, norm_factor_x = 1, 1
+            norm_factor = 1
 
-        edge_attr_y = (joint_y[edge_index[1]] - joint_y[edge_index[0]]) / norm_factor_y
-        edge_attr_x = (joint_x[edge_index[1]] - joint_x[edge_index[0]]) / norm_factor_x
+        edge_attr_y = (joint_y[edge_index[1]] - joint_y[edge_index[0]]).float() / norm_factor
+        edge_attr_x = (joint_x[edge_index[1]] - joint_x[edge_index[0]]).float() / norm_factor
 
-        edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1), connection_label_2], dim=1).float()
+        edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1), connection_label_2.float()], dim=1)
 
         return x, edge_attr, edge_index
 

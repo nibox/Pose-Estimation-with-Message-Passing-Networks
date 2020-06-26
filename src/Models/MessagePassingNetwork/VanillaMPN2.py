@@ -59,9 +59,12 @@ class VanillaMPN2(torch.nn.Module):
         self.mpn = nn.ModuleList([VanillaMPLayer2(config.NODE_FEATURE_DIM, config.NODE_FEATURE_DIM,
                                                   config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR)
                                   for _ in range(config.STEPS)])
-        self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, bn=config.BN)
-        self.node_embedding = _make_mlp(config.NODE_INPUT_DIM, config.NODE_EMB.OUTPUT_SIZES, bn=config.BN)
-        self.classification = _make_mlp(config.EDGE_FEATURE_DIM, config.CLASS.OUTPUT_SIZES, bn=config.BN, init_trick=True)
+        self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, bn=config.BN,
+                                        end_with_relu=config.EDGE_EMB.END_WITH_RELU)
+        self.node_embedding = _make_mlp(config.NODE_INPUT_DIM, config.NODE_EMB.OUTPUT_SIZES, bn=config.BN,
+                                        end_with_relu=config.NODE_EMB.END_WITH_RELU)
+        self.classification = _make_mlp(config.EDGE_FEATURE_DIM, config.CLASS.OUTPUT_SIZES, bn=config.BN, init_trick=True,
+                                        end_with_relu=False)
 
         """
         self.mpn = nn.ModuleList([VanillaMPLayer2(config.NODE_FEATURE_DIM, config.NODE_FEATURE_DIM,

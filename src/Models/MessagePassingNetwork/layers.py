@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-def _make_mlp(input_dim, hidden_dims, bn=False, init_trick=False):
+def _make_mlp(input_dim, hidden_dims, bn=False, init_trick=False, end_with_relu=False):
     layers = []
     layers.append(nn.Linear(input_dim, hidden_dims[0]))
     if len(hidden_dims) != 1:
@@ -16,5 +16,9 @@ def _make_mlp(input_dim, hidden_dims, bn=False, init_trick=False):
             layers.append(nn.ReLU())
             if bn:
                 layers.append(nn.BatchNorm1d(hidden_dims[i]))
+    if end_with_relu:
+        layers.append(nn.ReLU())
+        if bn:
+            layers.append(nn.BatchNorm1d(hidden_dims[i]))
 
     return nn.Sequential(*layers)

@@ -14,7 +14,7 @@ from Utils.transformations import kpt_affine, factor_affine, get_transform
 class CocoKeypoints(Dataset):
 
     def __init__(self, path, mini=False, input_size=512, output_size=128, mode="train", seed=0, filter_empty=True,
-                 img_ids=None, year=14, transforms=None):
+                 img_ids=None, year=14, transforms=None, mask_crowds=True):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
@@ -28,6 +28,7 @@ class CocoKeypoints(Dataset):
         # self.output_size = output_size
 
         self.max_num_people = 30  # from github code
+        self.mask_crowds = mask_crowds
         assert mode in ["train", "val"]
         self.data_dir =f"train20{year}" if mode == "train" else f"val20{year}"
 
@@ -101,16 +102,17 @@ class CocoKeypoints(Dataset):
 
         # load mask
         mask = np.zeros([img_height, img_width])
-        for j in ann:
-            if j["iscrowd"]:
-                assert j["num_keypoints"] == 0
-            # testing for the number of keypoints should be sufficient if the assertion above is true
-            if j["num_keypoints"] == 0:
-                encoding = maskapi.frPyObjects(j["segmentation"], img_height, img_width)
-                inst_mask = maskapi.decode(encoding)
-                if len(inst_mask.shape) == 3:
-                    inst_mask = maskapi.decode(encoding).sum(axis=2)
-                mask += inst_mask
+        if self.mask_crowds:
+            for j in ann:
+                if j["iscrowd"]:
+                    assert j["num_keypoints"] == 0
+                # testing for the number of keypoints should be sufficient if the assertion above is true
+                if j["num_keypoints"] == 0:
+                    encoding = maskapi.frPyObjects(j["segmentation"], img_height, img_width)
+                    inst_mask = maskapi.decode(encoding)
+                    if len(inst_mask.shape) == 3:
+                        inst_mask = maskapi.decode(encoding).sum(axis=2)
+                    mask += inst_mask
         mask = (mask < 0.5).astype(np.float32)
 
         """

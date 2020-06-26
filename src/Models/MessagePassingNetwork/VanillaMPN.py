@@ -52,7 +52,7 @@ default_config = {"steps": 10,
 class VanillaMPLayer(MessagePassing):
 
     # todo with or without inital feature skip connection
-    def __init__(self, node_feature_dim, edge_feature_dim, aggr, skip=False):
+    def __init__(self, node_feature_dim, edge_feature_dim, edge_feature_hidden, aggr, skip=False):
         super(VanillaMPLayer, self).__init__(aggr=aggr)
         # todo better architecture
 
@@ -60,9 +60,9 @@ class VanillaMPLayer(MessagePassing):
         node_factor = 2 if skip else 1
         edge_factor = 2 if skip else 1
 
-        self.mlp_edge = nn.Sequential(nn.Linear(node_feature_dim * 2 * node_factor + edge_feature_dim * edge_factor, 64),
+        self.mlp_edge = nn.Sequential(nn.Linear(node_feature_dim * 2 * node_factor + edge_feature_dim * edge_factor, edge_feature_hidden),
                                       non_lin,
-                                      nn.Linear(64, edge_feature_dim),
+                                      nn.Linear(edge_feature_hidden, edge_feature_dim),
                                       non_lin,
                                       )
 
@@ -96,12 +96,14 @@ class VanillaMPN(torch.nn.Module):
         super().__init__()
         # self.mpn = nn.ModuleList([VanillaMPLayer(node_feature_dim, edge_feature_dim) for i in range(steps)])
         self.use_skip_connections = config.SKIP
-        self.mpn = VanillaMPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, aggr=config.AGGR, skip=config.SKIP)
+        self.mpn = VanillaMPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN, aggr=config.AGGR, skip=config.SKIP)
 
         # """
-        self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, False)
-        self.node_embedding = _make_mlp(config.NODE_INPUT_DIM, config.NODE_EMB.OUTPUT_SIZES, False)
-        self.classification = _make_mlp(config.EDGE_FEATURE_DIM, config.CLASS.OUTPUT_SIZES, False)
+        self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, bn=config.BN,
+                                        end_with_relu=config.NODE_EMB.END_WITH_RELU)
+        self.node_embedding = _make_mlp(config.NODE_INPUT_DIM, config.NODE_EMB.OUTPUT_SIZES, bn=config.BN,
+                                        end_with_relu=config.NODE_EMB.END_WITH_RELU)
+        self.classification = _make_mlp(config.EDGE_FEATURE_DIM, config.CLASS.OUTPUT_SIZES, bn=config.BN)
         # """
         non_linearity = nn.ReLU()
         """
