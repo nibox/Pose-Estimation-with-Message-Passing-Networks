@@ -1,5 +1,16 @@
 LOG_DIR: "../log/PoseEstimationBaseline/Real/20"
 
+DATASET:
+  ROOT: '../../storage/user/kistern/coco'
+  MAX_NUM_PEOPLE: 30
+  SCALING_TYPE: long # short for training
+  # training data augmentation
+  MAX_ROTATION : 0
+  MIN_SCALE : 1.0
+  MAX_SCALE : 1.0
+  MAX_TRANSLATE : 0
+  FLIP : 0.0
+
 MODEL:
   KP: hourglass
   PRETRAINED: "../log/PoseEstimationBaseline/Real/20/pose_estimation.pth"
@@ -84,12 +95,14 @@ MODEL:
     NODE_FEATURE_DIM: 128
     EDGE_FEATURE_DIM: 128
     NODE_EMB:
+      END_WITH_RELU: False
       OUTPUT_SIZES:
         - 128
         - 128
         - 128
         - 128
     EDGE_EMB:
+      END_WITH_RELU: False
       OUTPUT_SIZES:
         - 19
         - 19
@@ -118,9 +131,9 @@ MODEL:
     FOCAL_GAMMA: 2.0
     FOCAL_ALPHA: 1.0
 TEST:
-  NUM_EVAL: 500
-  SPLIT: mini
-  ADJUST: False
+  NUM_EVAL: 455
+  SPLIT: princeton
+  ADJUST: True
 
 TRAIN:
   LR: 3e-4

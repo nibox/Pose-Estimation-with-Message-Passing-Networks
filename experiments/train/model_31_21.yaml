@@ -9,11 +9,11 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.0
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real/31_1"
+LOG_DIR: "../log/PoseEstimationBaseline/Real/31_21"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real/31_1/pose_estimation.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real/31_21/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -87,7 +87,7 @@ MODEL:
     NUM_JOINTS: 17
     PRETRAINED: '../PretrainedModels/pose_higher_hrnet_w32_512.pth'
     TAG_PER_JOINT: True
-    FEATURE_FUSION: avg
+    FEATURE_FUSION: pool
   MPN:
     NAME: VanillaMPN
     STEPS: 10

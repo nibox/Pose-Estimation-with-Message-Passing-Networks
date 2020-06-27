@@ -9,11 +9,11 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.0
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real/31_1"
+LOG_DIR: "../log/PoseEstimationBaseline/Real/31_2"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real/31_1/pose_estimation.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real/31_2/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -96,11 +96,13 @@ MODEL:
     NODE_FEATURE_DIM: 64
     EDGE_FEATURE_DIM: 64
     NODE_EMB:
+      END_WITH_RELU: False
       OUTPUT_SIZES:
         - 128
         - 64
         - 64
     EDGE_EMB:
+      END_WITH_RELU: False
       OUTPUT_SIZES:
         - 32
         - 64
@@ -126,6 +128,7 @@ MODEL:
     INCLUSION_RADIUS: 0.75
     GRAPH_TYPE: knn
     CC_METHOD: GAEC
+    NORM_NODE_DISTANCE: False
   LOSS:
     USE_FOCAL: True
     FOCAL_GAMMA: 2.0
