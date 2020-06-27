@@ -9,11 +9,11 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.0
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real/31_22_2"
+LOG_DIR: "../log/PoseEstimationBaseline/With_gt/37"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real/31_22_2/pose_estimation.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/With_gt/37/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -87,7 +87,7 @@ MODEL:
     NUM_JOINTS: 17
     PRETRAINED: '../PretrainedModels/pose_higher_hrnet_w32_512.pth'
     TAG_PER_JOINT: True
-    FEATURE_FUSION: small
+    FEATURE_FUSION: avg
   MPN:
     NAME: VanillaMPN
     STEPS: 10
@@ -96,15 +96,14 @@ MODEL:
     NODE_FEATURE_DIM: 64
     EDGE_FEATURE_DIM: 64
     EDGE_FEATURE_HIDDEN: 64
-    USE_NODE_UPDATE_MLP: True
     NODE_EMB:
-      END_WITH_RELU: True
+      END_WITH_RELU: False
       OUTPUT_SIZES:
         - 128
         - 64
         - 64
     EDGE_EMB:
-      END_WITH_RELU: True
+      END_WITH_RELU: False
       OUTPUT_SIZES:
         - 32
         - 64
@@ -121,16 +120,16 @@ MODEL:
   GC:
     NAME: naive_graph_constructor
     CHEAT: False
-    USE_GT: False
-    USE_NEIGHBOURS: True
-    EDGE_LABEL_METHOD: 4
+    USE_GT: True
+    USE_NEIGHBOURS: False
+    EDGE_LABEL_METHOD: 1
     MASK_CROWDS: True
-    DETECT_THRESHOLD: 0.005
-    MATCHING_RADIUS: 0.1
-    INCLUSION_RADIUS: 0.75
+    DETECT_THRESHOLD: 0.1
+    MATCHING_RADIUS: 0.1 # useless
+    INCLUSION_RADIUS: 0.75 # useless
     GRAPH_TYPE: knn
     CC_METHOD: GAEC
-    NORM_NODE_DISTANCE: False
+    NORM_NODE_DISTANCE: True
   LOSS:
     USE_FOCAL: True
     FOCAL_GAMMA: 2.0
