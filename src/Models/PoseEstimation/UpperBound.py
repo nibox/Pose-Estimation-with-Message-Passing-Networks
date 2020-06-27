@@ -102,7 +102,7 @@ class UpperBoundModel(nn.Module):
                                                    mpn_graph_type=self.config["mpn_graph_type"])
         """
 
-        x, edge_attr, edge_index, edge_labels, joint_det, label_mask, batch_index = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, joint_det, label_mask, batch_index, joint_scores = graph_constructor.construct_graph()
 
-        return scoremaps, edge_labels, joint_det, edge_index, edge_labels, label_mask
+        return scoremaps, edge_labels, joint_det, joint_scores, edge_index, edge_labels, label_mask
 

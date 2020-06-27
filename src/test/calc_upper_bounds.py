@@ -80,6 +80,8 @@ def fill_person_pred(persons):
 
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     ######################################
     config_name = "hrnet"
     config = get_config()
@@ -137,12 +139,12 @@ def main():
             img, _, masks, keypoints, factors = eval_set[i]
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
-            scoremaps, _, joint_det, edge_index, edge_labels, _ = model(img, keypoints, masks, factors)
+            scoremaps, _, joint_det, joint_scores, edge_index, edge_labels, _ = model(img, keypoints, masks, factors)
 
             test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_labels)
             sol = cluster_graph(test_graph, str(config.MODEL.GC.CC_METHOD), complete=False)
             sparse_sol_cc, _ = dense_to_sparse(torch.from_numpy(sol))
-            persons_pred_cc, _ = graph_cluster_to_persons(joint_det, sparse_sol_cc)  # might crash
+            persons_pred_cc, _ = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol_cc)  # might crash
 
             if config.UB.ADJUST:
                 persons_pred_cc = adjust(persons_pred_cc, scoremaps[0])

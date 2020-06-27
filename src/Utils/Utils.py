@@ -201,21 +201,21 @@ def draw_clusters(img: [torch.tensor, np.array], joints, joint_connections, fnam
         raise NotImplementedError
 
 
-def pred_to_person(joint_det, edge_index, pred, cc_method):
+def pred_to_person(joint_det, joint_scores, edge_index, pred, cc_method):
     test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
     sol = cluster_graph(test_graph, cc_method, complete=False)
     sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
-    persons_pred, mutants = graph_cluster_to_persons(joint_det, sparse_sol)  # might crash
+    persons_pred, mutants = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol)  # might crash
     return persons_pred, mutants
 
 
-def graph_cluster_to_persons(joints, joint_connections):
+def graph_cluster_to_persons(joints, scores, joint_connections):
     """
     :param joints: (N, 2) vector of joints
     :param joint_connections: (2, E) array/tensor that indicates which joint are connected thus belong to the same person
     :return: (N persons, 17, 3) array. 17 joints, 2 positions + visibiilty flag (in case joints are missing)
     """
-    joints, joint_connections = to_numpy(joints), to_numpy(joint_connections)
+    joints, joint_connections, scores = to_numpy(joints), to_numpy(joint_connections), to_numpy(scores)
     from scipy.sparse import csr_matrix
     from scipy.sparse.csgraph import connected_components
     # construct dense adj matrix
@@ -229,6 +229,7 @@ def graph_cluster_to_persons(joints, joint_connections):
     for i in range(n_components):
         # check if cc has more than one node
         person_joints = joints[person_labels == i]
+        person_scores = scores[person_labels == i]
         if len(person_joints) > 17:
             # print(f"Mutant detected!! It has {len(person_joints)} joints!!")
             # todo change meaning of mutant
@@ -240,9 +241,22 @@ def graph_cluster_to_persons(joints, joint_connections):
             for joint_type in range(17):  # 17 different joint types
                 # take the detected joints of a certain type
                 person_joint_for_type = person_joints[person_joints[:, 2] == joint_type]
+                person_scores_for_type = person_scores[person_joints[:, 2] == joint_type]
                 if len(person_joint_for_type) != 0:
-                    keypoints[joint_type] = np.mean(person_joint_for_type, axis=0)
-            keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
+                    f = True
+                    if f:
+                        keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
+                        joint_idx = np.argmax(person_scores_for_type, axis=0)
+                        keypoints[joint_type] = person_joint_for_type[joint_idx]# np.mean(person_joint_for_type, axis=0)
+                        keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
+                        # keypoints[joint_type, 2] = np.mean(person_scores_for_type, axis=0)
+                    else:
+                        norm_factor = np.sum(person_scores_for_type, axis=0)
+                        keypoints[joint_type] = np.sum(person_joint_for_type * person_scores_for_type[:, None] / norm_factor, axis=0)
+                        keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
+                        # keypoints[joint_type, 2] = np.mean(person_scores_for_type, axis=0)
+
+            # keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
             keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
             persons.append(keypoints)
     persons = np.array(persons)

@@ -120,13 +120,13 @@ class PoseEstimationBaseline(nn.Module):
                                                    mpn_graph_type=self.config["mpn_graph_type"])
         """
 
-        x, edge_attr, edge_index, edge_labels, joint_det, label_mask, batch_index = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, joint_det, label_mask, batch_index, joint_scores = graph_constructor.construct_graph()
 
         preds = self.mpn(x, edge_attr, edge_index).squeeze()
         if not with_logits:
             preds = torch.sigmoid(preds)
 
-        return scoremaps, preds, joint_det, edge_index, edge_labels, label_mask, batch_index
+        return scoremaps, preds, joint_det, joint_scores, edge_index, edge_labels, label_mask, batch_index
 
     """
     def mpn_loss(self, outputs, targets, reduction, with_logits=True, mask=None, batch_index=None) -> torch.Tensor:

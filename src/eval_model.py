@@ -67,8 +67,11 @@ def gen_ann_format(pred, image_id=0):
         # todo what does the score do?
         # how are missing joints handled ?
         tmp = {'image_id': int(image_id), "category_id": 1, "keypoints": [], "score": 1.0}
+        score = 0.0
         for j in range(len(person)):
-            tmp["keypoints"] += [float(person[j, 0]), float(person[j, 1]), int(person[j, 2])]
+            tmp["keypoints"] += [float(person[j, 0]), float(person[j, 1]), float(person[j, 2])]
+            score += float(person[j, 2])
+        tmp["score"] = score #/ 17.0
         ans.append(tmp)
     return ans
 
@@ -170,7 +173,7 @@ def main():
             img, _, masks, keypoints, factors = eval_set[i]
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
-            scoremaps, pred, joint_det, edge_index, edge_labels, _, _ = model(img, keypoints, masks, factors, with_logits=True)
+            scoremaps, pred, joint_det, joint_scores, edge_index, edge_labels, _, _ = model(img, keypoints, masks, factors, with_logits=True)
 
             pred = pred.sigmoid().squeeze()
             result = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
@@ -187,11 +190,11 @@ def main():
             # pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
-            ann = perd_to_ann(scoremaps[0], joint_det, edge_index, pred, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
+            ann = perd_to_ann(scoremaps[0], joint_det, joint_scores, edge_index, result, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
                               , config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
-            ann_intra = perd_to_ann(scoremaps[0], joint_det, edge_index, pred_intra_person, img_info, int(eval_set.img_ids[i]),
+            ann_intra = perd_to_ann(scoremaps[0], joint_det, joint_scores, edge_index, pred_intra_person, img_info, int(eval_set.img_ids[i]),
                                     config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
-            ann_inter = perd_to_ann(scoremaps[0], joint_det, edge_index, pred_inter_person, img_info, int(eval_set.img_ids[i]),
+            ann_inter = perd_to_ann(scoremaps[0], joint_det, joint_scores, edge_index, pred_inter_person, img_info, int(eval_set.img_ids[i]),
                                     config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
 
             anns.append(ann)
@@ -213,13 +216,13 @@ def main():
                 img, _, masks, keypoints, factors = eval_set[i]
                 img = img.to(device)[None]
                 masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
-                scoremaps, pred, joint_det, edge_index, _, _, _ = model(img, keypoints, masks, factors, with_logits=True)
+                scoremaps, pred, joint_det, joint_scores, edge_index, _, _, _ = model(img, keypoints, masks, factors, with_logits=True)
 
                 pred = pred.sigmoid().squeeze()
 
                 # pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
                 img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
-                ann = perd_to_ann(scoremaps[0], joint_det, edge_index, pred, img_info, int(eval_set.img_ids[i]),
+                ann = perd_to_ann(scoremaps[0], joint_det, joint_scores, edge_index, pred, img_info, int(eval_set.img_ids[i]),
                                   config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
                 anns_real.append(ann)
                 if int(eval_set.img_ids[i]) in imgs_fully_det:
@@ -247,8 +250,8 @@ def main():
         print(f"Positive Specificity: {np.mean(eval_specificity_positive)}")
 
 
-def perd_to_ann(scoremaps, joint_det, edge_index, pred, img_info, img_id, cc_method, scaling_type, adjustment):
-    persons_pred, _ = pred_to_person(joint_det, edge_index, pred, cc_method)
+def perd_to_ann(scoremaps, joint_det, joint_scores, edge_index, pred, img_info, img_id, cc_method, scaling_type, adjustment):
+    persons_pred, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, cc_method)
 
     if len(persons_pred.shape) == 1:  # this means none persons were detected
         persons_pred = np.zeros([1, 17, 3])

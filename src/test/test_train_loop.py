@@ -97,7 +97,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             keypoints = keypoints.to(kwargs["device"])
             factors = factors.to(kwargs["device"])
 
-            scoremaps, preds, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
+            scoremaps, preds, joint_det, _, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
 
             label_mask = label_mask if kwargs["use_label_mask"] else None
             batch_index = batch_index if kwargs["use_batch_index"] else None
