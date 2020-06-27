@@ -53,18 +53,20 @@ class NaiveGraphConstructor:
             # remove detected joints that are close to multiple gt joints
             if self.use_gt:
                 person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
-                joints_gt_loc = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
+                clamp_max = max(self.scoremaps.shape[2], self.scoremaps.shape[3]) - 1
+                joints_gt_loc = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, clamp_max)
                 joints_gt_loc = torch.cat([joints_gt_loc, joint_idx_gt.unsqueeze(1)], 1)
 
                 joint_det = NaiveGraphConstructor.remove_ambigiuous_det(joint_det, joints_gt_loc, self.inclusion_radius)
 
                 person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
-                tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, 127)
+                tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, clamp_max)
                 joints_gt_position = torch.cat([tmp, joint_idx_gt.unsqueeze(1)], 1)
                 unique_elements = torch.eq(joints_gt_position[:, :2].unsqueeze(1), joint_det[:, :2])
                 unique_elements = unique_elements[:, :, 0] & unique_elements[:, :, 1]
                 unique_elements = unique_elements.sum(dim=0)
                 joint_det = torch.cat([joint_det[unique_elements == 0], joints_gt_position], 0)
+                joint_scores = self.scoremaps[batch][joint_det[:, 2], joint_det[:, 1], joint_det[:, 0]]
                 if self.no_false_positives:
                     joint_det = joints_gt_position
 
@@ -79,6 +81,10 @@ class NaiveGraphConstructor:
                     edge_labels = self._construct_edge_labels_1(joint_det, self.joints_gt[batch], edge_index)
                 elif self.edge_label_method == 2:
                     edge_labels = self._construct_edge_labels_2(joint_det, self.joints_gt[batch], edge_index)
+                label_mask = torch.ones_like(edge_labels, device=self.device, dtype=torch.float)
+                if edge_labels.max() == 0:
+                    label_mask = torch.zeros_like(label_mask, device=self.device, dtype=torch.float)
+                label_mask_list.append(label_mask)
             elif self.joints_gt is not None:
                 assert self.edge_label_method in [3, 4]
 
@@ -337,7 +343,8 @@ class NaiveGraphConstructor:
         person_idx_gt, joint_idx_gt = joints_gt[:, :, 2].nonzero(as_tuple=True)
         num_joints_gt = len(person_idx_gt)
 
-        distance = torch.norm(joints_gt[person_idx_gt, joint_idx_gt, :2].unsqueeze(1).round().float().clamp(0, 127) - joint_det[:, :2].float(), dim=2)
+        clamp_max = max(self.scoremaps.shape[2], self.scoremaps.shape[3]) - 1  # -1 to get the same value as was added
+        distance = torch.norm(joints_gt[person_idx_gt, joint_idx_gt, :2].unsqueeze(1).round().float().clamp(0, clamp_max) - joint_det[:, :2].float(), dim=2)
         # set distance between joints of different type to some high value
         different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
         distance[different_type] = 1000.0
