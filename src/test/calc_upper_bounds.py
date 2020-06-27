@@ -36,8 +36,11 @@ def gen_ann_format(pred, image_id=0):
         # todo what does the score do?
         # how are missing joints handled ?
         tmp = {'image_id': int(image_id), "category_id": 1, "keypoints": [], "score": 1.0}
+        score = 0.0
         for j in range(len(person)):
-            tmp["keypoints"] += [float(person[j, 0]), float(person[j, 1]), int(person[j, 2])]
+            tmp["keypoints"] += [float(person[j, 0]), float(person[j, 1]), float(person[j, 2])]
+            score += float(person[j, 2])
+        tmp["score"] = score
         ans.append(tmp)
     return ans
 
@@ -102,7 +105,9 @@ def main():
         eval_set = CocoKeypoints_hg(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids)
     elif config.UB.SPLIT == "princeton":
         _, valid_ids = pickle.load(open("tmp/princeton_split.p", "rb"))
-        eval_set = CocoKeypoints_hg(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=valid_ids)
+        transforms = transforms_hg_eval(config)
+        eval_set = CocoKeypoints_hg(config.DATASET.ROOT, mini=True, seed=0, mode="train",
+                                    img_ids=valid_ids, transforms=transforms, mask_crowds=False)
     elif config.UB.SPLIT == "coco_17_mini":
         _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
         heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]

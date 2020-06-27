@@ -217,7 +217,7 @@ def main():
                 masks = masks[-1].to(device)
                 keypoints = keypoints.to(device)
                 factors = factors.to(device)
-                _, preds, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
+                _, preds, joint_det, _, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
 
                 label_mask = label_mask if config.TRAIN.USE_LABEL_MASK else None
                 loss = loss_func(preds, edge_labels, label_mask)

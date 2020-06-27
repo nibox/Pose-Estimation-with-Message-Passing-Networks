@@ -16,27 +16,24 @@ def main():
     np.random.seed(seed)
     torch.manual_seed(seed)
 
-    use_subset = True
+    use_subset = False
     config = get_config()
     config = update_config(config, f"../experiments/upper_bound/hrnet.yaml")
 
-    transforms = torchvision.transforms.Compose(
-        [
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ]
-    )
-    transforms, transforms_inv = transforms_hr_eval(config)
+    transforms, transforms_inv = transforms_hr_train(config)
 
 
+    """
     id_subset = [471913, 139124, 451781, 437856, 543272, 423250, 304336, 499425, 128905, 389185, 108762, 10925, 464037,
                  121938, 389815, 1145, 1431, 4309, 5028, 5294, 6777, 7650, 10130, 401534]
+    """
+    id_subset = [164013]
     ##################################
 
-    model = get_upper_bound_model(config, device)
+    model = get_upper_bound_model(config, device).to(device)
     model.eval()
 
-    train_ids, _ = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))  # mini_train_valid_split_4 old one
+    train_ids, _ = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
     heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
     img_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=train_ids, year=17,
                                transforms=transforms, heatmap_generator=heatmap_generator)
@@ -54,13 +51,13 @@ def main():
             img, _, masks, keypoints, factor_list = img_set[i]
             mask, keypoints, factor_list = to_tensor(device, masks[-1], keypoints, factor_list)
             img = img.to(device)[None]
-            _, pred, joint_det, edge_index, _, label_mask = model(img, keypoints, mask, factor_list)
+            _, pred, joint_det, joint_scores, edge_index, _, label_mask = model(img, keypoints, mask, factor_list)
 
             # construct poses
-            persons_pred_cc, _ = pred_to_person(joint_det, edge_index, pred, config.MODEL.GC.CC_METHOD)
+            persons_pred_cc, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, config.MODEL.GC.CC_METHOD)
             # construct solution by using only labeled edges (instead of corr clustering)
             sparse_sol_gt = torch.stack([edge_index[0, pred == 1], edge_index[1, pred == 1]])
-            persons_pred_gt, _ = graph_cluster_to_persons(joint_det, sparse_sol_gt)  # might crash
+            persons_pred_gt, _ = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol_gt)  # might crash
             print(f"Num detection: {len(joint_det)}")
             print(f"Num edges : {len(edge_index[0])}")
             print(f"Num active edges: {(pred==1).sum()}")

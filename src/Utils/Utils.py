@@ -251,14 +251,26 @@ def graph_cluster_to_persons(joints, scores, joint_connections):
                         keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
                         # keypoints[joint_type, 2] = np.mean(person_scores_for_type, axis=0)
                     else:
-                        norm_factor = np.sum(person_scores_for_type, axis=0)
-                        keypoints[joint_type] = np.sum(person_joint_for_type * person_scores_for_type[:, None] / norm_factor, axis=0)
-                        keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
-                        # keypoints[joint_type, 2] = np.mean(person_scores_for_type, axis=0)
+                        keypoints[joint_type] = np.mean(person_joint_for_type, axis=0)
 
-            # keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
+            #keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
             keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
+            # keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
             persons.append(keypoints)
+        elif len(person_joints) == 1 and False:
+
+
+            keypoints = np.zeros([17, 3])
+            joint_type = person_joints[:, 2]
+            person_score = person_scores[0]
+            if person_score < 0.7:
+                continue
+
+            keypoints[joint_type, 2] = person_score
+            keypoints[:, :2] = person_joints[0, :2]
+
+            persons.append(keypoints)
+
     persons = np.array(persons)
     return persons, mutant_detected
 

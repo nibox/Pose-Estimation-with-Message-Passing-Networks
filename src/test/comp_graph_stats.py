@@ -20,13 +20,6 @@ def main():
     config = get_config()
     config = update_config(config, "../experiments/upper_bound/hrnet.yaml")
 
-    transforms = torchvision.transforms.Compose(
-        [
-            torchvision.transforms.ToTensor(),
-            torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-        ]
-    )
-
     model = get_upper_bound_model(config, device=device)
     model.eval()
 
