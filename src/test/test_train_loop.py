@@ -107,7 +107,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             optimizer.step()
             loss = loss.item()
 
-        return preds[label_mask==1], edge_labels[label_mask==1], loss
+        return preds[-1][label_mask==1], edge_labels[label_mask==1], loss
 
     return func
 

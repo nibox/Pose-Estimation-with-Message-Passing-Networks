@@ -174,7 +174,7 @@ def main():
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
             scoremaps, pred, joint_det, joint_scores, edge_index, edge_labels, _, _ = model(img, keypoints, masks, factors, with_logits=True)
 
-            pred = pred.sigmoid().squeeze()
+            pred = pred[-1].sigmoid().squeeze()
             result = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
             n, _ = num_non_detected_points(joint_det.cpu(), keypoints.cpu(), 6.0, config.MODEL.GC.USE_GT)
 
@@ -216,7 +216,7 @@ def main():
                 masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
                 scoremaps, pred, joint_det, joint_scores, edge_index, _, _, _ = model(img, keypoints, masks, factors, with_logits=True)
 
-                pred = pred.sigmoid().squeeze()
+                pred = pred[-1].sigmoid().squeeze()
 
                 # pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
                 img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]

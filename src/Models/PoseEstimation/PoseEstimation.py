@@ -122,7 +122,7 @@ class PoseEstimationBaseline(nn.Module):
 
         x, edge_attr, edge_index, edge_labels, joint_det, label_mask, batch_index, joint_scores = graph_constructor.construct_graph()
 
-        preds = self.mpn(x, edge_attr, edge_index).squeeze()
+        preds = self.mpn(x, edge_attr, edge_index)
         if not with_logits:
             preds = torch.sigmoid(preds)
 

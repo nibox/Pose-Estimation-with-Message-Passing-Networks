@@ -87,7 +87,11 @@ class MPNLossFactory(nn.Module):
     def forward(self, outputs_class, edge_labels, label_mask):
 
 
-        loss = self.classification_loss(outputs_class, edge_labels, "mean", label_mask)
+
+        loss = 0.0
+        for i in range(len(outputs_class)):
+            loss += self.classification_loss(outputs_class[i], edge_labels, "mean", label_mask)
+        loss = loss / len(outputs_class)
 
         return loss
 

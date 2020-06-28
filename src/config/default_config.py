@@ -102,12 +102,14 @@ _C.MODEL.MPN.EDGE_INPUT_DIM = 17 + 2
 _C.MODEL.MPN.EDGE_FEATURE_DIM = 64
 _C.MODEL.MPN.EDGE_FEATURE_HIDDEN = 64
 _C.MODEL.MPN.NODE_FEATURE_DIM = 64
+_C.MODEL.MPN.USE_NODE_UPDATE_MLP = False
 _C.MODEL.MPN.NODE_EMB = CN(new_allowed=True)
 _C.MODEL.MPN.EDGE_EMB = CN(new_allowed=True)
 _C.MODEL.MPN.CLASS = CN(new_allowed=True)
 _C.MODEL.MPN.BN = True
 _C.MODEL.MPN.AGGR = "max"
 _C.MODEL.MPN.SKIP = False
+_C.MODEL.MPN.AUX_LOSS_STEPS = 0  # 0 means only the last prediction is used for loss
 
 
 # configuration for the Graph Constructor
