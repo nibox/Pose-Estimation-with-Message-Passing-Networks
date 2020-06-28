@@ -117,7 +117,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             optimizer.step()
             loss = loss.item()
 
-        return preds, edge_labels, loss, label_mask
+        return preds[-1], edge_labels, loss, label_mask
 
     return func
 
@@ -221,7 +221,7 @@ def main():
 
                 label_mask = label_mask if config.TRAIN.USE_LABEL_MASK else None
                 loss = loss_func(preds, edge_labels, label_mask)
-                result = preds.sigmoid().squeeze()
+                result = preds[-1].sigmoid().squeeze()
                 result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
 
                 # remove masked connections from score calculation

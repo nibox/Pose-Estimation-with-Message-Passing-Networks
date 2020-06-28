@@ -9,11 +9,11 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.0
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real/31_22_2"
+LOG_DIR: "../log/PoseEstimationBaseline/Real/31_22_3_1_2"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real/31_22_2/pose_estimation.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real/31_22_3_1_2/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -96,7 +96,6 @@ MODEL:
     NODE_FEATURE_DIM: 64
     EDGE_FEATURE_DIM: 64
     EDGE_FEATURE_HIDDEN: 64
-    USE_NODE_UPDATE_MLP: True
     NODE_EMB:
       END_WITH_RELU: False
       OUTPUT_SIZES:
@@ -118,6 +117,7 @@ MODEL:
     BN: False
     AGGR: max
     SKIP: False
+    AUX_LOSS_STEPS: 4
   GC:
     NAME: naive_graph_constructor
     CHEAT: False
@@ -125,7 +125,7 @@ MODEL:
     USE_NEIGHBOURS: True
     EDGE_LABEL_METHOD: 4
     MASK_CROWDS: True
-    DETECT_THRESHOLD: 0.005
+    DETECT_THRESHOLD: 0.1
     MATCHING_RADIUS: 0.1
     INCLUSION_RADIUS: 0.75
     GRAPH_TYPE: knn
