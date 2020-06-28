@@ -68,7 +68,12 @@ class NaiveGraphConstructor:
                 joint_det = torch.cat([joint_det[unique_elements == 0], joints_gt_position], 0)
                 joint_scores = self.scoremaps[batch][joint_det[:, 2], joint_det[:, 1], joint_det[:, 0]]
                 if self.no_false_positives:
-                    joint_det = joints_gt_position
+                    if len(joints_gt_position) >= 2:
+                        # idea is that for images without present gt joint (happens due to crop and masking), i use
+                        # the detected joints as dummy input but because there are not gt joint the labels are all
+                        # inactive and the loss of the image should be masked out. It is a bit hacky but it works
+                        joint_det = joints_gt_position
+                        joint_scores = torch.ones(len(joint_det), dtype=torch.float, device=joint_det.device)
 
             x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch], self.mpn_graph_type,
                                                                  joint_scores)

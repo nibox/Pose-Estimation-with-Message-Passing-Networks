@@ -163,7 +163,6 @@ def main():
     print("Eval on Labeled data")
     skip_list = []  # [264, 217]
     eval_ids = []
-    model.use_gt = False
     with torch.no_grad():
         for i in tqdm(range(config.TEST.NUM_EVAL)):
             if i in skip_list:
@@ -190,7 +189,7 @@ def main():
             # pred = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
-            ann = perd_to_ann(scoremaps[0], joint_det, joint_scores, edge_index, result, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
+            ann = perd_to_ann(scoremaps[0], joint_det, joint_scores, edge_index, pred, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
                               , config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
             ann_intra = perd_to_ann(scoremaps[0], joint_det, joint_scores, edge_index, pred_intra_person, img_info, int(eval_set.img_ids[i]),
                                     config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
@@ -205,7 +204,6 @@ def main():
 
         anns_real = []
         anns_full = []
-        model.use_gt = False
         print("Eval on Real data")
         eval_ids_real = []
         with torch.no_grad():
