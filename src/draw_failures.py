@@ -76,15 +76,16 @@ def main():
             img_transformed = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
             num_persons_gt = np.count_nonzero(keypoints[0, :, :, 2].sum(axis=1).cpu().numpy())
-            _, pred, joint_det, joint_scores, edge_index, edge_labels, _, _ = model(img_transformed, keypoints, masks, factors, with_logits=False)
+            _, pred, joint_det, joint_scores, edge_index, edge_labels, _, _ , _, node_features = model(img_transformed, keypoints, masks, factors, with_logits=False)
 
-            result = pred.squeeze()
+            result = pred[-1].squeeze()
             result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
             f1_s = f1_score(result, edge_labels, 2)[1]
             # draw images that have low f1 score, that could not detect all persons or to many persons, or mutants
-            persons_pred, mutants = pred_to_person(joint_det, joint_scores, edge_index, result, config.MODEL.GC.CC_METHOD)
-            persons_pred_label, _ = pred_to_person(joint_det, joint_scores, edge_index, edge_labels, config.MODEL.GC.CC_METHOD)
+            persons_pred, mutants, person_labels = pred_to_person(joint_det, joint_scores, edge_index, result, config.MODEL.GC.CC_METHOD)
+            persons_pred_label, _, _ = pred_to_person(joint_det, joint_scores, edge_index, edge_labels, config.MODEL.GC.CC_METHOD)
             num_persons_det = len(persons_pred)
+
 
             img = np.array(transforms_inv(img.cpu().squeeze()))
             if (num_persons_gt != num_persons_det) or mutants or f1_s < 0.9:

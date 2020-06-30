@@ -118,7 +118,8 @@ class VanillaMPN(torch.nn.Module):
         node_features_initial = node_features
         edge_features_initial = edge_features
 
-        preds = []
+        preds_edge = []
+        preds_node = []
         for i in range(self.steps):
             if self.use_skip_connections:
                 node_features = torch.cat([node_features_initial, node_features], dim=1)
@@ -126,6 +127,7 @@ class VanillaMPN(torch.nn.Module):
 
             node_features, edge_features = self.mpn(node_features, edge_features, edge_index)
             if i >= self.steps - self.aux_loss_steps - 1:
-                preds.append(self.classification(edge_features).squeeze())
+                preds_edge.append(self.classification(edge_features).squeeze())
+                preds_node.append(node_features)
 
-        return preds
+        return preds_edge, preds_node

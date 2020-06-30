@@ -2,7 +2,8 @@ import torch
 from torch.utils.data import DataLoader
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
 from Utils.transforms import transforms_hr_eval, transforms_hr_train, transforms_hg_eval
-from Utils.loss import MPNLossFactory
+from Utils.loss import MPNLossFactory, MultiLossFactory
+from Utils.Utils import to_device
 from config import get_config, update_config
 import numpy as np
 import pickle
@@ -50,6 +51,7 @@ def create_train_validation_split(config):
 def make_train_func(model, optimizer, loss_func, **kwargs):
     def func(batch):
         if kwargs["end_to_end"]:
+            """
             optimizer.zero_grad()
             # split batch
             imgs, masks, keypoints, factors = batch
@@ -98,6 +100,25 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
 
             preds = torch.cat(preds, 1)
             edge_labels = torch.cat(labels)
+            """
+            optimizer.zero_grad()
+            # split batch
+            imgs, heatmaps, masks, keypoints, factors = batch
+            imgs = imgs.to(kwargs["device"])
+            masks = to_device(kwargs["device"], masks)
+            keypoints = keypoints.to(kwargs["device"])
+            factors = factors.to(kwargs["device"])
+            heatmaps = to_device(kwargs["device"], heatmaps)
+
+            _, preds, joint_det, _, edge_index, edge_labels, label_mask, batch_index, bb_output = model(imgs, keypoints, masks[-1], factors)
+
+            label_mask = label_mask if kwargs["use_label_mask"] else None
+            batch_index = batch_index if kwargs["use_batch_index"] else None
+
+            loss = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
+            loss.backward()
+            optimizer.step()
+            loss = loss.item()
         else:
             optimizer.zero_grad()
             # split batch
@@ -107,7 +128,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             keypoints = keypoints.to(kwargs["device"])
             factors = factors.to(kwargs["device"])
 
-            _, preds, joint_det, _,  edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
+            _, preds, joint_det, _,  edge_index, edge_labels, label_mask, batch_index, _, _ = model(imgs, keypoints, masks, factors)
 
             label_mask = label_mask if kwargs["use_label_mask"] else None
             batch_index = batch_index if kwargs["use_batch_index"] else None
@@ -147,6 +168,7 @@ def main():
         model.freeze_backbone(partial=True)
         optimizer = torch.optim.Adam([{"params": model.mpn.parameters(), "lr": config.TRAIN.LR},
                                       {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR}])
+        loss_func = MultiLossFactory(config)
     else:
         model.freeze_backbone(partial=False)
         optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR)
@@ -212,15 +234,20 @@ def main():
         with torch.no_grad():
             for batch in valid_loader:
                 # split batch
-                imgs, _, masks, keypoints, factors = batch
+                imgs, heatmaps, masks, keypoints, factors = batch
                 imgs = imgs.to(device)
-                masks = masks[-1].to(device)
+                masks = to_device(device, masks)
                 keypoints = keypoints.to(device)
                 factors = factors.to(device)
-                _, preds, joint_det, _, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
+                heatmaps = to_device(device, heatmaps)
+
+                _, preds, joint_det, _, edge_index, edge_labels, label_mask, batch_index, bb_output, _ = model(imgs, keypoints, masks[-1], factors)
 
                 label_mask = label_mask if config.TRAIN.USE_LABEL_MASK else None
-                loss = loss_func(preds, edge_labels, label_mask)
+                if config.TRAIN.END_TO_END:
+                    loss = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
+                else:
+                    loss = loss_func(preds, edge_labels, label_mask)
                 result = preds[-1].sigmoid().squeeze()
                 result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
 

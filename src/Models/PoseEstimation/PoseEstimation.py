@@ -68,24 +68,7 @@ class PoseEstimationBaseline(nn.Module):
         self.backbone, self.process_output = load_back_bone(config)
         self.mpn = get_mpn_model(config.MODEL.MPN)
         self.gc_config = config.MODEL.GC
-        """
-        self.mpn = config["message_passing"](**config["message_passing_config"])
-        self.num_aux_steps = config["num_aux_steps"]
-        self.graph_constructor = config["graph_constructor"]
-        self.feature_gather = nn.Conv2d(256, 128, 3, 1, 1, bias=True)
 
-        self.with_logits = with_logits
-
-        self.config = config
-        self.cheat = config["cheat"]
-        self.use_gt = config["use_gt"]
-        self.use_neighbours = config["use_neighbours"]
-        self.edge_label_method = config["edge_label_method"]
-        self.mask_crowds = config["mask_crowds"]
-        self.focal = None
-        if config["use_focal_loss"]:
-            self.focal = FocalLoss(logits=True)
-        """
         self.pool = nn.MaxPool2d(3, 1, 1)  # not sure if used
         self.feature_gather = nn.Conv2d(config.MODEL.KP_OUTPUT_DIM, config.MODEL.MPN.NODE_INPUT_DIM, 3, 1, 1, bias=True)
         self.num_aux_steps = config.MODEL.AUX_STEPS
@@ -101,32 +84,19 @@ class PoseEstimationBaseline(nn.Module):
         """
 
         features = self.feature_gather(features)
+        scoremaps = scoremaps.detach()
 
         graph_constructor = get_graph_constructor(self.gc_config, scoremaps=scoremaps, features=features,
                                                   joints_gt=keypoints_gt, factor_list=factors, masks=masks,
                                                   device=scoremaps.device)
-        """
-        graph_constructor = self.graph_constructor(self.gc_config, scoremaps=final_scoremap, features=features,
-                                                   joints_gt=keypoints_gt, factors=factors, masks=masks,
-
-                                                   use_gt=self.use_gt,
-                                                   no_false_positives=self.cheat, use_neighbours=self.use_neighbours,
-                                                   device=final_scoremap.device,
-                                                   edge_label_method=self.edge_label_method,
-                                                   detect_threshold=self.config["detect_threshold"],
-                                                   mask_crowds=self.mask_crowds,
-                                                   inclusion_radius=self.config["inclusion_radius"],
-                                                   matching_radius=self.config["matching_radius"],
-                                                   mpn_graph_type=self.config["mpn_graph_type"])
-        """
 
         x, edge_attr, edge_index, edge_labels, joint_det, label_mask, batch_index, joint_scores = graph_constructor.construct_graph()
 
-        preds = self.mpn(x, edge_attr, edge_index)
+        preds, node_features = self.mpn(x, edge_attr, edge_index)
         if not with_logits:
-            preds = torch.sigmoid(preds)
+            preds[-1] = torch.sigmoid(preds[-1])
 
-        return scoremaps, preds, joint_det, joint_scores, edge_index, edge_labels, label_mask, batch_index
+        return scoremaps, preds, joint_det, joint_scores, edge_index, edge_labels, label_mask, batch_index, bb_output[0], node_features[-1]
 
     """
     def mpn_loss(self, outputs, targets, reduction, with_logits=True, mask=None, batch_index=None) -> torch.Tensor:
@@ -149,6 +119,8 @@ class PoseEstimationBaseline(nn.Module):
     """
 
     def freeze_backbone(self, partial):
+        if partial:
+            return
         for param in self.backbone.parameters():
             param.requires_grad = False
 

@@ -205,8 +205,8 @@ def pred_to_person(joint_det, joint_scores, edge_index, pred, cc_method):
     test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
     sol = cluster_graph(test_graph, cc_method, complete=False)
     sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
-    persons_pred, mutants = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol)  # might crash
-    return persons_pred, mutants
+    persons_pred, mutants, person_labels = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol)  # might crash
+    return persons_pred, mutants, person_labels
 
 
 def graph_cluster_to_persons(joints, scores, joint_connections):
@@ -272,7 +272,7 @@ def graph_cluster_to_persons(joints, scores, joint_connections):
             persons.append(keypoints)
 
     persons = np.array(persons)
-    return persons, mutant_detected
+    return persons, mutant_detected, person_labels
 
 
 def num_non_detected_points(joint_det, keypoints, threshold, use_gt):
@@ -325,10 +325,10 @@ def to_tensor(device, *args):
     return out
 
 
-def to_device(device, *args):
+def to_device(device, l):
     out = []
-    for a in args:
-        out.append(a.to(device).unsqueeze(0))
+    for a in l:
+        out.append(a.to(device))
     return out
 
 

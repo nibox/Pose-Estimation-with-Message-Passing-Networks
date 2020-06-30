@@ -30,20 +30,19 @@ class MultiLossFactory(nn.Module):
     def __init__(self, config):
         super().__init__()
         # init check
-        self._init_check(config)
 
-        self.num_joints = config.MODEL.NUM_JOINTS
-        self.num_stages = config.LOSS.NUM_STAGES
+        self.num_joints = config.MODEL.HRNET.NUM_JOINTS
+        self.num_stages = config.MODEL.HRNET.LOSS.NUM_STAGES
 
         self.heatmaps_loss = \
             nn.ModuleList(
                 [
                     HeatmapLoss()
                     if with_heatmaps_loss else None
-                    for with_heatmaps_loss in config.LOSS.WITH_HEATMAPS_LOSS
+                    for with_heatmaps_loss in config.MODEL.HRNET.LOSS.WITH_HEATMAPS_LOSS
                 ]
             )
-        self.heatmaps_loss_factor = config.LOSS.HEATMAPS_LOSS_FACTOR
+        self.heatmaps_loss_factor = config.MODEL.HRNET.LOSS.HEATMAPS_LOSS_FACTOR
         if config.MODEL.LOSS.USE_FOCAL:
             self.classification_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA, logits=True)
         else:
@@ -53,7 +52,7 @@ class MultiLossFactory(nn.Module):
 
     def forward(self, outputs_det, outputs_class, heatmaps, edge_labels, masks, label_mask):
 
-        heatmaps_losses = []
+        heatmap_loss = 0.0
         for idx in range(len(outputs_det)):
             if self.heatmaps_loss[idx]:
                 heatmaps_pred = outputs_det[idx][:, :self.num_joints]
@@ -62,16 +61,12 @@ class MultiLossFactory(nn.Module):
                     heatmaps_pred, heatmaps[idx], masks[idx]
                 )
                 heatmaps_loss = heatmaps_loss * self.heatmaps_loss_factor[idx]
-                heatmaps_losses.append(heatmaps_loss)
-            else:
-                heatmaps_losses.append(None)
+                heatmap_loss += heatmaps_loss.mean()  # average over batch
 
-        edge_class_losses = []
+        edge_class_loss = 0.0
         for i in range(len(outputs_class)):
-            loss = self.classification_loss(outputs_class[i], edge_labels, "mean", label_mask)
-            edge_class_losses.append(loss)
-
-        return heatmaps_losses, edge_class_losses
+            edge_class_loss += self.classification_loss(outputs_class[i], edge_labels, "mean", label_mask)
+        return heatmap_loss + edge_class_loss
 
 class MPNLossFactory(nn.Module):
 

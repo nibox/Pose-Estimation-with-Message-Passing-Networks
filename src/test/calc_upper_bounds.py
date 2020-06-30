@@ -113,7 +113,7 @@ def main():
         heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
         transforms, _ = transforms_hr_eval(config)
         eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
-                                    transforms=transforms, heatmap_generator=heatmap_generator)
+                                    transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False)
     else:
         raise NotImplementedError
 
