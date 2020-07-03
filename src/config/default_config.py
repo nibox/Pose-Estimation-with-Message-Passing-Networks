@@ -110,6 +110,7 @@ _C.MODEL.MPN.BN = True
 _C.MODEL.MPN.AGGR = "max"
 _C.MODEL.MPN.SKIP = False
 _C.MODEL.MPN.AUX_LOSS_STEPS = 0  # 0 means only the last prediction is used for loss
+_C.MODEL.MPN.DROP_FEATURE = ""
 
 
 # configuration for the Graph Constructor

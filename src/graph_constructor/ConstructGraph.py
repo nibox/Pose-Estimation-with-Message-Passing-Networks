@@ -159,6 +159,8 @@ class NaiveGraphConstructor:
             edge_index = self.feature_knn_mpn_graph(joint_det, x)
         elif graph_type == "score_based":
             edge_index = self.score_based_graph(joint_det, joint_scores)
+        elif graph_type == "score_based_per_type":
+            edge_index = self.score_based_k_per_type(joint_det, joint_scores)
         else:
             raise NotImplementedError
 
@@ -257,6 +259,33 @@ class NaiveGraphConstructor:
         adj_mat[root_joint_idx] = 1
         edge_index, _ = gutils.dense_to_sparse(adj_mat)
         edge_index = gutils.to_undirected(edge_index, len(joint_det))
+        edge_index, _ = gutils.remove_self_loops(edge_index)
+
+        return edge_index.to(self.device)
+
+    def score_based_k_per_type(self, joint_det, joint_scores):
+        """
+        Idea: create a fully connected graph using high scoring joints called root joints
+        (assumption is that for each person at least one joint has a high score)
+        the rest of the joint are connected to all of these root joints
+        :param joint_det:
+        :param joint_scores:
+        :return:
+        """
+        num_joints = len(joint_det)
+        joint_det = joint_det.view(17, 30, 3)
+        joint_scores = joint_scores.view(17, 30)
+        _, indices = joint_scores.topk(k=2, dim=1)
+
+        type_idx = joint_det[np.arange(0, 17).reshape(17, 1), indices, 2]
+        indices = indices.reshape(-1)
+        root_joint_idx = indices + type_idx.view(-1) * 17
+
+        adj_mat = torch.zeros([num_joints, num_joints], dtype=torch.long)
+        adj_mat[root_joint_idx] = 1
+        adj_mat[joint_scores.view(-1) > 0.1] = 1
+        edge_index, _ = gutils.dense_to_sparse(adj_mat)
+        edge_index = gutils.to_undirected(edge_index, num_joints)
         edge_index, _ = gutils.remove_self_loops(edge_index)
 
         return edge_index.to(self.device)

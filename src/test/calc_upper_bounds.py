@@ -149,7 +149,7 @@ def main():
             test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_labels)
             sol = cluster_graph(test_graph, str(config.MODEL.GC.CC_METHOD), complete=False)
             sparse_sol_cc, _ = dense_to_sparse(torch.from_numpy(sol))
-            persons_pred_cc, _ = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol_cc)  # might crash
+            persons_pred_cc, _, _ = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol_cc)  # might crash
 
             if config.UB.ADJUST:
                 persons_pred_cc = adjust(persons_pred_cc, scoremaps[0])
