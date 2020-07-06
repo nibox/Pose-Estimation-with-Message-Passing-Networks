@@ -51,23 +51,28 @@ def main():
             img, _, masks, keypoints, factor_list = img_set[i]
             mask, keypoints, factor_list = to_tensor(device, masks[-1], keypoints, factor_list)
             img = img.to(device)[None]
-            _, pred, joint_det, joint_scores, edge_index, _, label_mask = model(img, keypoints, mask, factor_list)
+            _, pred, preds_nodes, joint_det, joint_scores, edge_index, _, _, label_mask = model(img, keypoints, mask, factor_list)
 
             # construct poses
-            persons_pred_cc, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, config.MODEL.GC.CC_METHOD)
+            persons_pred_cc, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, config.MODEL.GC.CC_METHOD)
             # construct solution by using only labeled edges (instead of corr clustering)
             sparse_sol_gt = torch.stack([edge_index[0, pred == 1], edge_index[1, pred == 1]])
-            persons_pred_gt, _ = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol_gt)  # might crash
+            persons_pred_gt, _, _ = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol_gt)  # might crash
             print(f"Num detection: {len(joint_det)}")
             print(f"Num edges : {len(edge_index[0])}")
             print(f"Num active edges: {(pred==1).sum()}")
 
             joint_det = joint_det.cpu().numpy().squeeze()
+            preds_nodes = preds_nodes.cpu().numpy()
+            clean_joint_det = joint_det[preds_nodes == 1]
             keypoints = keypoints.cpu().numpy().squeeze()
 
             img = np.array(transforms_inv(img.cpu().squeeze()))
             draw_detection(img, joint_det, keypoints,
                            fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_det.png",
+                           output_size=256)
+            draw_detection(img, clean_joint_det, keypoints,
+                           fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_clean.png",
                            output_size=256)
             draw_poses(img, keypoints, fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt.png",
                        output_size=256)

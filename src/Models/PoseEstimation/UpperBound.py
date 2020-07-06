@@ -67,42 +67,14 @@ class UpperBoundModel(nn.Module):
 
         bb_output = self.backbone(imgs)
         scoremaps, features = self.process_output(bb_output)
-        """
-        scoremap_1, scoremap_2 = self.backbone(imgs)
-
-        scoremap_1 = torch.nn.functional.interpolate(
-            scoremap_1,
-            size=(scoremap_2.shape[2], scoremap_2.shape[3]),
-            mode='bilinear',
-            align_corners=False
-        )
-        #scoremaps = (scoremap_2 + scoremap_1[:, :17]) / 2
-        scoremaps = scoremap_2
-        scoremaps, features = self.process_output(bb_output)
-
-        scoremaps = scoremaps[:, :17]
-        features = torch.zeros(1, 256, scoremaps.shape[2], scoremaps.shape[3], dtype=torch.float32)
-
-        """
         features = self.feature_gather(features)
 
         graph_constructor = get_graph_constructor(self.gc_config, scoremaps=scoremaps, features=features,
                                                   joints_gt=keypoints_gt, factor_list=factor_list, masks=masks,
                                                   device=scoremaps.device)
 
-        """
-        graph_constructor = self.graph_constructor(scoremap, features, keypoints_gt, factor_list, masks,
-                                                   use_gt=self.use_gt,
-                                                   no_false_positives=self.cheat, use_neighbours=self.use_neighbours,
-                                                   device=scoremap.device, edge_label_method=self.edge_label_method,
-                                                   detect_threshold=self.config["detect_threshold"],
-                                                   mask_crowds=self.mask_crowds,
-                                                   inclusion_radius=self.config["inclusion_radius"],
-                                                   matching_radius=self.config["matching_radius"],
-                                                   mpn_graph_type=self.config["mpn_graph_type"])
-        """
 
-        x, edge_attr, edge_index, edge_labels, joint_det, label_mask, joint_scores = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, node_labels, joint_det, label_mask, joint_scores = graph_constructor.construct_graph()
 
-        return scoremaps, edge_labels, joint_det, joint_scores, edge_index, edge_labels, label_mask
+        return scoremaps, edge_labels, node_labels, joint_det, joint_scores, edge_index, edge_labels, node_labels, label_mask
 

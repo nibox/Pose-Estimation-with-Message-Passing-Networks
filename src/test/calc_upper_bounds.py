@@ -2,7 +2,7 @@ import pickle
 import torch
 import numpy as np
 import torchvision
-from torch_geometric.utils import dense_to_sparse
+from torch_geometric.utils import dense_to_sparse, subgraph
 from tqdm import tqdm
 
 from Utils.transformations import reverse_affine_map
@@ -144,8 +144,9 @@ def main():
             img, _, masks, keypoints, factors = eval_set[i]
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
-            scoremaps, _, joint_det, joint_scores, edge_index, edge_labels, _ = model(img, keypoints, masks, factors)
+            scoremaps, _, _, joint_det, joint_scores, edge_index, edge_labels, node_labels, _ = model(img, keypoints, masks, factors)
 
+            edge_index, edge_labels = subgraph(node_labels > 0.5, edge_index, edge_labels)
             test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_labels)
             sol = cluster_graph(test_graph, str(config.MODEL.GC.CC_METHOD), complete=False)
             sparse_sol_cc, _ = dense_to_sparse(torch.from_numpy(sol))

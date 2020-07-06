@@ -85,7 +85,7 @@ class ClassificationMPN(torch.nn.Module):
         if kwargs["node_labels"] is not None and self.training:
             true_positive_idx[kwargs["node_labels"]==1.0] = True
 
-        default_preds_edge = torch.zeros(edge_index.shape[1], dtype=torch.float, device=edge_index.device, requires_grad=False) - 1e-10
+        default_preds_edge = torch.zeros(edge_index.shape[1], dtype=torch.float, device=edge_index.device, requires_grad=False) - 1e-3
         mask = subgraph_mask(true_positive_idx, edge_index)
         if len(mask) != 0:
             sub_edge_index = edge_index[:, mask]

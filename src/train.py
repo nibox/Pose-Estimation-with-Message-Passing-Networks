@@ -116,8 +116,9 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
                 true_positive_idx = preds_nodes[-1].detach() > 0.0
                 true_positive_idx[node_labels == 1.0] = True
                 mask = subgraph_mask(true_positive_idx, edge_index)
-                label_mask[mask == 0] = 0.0
-                loss = loss_func(preds, preds_nodes, edge_labels, node_labels, label_mask)
+                loss_mask = label_mask.clone() # .[mask == 0] = 0.0
+                loss_mask[mask==0] = 0.0
+                loss = loss_func(preds, preds_nodes, edge_labels, node_labels, loss_mask)
                 label_mask[mask == 0] = 1.0
                 # """
             else:
@@ -145,7 +146,7 @@ def main():
     torch.manual_seed(seed)
 
     ##########################################################
-    config_name = "model_35_2"
+    config_name = "model_40"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
@@ -284,12 +285,23 @@ def main():
                         loss = loss_func(preds, edge_labels, label_mask=label_mask)
                     elif isinstance(loss_func, ClassMPNLossFactory):
                         # adapt labels and mask to reduced graph
+                        """
                         true_positive_idx = preds_nodes[-1] > 0.0
                         true_positive_idx[node_labels == 1.0] = True
                         _, attr = subgraph(true_positive_idx, edge_index, torch.stack([edge_labels, label_mask], dim=1))
                         edge_labels = attr[:, 0]
                         label_mask = attr[:, 1]
                         loss = loss_func(preds, preds_nodes, edge_labels, node_labels, label_mask)
+                        # """
+                        # """
+                        true_positive_idx = preds_nodes[-1].detach() > 0.0
+                        true_positive_idx[node_labels == 1.0] = True
+                        mask = subgraph_mask(true_positive_idx, edge_index)
+                        loss_mask = label_mask.clone()  # .[mask == 0] = 0.0
+                        loss_mask[mask == 0] = 0.0
+                        loss = loss_func(preds, preds_nodes, edge_labels, node_labels, loss_mask)
+                        label_mask[mask == 0] = 1.0
+                        # """
                     else:
                         raise NotImplementedError
 
@@ -328,8 +340,8 @@ def main():
         scheduler.step()
 
         logger.log_loss(np.mean(valid_loss), "Loss/valid", epoch)
-        logger.log_vars("Metrics/valid", epoch, **valid_dict['edge'])
-        logger.log_vars("Metrics/Node/valid", epoch, **valid_dict['node'])
+        logger.log_vars("Metric/valid", epoch, **valid_dict['edge'])
+        logger.log_vars("Metric/Node/valid", epoch, **valid_dict['node'])
 
         torch.save({"epoch": epoch,
                     "model_state_dict": model.state_dict(),
