@@ -10,6 +10,7 @@ import torch.nn as nn
 from torch import nn as nn
 from torch.nn import functional as F
 from torch_scatter import scatter_mean
+from torch_geometric.utils import subgraph
 
 
 class HeatmapLoss(nn.Module):
@@ -89,6 +90,31 @@ class MPNLossFactory(nn.Module):
         loss = loss / len(outputs_class)
 
         return loss
+
+class ClassMPNLossFactory(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+
+        if config.MODEL.LOSS.USE_FOCAL:
+            self.classification_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA,
+                                                 logits=True)
+        else:
+            raise NotImplementedError
+
+    def forward(self, outputs_class, outputs_nodes, edge_labels, node_labels, label_mask):
+
+        node_loss = 0.0
+        for i in range(len(outputs_nodes)):
+            node_loss += self.classification_loss(outputs_nodes[i], node_labels, "mean", None)
+        node_loss = node_loss / len(outputs_nodes)
+
+        edge_loss = 0.0
+        for i in range(len(outputs_class)):
+            edge_loss += self.classification_loss(outputs_class[i], edge_labels, "mean", label_mask)
+        edge_loss = edge_loss / len(outputs_class)
+
+        return node_loss + edge_loss
 
 
 class FocalLoss(nn.Module):

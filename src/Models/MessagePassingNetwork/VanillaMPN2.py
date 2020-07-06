@@ -73,15 +73,21 @@ class VanillaMPN2(torch.nn.Module):
         self.steps = config.STEPS
         self.aux_loss_steps = config.AUX_LOSS_STEPS
 
-    def forward(self, x, edge_attr, edge_index):
+    def forward(self, x, edge_attr, edge_index, **kwargs):
         node_features = self.node_embedding(x)
         edge_features = self.edge_embedding(edge_attr)
 
-        preds = []
+        # node_features_initial = node_features
+        # edge_features_initial = edge_features
+
+        preds_edge = []
         for i, mpn in enumerate(self.mpn):
+            # if self.use_skip_connections:
+            #     node_features = torch.cat([node_features_initial, node_features], dim=1)
+            #     edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
             node_features, edge_features = mpn(node_features, edge_features, edge_index)
 
             if i >= self.steps - self.aux_loss_steps - 1:
-                preds.append(self.classification(edge_features).squeeze())
-        return preds
+                preds_edge.append(self.classification(edge_features).squeeze())
+        return preds_edge, None
 

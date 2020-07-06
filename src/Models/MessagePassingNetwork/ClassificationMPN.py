@@ -2,39 +2,15 @@ import torch
 import torch.nn as nn
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
-from torch_geometric.utils import add_self_loops, degree
+from Utils.Utils import subgraph_mask
 from .layers import _make_mlp
 
 
-class PerInvMLP(nn.Module):
-
-    def __init__(self, node_feature_dim, edge_feature_dim):
-        super().__init__()
-        self.node_feature_dim = node_feature_dim
-        self.node_mlp = nn.Sequential(nn.Linear(node_feature_dim, edge_feature_dim),
-                                      nn.ReLU(),
-                                      nn.Linear(edge_feature_dim, edge_feature_dim))
-        self.edge_mlp = nn.Sequential(nn.Linear(edge_feature_dim, edge_feature_dim),
-                                      nn.ReLU(),
-                                      nn.Linear(edge_feature_dim, edge_feature_dim))
-        self.fusion = nn.Sequential(nn.Linear(2 * edge_feature_dim, edge_feature_dim),
-                                    nn.ReLU(),
-                                    nn.Linear(edge_feature_dim, edge_feature_dim))
-
-    def forward(self, x):
-        node_1 = self.node_mlp(x[:, :self.node_feature_dim])
-        node_2 = self.node_mlp(x[:, self.node_feature_dim: 2 * self.node_feature_dim])
-        edge = self.edge_mlp(x[:, self.node_feature_dim * 2:])
-        edge_attr = self.fusion(
-            torch.cat([node_1 + node_2, edge], dim=1))  # todo ask if edge features are permutation inv
-        return edge_attr
-
-
-class VanillaMPLayer(MessagePassing):
+class MPLayer(MessagePassing):
 
     # todo with or without inital feature skip connection
     def __init__(self, node_feature_dim, edge_feature_dim, edge_feature_hidden, aggr, use_node_update_mlp, skip=False):
-        super(VanillaMPLayer, self).__init__(aggr=aggr)
+        super(MPLayer, self).__init__(aggr=aggr)
         # todo better architecture
 
         node_factor = 2 if skip else 1
@@ -74,40 +50,51 @@ class VanillaMPLayer(MessagePassing):
         return aggr_out
 
 
-class VanillaMPN(torch.nn.Module):
+class ClassificationMPN(torch.nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.use_skip_connections = config.SKIP
-        self.mpn = VanillaMPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
+        self.mpn_node_cls = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
                                   aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP)
+        self.mpn_grouping = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
+                                    aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP)
 
         self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, bn=config.BN,
                                         end_with_relu=config.NODE_EMB.END_WITH_RELU)
         self.node_embedding = _make_mlp(config.NODE_INPUT_DIM, config.NODE_EMB.OUTPUT_SIZES, bn=config.BN,
                                         end_with_relu=config.NODE_EMB.END_WITH_RELU)
-        self.classification = _make_mlp(config.EDGE_FEATURE_DIM, config.CLASS.OUTPUT_SIZES, bn=config.BN)
 
-        self.aux_loss_steps = config.AUX_LOSS_STEPS
+        self.edge_classification = _make_mlp(config.EDGE_FEATURE_DIM, config.EDGE_CLASS.OUTPUT_SIZES, bn=config.BN)
+        self.node_classification = _make_mlp(config.NODE_FEATURE_DIM, config.NODE_CLASS.OUTPUT_SIZES, bn=config.BN)
 
-        self.steps = config.STEPS
+        self.node_steps = config.STEPS_NODE
+        self.grouping_steps = config.STEPS_GROUP
 
     def forward(self, x, edge_attr, edge_index, **kwargs):
 
         node_features = self.node_embedding(x)
         edge_features = self.edge_embedding(edge_attr)
 
-        node_features_initial = node_features
-        edge_features_initial = edge_features
-
         preds_edge = []
-        for i in range(self.steps):
-            if self.use_skip_connections:
-                node_features = torch.cat([node_features_initial, node_features], dim=1)
-                edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
+        preds_node = []
+        for i in range(self.node_steps):
+            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index)
+        preds_node.append(self.node_classification(node_features).squeeze())
 
-            node_features, edge_features = self.mpn(node_features, edge_features, edge_index)
-            if i >= self.steps - self.aux_loss_steps - 1:
-                preds_edge.append(self.classification(edge_features).squeeze())
+        true_positive_idx = preds_node[-1] > 0.0
+        if kwargs["node_labels"] is not None and self.training:
+            true_positive_idx[kwargs["node_labels"]==1.0] = True
 
-        return preds_edge, None
+        default_preds_edge = torch.zeros(edge_index.shape[1], dtype=torch.float, device=edge_index.device, requires_grad=False) - 1e-10
+        mask = subgraph_mask(true_positive_idx, edge_index)
+        if len(mask) != 0:
+            sub_edge_index = edge_index[:, mask]
+            edge_features = edge_features[mask]
+
+            for i in range(self.grouping_steps):
+                node_features, edge_features = self.mpn_grouping(node_features, edge_features, sub_edge_index)
+            default_preds_edge[mask] = self.edge_classification(edge_features).squeeze()
+        preds_edge.append(default_preds_edge)
+        # preds_edge.append(self.edge_classification(edge_features).squeeze())
+
+        return preds_edge, preds_node

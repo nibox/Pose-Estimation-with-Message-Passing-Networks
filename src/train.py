@@ -2,15 +2,36 @@ import torch
 from torch.utils.data import DataLoader
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
 from Utils.transforms import transforms_hr_eval, transforms_hr_train, transforms_hg_eval
-from Utils.loss import MPNLossFactory, MultiLossFactory
-from Utils.Utils import to_device
+from Utils.loss import MPNLossFactory, MultiLossFactory, ClassMPNLossFactory
+from Utils.Utils import to_device, calc_metrics, subgraph_mask
+from torch_geometric.utils import subgraph
 from config import get_config, update_config
 import numpy as np
 import pickle
 from Models import get_pose_model
-from torch_geometric.utils import recall, accuracy, precision, f1_score
 from torch.utils.tensorboard import SummaryWriter
 import os
+
+
+class Logger(object):
+
+    def __init__(self, config):
+        self.writer = SummaryWriter(config.LOG_DIR)
+
+
+    def log_vars(self, name, iter, **kwargs):
+
+        for key in kwargs.keys():
+            if isinstance(kwargs[key], list):
+                if kwargs[key]:
+                    self.writer.add_scalar(f"{name}_{key}", np.mean(kwargs[key]), iter)
+                else:
+                    continue
+            else:
+                self.writer.add_scalar(f"{name}_{key}", kwargs[key], iter)
+
+    def log_loss(self, loss, name, iter):
+        self.writer.add_scalar(f"{name}", loss, iter)
 
 
 def create_train_validation_split(config):
@@ -51,56 +72,6 @@ def create_train_validation_split(config):
 def make_train_func(model, optimizer, loss_func, **kwargs):
     def func(batch):
         if kwargs["end_to_end"]:
-            """
-            optimizer.zero_grad()
-            # split batch
-            imgs, masks, keypoints, factors = batch
-            imgs = imgs.to(kwargs["device"])
-            masks = masks.to(kwargs["device"])
-            keypoints = keypoints.to(kwargs["device"])
-            factors = factors.to(kwargs["device"])
-
-            loss = 0.0
-            preds, labels = [], []
-            batch_size = imgs.shape[0]
-
-            num_edges_in_batch = 0
-            for i in range(batch_size):
-
-                _, pred, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs[None, i],
-                                                                                          keypoints[None, i],
-                                                                                          masks[None, i],
-                                                                                          factors[None, i])
-
-                label_mask = label_mask if kwargs["use_label_mask"] else None
-                batch_index = batch_index if kwargs["use_batch_index"] else None
-
-                local_loss = model.mpn_loss(pred, edge_labels, reduction=kwargs["loss_reduction"],
-                                            pos_weight=None, mask=label_mask, batch_index=batch_index)
-
-                num_edges_in_batch += len(edge_labels)
-                # in case of loss_reduction="sum" the scaling is done at the gradient directly
-                local_loss.backward()
-                loss += local_loss.item()
-
-                preds.append(pred.detach())
-                labels.append(edge_labels.detach())
-
-            if kwargs["loss_reduction"] == "sum":
-                norm_const = num_edges_in_batch
-            elif kwargs["loss_reduction"] == "mean":
-                norm_const = batch_size
-            else:
-                raise NotImplementedError
-            loss /= norm_const  # this is for logging
-            for p in model.parameters():
-                if p.grad is not None:
-                    p.grad.data /= norm_const
-            optimizer.step()
-
-            preds = torch.cat(preds, 1)
-            edge_labels = torch.cat(labels)
-            """
             optimizer.zero_grad()
             # split batch
             imgs, heatmaps, masks, keypoints, factors = batch
@@ -110,15 +81,13 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             factors = factors.to(kwargs["device"])
             heatmaps = to_device(kwargs["device"], heatmaps)
 
-            _, preds, joint_det, _, edge_index, edge_labels, label_mask, batch_index, bb_output = model(imgs, keypoints, masks[-1], factors)
+            _, preds, preds_nodes, joint_det, _, edge_index, edge_labels, node_labels, label_mask, bb_output = model(imgs, keypoints, masks[-1], factors)
 
             label_mask = label_mask if kwargs["use_label_mask"] else None
-            batch_index = batch_index if kwargs["use_batch_index"] else None
 
             loss = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
             loss.backward()
             optimizer.step()
-            loss = loss.item()
         else:
             optimizer.zero_grad()
             # split batch
@@ -127,18 +96,42 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             masks = masks[-1].to(kwargs["device"])
             keypoints = keypoints.to(kwargs["device"])
             factors = factors.to(kwargs["device"])
-
-            _, preds, joint_det, _,  edge_index, edge_labels, label_mask, batch_index, _, _ = model(imgs, keypoints, masks, factors)
+            _, preds, preds_nodes, joint_det, _, edge_index, edge_labels, node_labels, label_mask, bb_output = model(imgs, keypoints, masks, factors)
 
             label_mask = label_mask if kwargs["use_label_mask"] else None
-            batch_index = batch_index if kwargs["use_batch_index"] else None
 
-            loss = loss_func(preds, edge_labels, label_mask=label_mask)
+            if isinstance(loss_func, MPNLossFactory):
+                loss = loss_func(preds, edge_labels, label_mask=label_mask)
+            elif isinstance(loss_func, ClassMPNLossFactory):
+                # adapt labels and mask to reduced graph
+                """
+                true_positive_idx = preds_nodes[-1] > 0.0
+                true_positive_idx[node_labels == 1.0] = True
+                _, attr = subgraph(true_positive_idx, edge_index, torch.stack([edge_labels, label_mask], dim=1))
+                edge_labels = attr[:, 0]
+                label_mask = attr[:, 1]
+                loss = loss_func(preds, preds_nodes, edge_labels, node_labels, label_mask)
+                # """
+                # """
+                true_positive_idx = preds_nodes[-1].detach() > 0.0
+                true_positive_idx[node_labels == 1.0] = True
+                mask = subgraph_mask(true_positive_idx, edge_index)
+                label_mask[mask == 0] = 0.0
+                loss = loss_func(preds, preds_nodes, edge_labels, node_labels, label_mask)
+                label_mask[mask == 0] = 1.0
+                # """
+            else:
+                raise NotImplementedError
             loss.backward()
             optimizer.step()
-            loss = loss.item()
+        loss = loss.item()
+        preds_edges = preds[-1].detach()
+        preds_nodes = None if preds_nodes is None else preds_nodes[-1].detach()
+        edge_labels = edge_labels.detach()
+        node_labels = None if preds_nodes is None else node_labels.detach()
+        edge_label_mask = label_mask.detach()
 
-        return preds[-1], edge_labels, loss, label_mask
+        return loss, preds_nodes, preds_edges, node_labels, edge_labels, edge_label_mask
 
     return func
 
@@ -152,12 +145,12 @@ def main():
     torch.manual_seed(seed)
 
     ##########################################################
-    config_name = "model_24_7"
+    config_name = "model_35_2"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
     os.makedirs(config.LOG_DIR, exist_ok=True)
-    writer = SummaryWriter(config.LOG_DIR)
+    logger = Logger(config)
 
     ##########################################################
     if not config.MODEL.GC.USE_GT:
@@ -172,7 +165,12 @@ def main():
     else:
         model.freeze_backbone(partial=False)
         optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR)
-        loss_func = MPNLossFactory(config)
+        if config.MODEL.LOSS.NAME == "edge_loss":
+            loss_func = MPNLossFactory(config)
+        elif config.MODEL.LOSS.NAME == "node_edge_loss":
+            loss_func = ClassMPNLossFactory(config)
+        else:
+            raise NotImplementedError
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, config.TRAIN.LR_STEP, config.TRAIN.LR_FACTOR)
     model.to(device)
 
@@ -199,13 +197,41 @@ def main():
         for i, batch in enumerate(train_loader):
             iter = i + (epoch_len * epoch)
 
-            pred, edge_labels, loss, label_mask = update_model(batch)
+            loss, preds_nodes, preds_edges, node_labels, edge_labels, edge_label_mask = update_model(batch)
 
-            result = pred.sigmoid().squeeze()
-            result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
+            if preds_nodes is not None:
+                result_nodes = preds_nodes.sigmoid().squeeze()
+                result_nodes = torch.where(result_nodes < 0.5, torch.zeros_like(result_nodes), torch.ones_like(result_nodes))
+            else:
+                result_nodes = None
+            result_edges = preds_edges.sigmoid().squeeze()
+            result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
 
+            node_metrics = calc_metrics(result_nodes, node_labels)
+            edge_metrics = calc_metrics(result_edges, edge_labels, edge_label_mask)
+
+            logger.log_vars("Metric/train", iter, **edge_metrics)
+            logger.log_vars("Metric/Node/train", iter, **(node_metrics or {}))
+            logger.log_loss(loss, "Loss/train", iter)
+
+            if preds_nodes is not None:
+                print(f"Iter: {iter}, loss:{loss:6f}, "
+                      f"Edge_Prec : {edge_metrics['prec']:5f} "
+                      f"Edge_Rec: {edge_metrics['rec']:5f} "
+                      f"Edge_Acc: {edge_metrics['acc']:5f} "
+                      f"Node_Prec: {node_metrics['prec']:5f} "
+                      f"Node_Rec: {node_metrics['rec']:5f} "
+                      )
+            else:
+                print(f"Iter: {iter}, loss:{loss:6f}, "
+                      f"Edge_Prec : {edge_metrics['prec']:5f} "
+                      f"Edge_Rec: {edge_metrics['rec']:5f} "
+                      f"Edge_Acc: {edge_metrics['acc']:5f} "
+                      )
+            """
             result = result[label_mask==1.0]
             edge_labels = edge_labels[label_mask==1.0]
+
 
             # metrics
             # edge_labels[edge_labels<0.99] = 0.0  # some edge labels might be
@@ -213,6 +239,10 @@ def main():
             rec = recall(result, edge_labels, 2)[1]
             acc = accuracy(result, edge_labels)
             f1 = f1_score(result, edge_labels, 2)[1]
+
+            node_rec = recall(result_nodes, node_labels, 2)[1]
+            node_prec = precision(result_nodes, node_labels, 2)[1]
+            node_acc = accuracy(result_nodes, node_labels)
             print(f"Iter: {iter}, loss:{loss:6f}, "
                   f"Precision : {prec:5f} "
                   f"Recall: {rec:5f} "
@@ -223,14 +253,17 @@ def main():
             writer.add_scalar("Metric/train_f1:", f1, iter)
             writer.add_scalar("Metric/train_prec:", prec, iter)
             writer.add_scalar("Metric/train_rec:", rec, iter)
+            writer.add_scalar("Metrics/Node/train_prec", node_prec, iter)
+            writer.add_scalar("Metrics/Node/train_rec", node_rec, iter)
+            writer.add_scalar("Metrics/Node/train_acc", node_acc, iter)
+            """
         model.eval()
 
         print("#### BEGIN VALIDATION ####")
+
+        valid_dict = {"node": {"acc": [], "prec": [], "rec": [], "f1": []},
+                      "edge": {"acc": [], "prec": [], "rec": [], "f1": []}}
         valid_loss = []
-        valid_acc = []
-        valid_f1 = []
-        valid_prec = []
-        valid_recall = []
         with torch.no_grad():
             for batch in valid_loader:
                 # split batch
@@ -241,43 +274,68 @@ def main():
                 factors = factors.to(device)
                 heatmaps = to_device(device, heatmaps)
 
-                _, preds, joint_det, _, edge_index, edge_labels, label_mask, batch_index, bb_output, _ = model(imgs, keypoints, masks[-1], factors)
+                _, preds, preds_nodes, joint_det, _, edge_index, edge_labels, node_labels, label_mask, bb_output = model(imgs, keypoints, masks[-1], factors)
 
                 label_mask = label_mask if config.TRAIN.USE_LABEL_MASK else None
                 if config.TRAIN.END_TO_END:
                     loss = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
                 else:
-                    loss = loss_func(preds, edge_labels, label_mask)
-                result = preds[-1].sigmoid().squeeze()
-                result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
+                    if isinstance(loss_func, MPNLossFactory):
+                        loss = loss_func(preds, edge_labels, label_mask=label_mask)
+                    elif isinstance(loss_func, ClassMPNLossFactory):
+                        # adapt labels and mask to reduced graph
+                        true_positive_idx = preds_nodes[-1] > 0.0
+                        true_positive_idx[node_labels == 1.0] = True
+                        _, attr = subgraph(true_positive_idx, edge_index, torch.stack([edge_labels, label_mask], dim=1))
+                        edge_labels = attr[:, 0]
+                        label_mask = attr[:, 1]
+                        loss = loss_func(preds, preds_nodes, edge_labels, node_labels, label_mask)
+                    else:
+                        raise NotImplementedError
+
+                result_edges = preds[-1].sigmoid().squeeze()
+                result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
+
+                if preds_nodes is not None:
+                    result_nodes = preds_nodes[-1].sigmoid().squeeze()
+                    result_nodes = torch.where(result_nodes < 0.5, torch.zeros_like(result_nodes), torch.ones_like(result_nodes))
+                else:
+                    result_nodes = None
+                    node_labels = None
 
                 # remove masked connections from score calculation
-                result = result[label_mask == 1.0]
-                edge_labels = edge_labels[label_mask == 1.0]
+                """
                 if len(result) == 0:
                     continue
+                """
+                print(result_nodes)
+                node_metrics = calc_metrics(result_nodes, node_labels)
+                edge_metrics = calc_metrics(result_edges, edge_labels, label_mask)
 
                 valid_loss.append(loss.item())
-                valid_acc.append(accuracy(result, edge_labels))
-                valid_f1.append(f1_score(result, edge_labels, 2)[1])
-                valid_prec.append(precision(result, edge_labels, 2)[1])
-                valid_recall.append(recall(result, edge_labels, 2)[1])
+                if edge_metrics is not None:
+                    for key in edge_metrics.keys():
+                        valid_dict["edge"][key].append((edge_metrics[key]))
+
+                if node_metrics is not None:
+                    for key in node_metrics.keys():
+                        valid_dict["edge"][key].append((node_metrics[key]))
+
         print(f"Epoch: {epoch}, loss:{np.mean(valid_loss):6f}, "
-              f"Accuracy: {np.mean(valid_acc)}, "
-              f"Precision: {np.mean(valid_prec)}")
+              f"Accuracy: {np.mean(valid_dict['edge']['acc']):5f}, "
+              f"Precision: {np.mean(valid_dict['edge']['prec']):5f}, "
+              f"Recall: {np.mean(valid_dict['edge']['rec']):5f}")
         scheduler.step()
 
-        writer.add_scalar("Loss/valid", np.mean(valid_loss), epoch)
-        writer.add_scalar("Metric/valid_acc", np.mean(valid_acc), epoch)
-        writer.add_scalar("Metric/valid_f1:", np.mean(valid_f1), epoch)
-        writer.add_scalar("Metric/valid_prec:", np.mean(valid_prec), epoch)
-        writer.add_scalar("Metric/valid_recall:", np.mean(valid_recall), epoch)
+        logger.log_loss(np.mean(valid_loss), "Loss/valid", epoch)
+        logger.log_vars("Metrics/valid", epoch, **valid_dict['edge'])
+        logger.log_vars("Metrics/Node/valid", epoch, **valid_dict['node'])
+
         torch.save({"epoch": epoch,
                     "model_state_dict": model.state_dict(),
                     "optimizer_state_dict": optimizer.state_dict(),
                     "lr_scheduler_state_dict": scheduler.state_dict()
                     }, config.MODEL.PRETRAINED)
-    writer.close()
 
 
 if __name__ == "__main__":

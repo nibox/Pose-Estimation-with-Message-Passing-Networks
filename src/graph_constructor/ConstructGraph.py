@@ -32,8 +32,8 @@ class NaiveGraphConstructor:
     def construct_graph(self):
         x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list = [], [], [], [], []
         joint_score_list = []
+        node_label_list = []
         label_mask_list = []
-        batch_index = []
         num_node_list = [0]
         for batch in range(self.batch_size):
             if self.mask_crowds:
@@ -74,10 +74,8 @@ class NaiveGraphConstructor:
                         # inactive and the loss of the image should be masked out. It is a bit hacky but it works
                         joint_det = joints_gt_position
                         joint_scores = torch.ones(len(joint_det), dtype=torch.float, device=joint_det.device)
-
             x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch], self.mpn_graph_type,
                                                                  joint_scores)
-
 
             # sol maps nodes to gt joints/  gt joints to nodes and connectivity maps between gt joints
             edge_labels = None
@@ -102,24 +100,28 @@ class NaiveGraphConstructor:
                 if edge_labels.max() == 0:
                     label_mask = torch.zeros_like(label_mask, device=self.device, dtype=torch.float)
                 label_mask_list.append(label_mask)
+
+            node_labels = torch.zeros(joint_det.shape[0], device=joint_det.device, dtype=torch.float32)
+            node_labels[edge_index[0][edge_labels == 1]] = 1.0
+
             x_list.append(x)
-            batch_index.append(torch.ones_like(edge_labels, dtype=torch.long) * batch)
             num_node_list.append(x.shape[0] + num_node_list[-1])
             edge_attr_list.append(edge_attr)
             edge_index_list.append(edge_index)
             edge_labels_list.append(edge_labels)
             joint_det_list.append(joint_det)
             joint_score_list.append(joint_scores)
+            node_label_list.append(node_labels)
         # update edge_indices for batching
         for i in range(1, len(x_list)):
             edge_index_list[i] += num_node_list[i]
 
         x_list = torch.cat(x_list, 0)
-        batch_index = torch.cat(batch_index, 0)
         edge_attr_list = torch.cat(edge_attr_list, 0)
         edge_index_list = torch.cat(edge_index_list, 1)
         joint_det_list = torch.cat(joint_det_list, 0)
         joint_score_list = torch.cat(joint_score_list, 0)
+        node_label_list = torch.cat(node_label_list, 0)
         if self.joints_gt is not None:
             assert edge_labels_list[0] is not None
             edge_labels_list = torch.cat(edge_labels_list, 0)
@@ -128,7 +130,7 @@ class NaiveGraphConstructor:
         else:
             label_mask_list = torch.cat(label_mask_list, 0)
 
-        return x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list, label_mask_list, batch_index, joint_score_list
+        return x_list, edge_attr_list, edge_index_list, edge_labels_list, node_label_list, joint_det_list, label_mask_list, joint_score_list
 
     def _construct_mpn_graph(self, joint_det, features, graph_type, joint_scores):
         """

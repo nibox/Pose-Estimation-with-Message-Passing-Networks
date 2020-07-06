@@ -23,6 +23,7 @@ _C.MODEL = CN()
 _C.MODEL.KP = "hrnet"
 _C.MODEL.PRETRAINED = ""  # means the path were the trained model is saved to and where the trained model is loaded from
 _C.MODEL.LOSS = CN()
+_C.MODEL.LOSS.NAME = "edge_loss"
 _C.MODEL.LOSS.USE_FOCAL = True
 _C.MODEL.LOSS.FOCAL_ALPHA = 1.0
 _C.MODEL.LOSS.FOCAL_GAMMA = 2.0
@@ -94,7 +95,7 @@ _C.MODEL.HRNET.EXTRA.DECONV.NUM_BASIC_BLOCKS = 4
 _C.MODEL.HRNET.EXTRA.DECONV.KERNEL_SIZE = [4]
 _C.MODEL.HRNET.EXTRA.DECONV.CAT_OUTPUT = [True]
 
-_C.MODEL.MPN = CN()
+_C.MODEL.MPN = CN(new_allowed=True)
 _C.MODEL.MPN.NAME = "VanillaMPN"
 _C.MODEL.MPN.STEPS = 10
 _C.MODEL.MPN.NODE_INPUT_DIM = 128

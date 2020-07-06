@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from matplotlib import pyplot as plt
-from torch_geometric.utils import dense_to_sparse
+from torch_geometric.utils import dense_to_sparse, precision, recall, accuracy, f1_score
 
 from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
 from Utils.dataset_utils import Graph
@@ -335,3 +335,41 @@ def to_device(device, l):
 def set_bn_eval(module):
     if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
         module.eval()
+
+def set_bn_feeze(module):
+    if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
+        for param in module.parameters():
+            param.requires_grad = False
+
+
+def calc_metrics(output, targets, mask=None):
+    if output is None and targets is None:
+        # do nothing
+        return None
+
+    if mask is not None:
+        output = output[mask == 1.0]
+        targets = targets[mask == 1.0]
+        if len(output) == 0:
+            return None
+
+    prec = precision(output, targets, 2)[1]
+    rec = recall(output, targets, 2)[1]
+    acc = accuracy(output, targets)
+    f1 = f1_score(output, targets, 2)[1]
+
+    return {"acc": acc, "prec": prec, "rec": rec, "f1": f1}
+
+def subgraph_mask(subset, edge_index):
+    r"""Copy paste of torch_geometric.utils.subgraph but it return the mask instead of the subgraph.
+    Subset has to
+
+    Args:
+        subset (BoolTensor or [int] ): The nodes to keep.
+        edge_index (LongTensor): The edge indices.
+
+    :rtype: (:class:`LongTensor`, :class:`Tensor`)
+    """
+    mask = subset[edge_index[0]] & subset[edge_index[1]]
+
+    return mask

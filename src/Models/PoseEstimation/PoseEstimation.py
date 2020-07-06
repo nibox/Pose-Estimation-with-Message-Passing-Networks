@@ -90,13 +90,15 @@ class PoseEstimationBaseline(nn.Module):
                                                   joints_gt=keypoints_gt, factor_list=factors, masks=masks,
                                                   device=scoremaps.device)
 
-        x, edge_attr, edge_index, edge_labels, joint_det, label_mask, batch_index, joint_scores = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, node_labels, joint_det, label_mask, joint_scores = graph_constructor.construct_graph()
 
-        preds, node_features = self.mpn(x, edge_attr, edge_index)
+        preds, node_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels)
         if not with_logits:
             preds[-1] = torch.sigmoid(preds[-1])
+            if node_pred is not None:
+                node_pred[-1] = torch.sigmoid(node_pred[-1])
 
-        return scoremaps, preds, joint_det, joint_scores, edge_index, edge_labels, label_mask, batch_index, bb_output[0], node_features[-1]
+        return scoremaps, preds, node_pred, joint_det, joint_scores, edge_index, edge_labels, node_labels, label_mask, bb_output[0]
 
     """
     def mpn_loss(self, outputs, targets, reduction, with_logits=True, mask=None, batch_index=None) -> torch.Tensor:
@@ -120,6 +122,7 @@ class PoseEstimationBaseline(nn.Module):
 
     def freeze_backbone(self, partial):
         if partial:
+            self.backbone.apply(set_bn_feeze)
             return
         for param in self.backbone.parameters():
             param.requires_grad = False
