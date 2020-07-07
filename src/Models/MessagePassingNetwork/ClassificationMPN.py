@@ -54,6 +54,7 @@ class ClassificationMPN(torch.nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        self.use_skip_connections = config.SKIP
         self.mpn_node_cls = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
                                   aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP)
         self.mpn_grouping = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
@@ -75,9 +76,15 @@ class ClassificationMPN(torch.nn.Module):
         node_features = self.node_embedding(x)
         edge_features = self.edge_embedding(edge_attr)
 
+        node_features_initial = node_features
+        edge_features_initial = edge_features
+
         preds_edge = []
         preds_node = []
         for i in range(self.node_steps):
+            if self.use_skip_connections:
+                node_features = torch.cat([node_features_initial, node_features], dim=1)
+                edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
             node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index)
         preds_node.append(self.node_classification(node_features).squeeze())
 
@@ -90,8 +97,13 @@ class ClassificationMPN(torch.nn.Module):
         if len(mask) != 0:
             sub_edge_index = edge_index[:, mask]
             edge_features = edge_features[mask]
+            if self.use_skip_connections:
+                edge_features_initial = edge_features_initial[mask]
 
             for i in range(self.grouping_steps):
+                if self.use_skip_connections:
+                    node_features = torch.cat([node_features_initial, node_features], dim=1)
+                    edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
                 node_features, edge_features = self.mpn_grouping(node_features, edge_features, sub_edge_index)
             default_preds_edge[mask] = self.edge_classification(edge_features).squeeze()
         preds_edge.append(default_preds_edge)

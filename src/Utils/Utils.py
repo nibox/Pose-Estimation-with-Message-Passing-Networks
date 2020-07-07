@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from matplotlib import pyplot as plt
+from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.utils import dense_to_sparse, precision, recall, accuracy, f1_score
 
 from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
@@ -373,3 +374,24 @@ def subgraph_mask(subset, edge_index):
     mask = subset[edge_index[0]] & subset[edge_index[1]]
 
     return mask
+
+
+class Logger(object):
+
+    def __init__(self, config):
+        self.writer = SummaryWriter(config.LOG_DIR)
+
+
+    def log_vars(self, name, iter, **kwargs):
+
+        for key in kwargs.keys():
+            if isinstance(kwargs[key], list):
+                if kwargs[key]:
+                    self.writer.add_scalar(f"{name}_{key}", np.mean(kwargs[key]), iter)
+                else:
+                    continue
+            else:
+                self.writer.add_scalar(f"{name}_{key}", kwargs[key], iter)
+
+    def log_loss(self, loss, name, iter):
+        self.writer.add_scalar(f"{name}", loss, iter)

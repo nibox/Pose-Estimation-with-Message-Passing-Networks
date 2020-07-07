@@ -1,37 +1,14 @@
 import torch
 from torch.utils.data import DataLoader
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
-from Utils.transforms import transforms_hr_eval, transforms_hr_train, transforms_hg_eval
+from Utils.transforms import transforms_hr_train, transforms_hg_eval
 from Utils.loss import MPNLossFactory, MultiLossFactory, ClassMPNLossFactory
-from Utils.Utils import to_device, calc_metrics, subgraph_mask
-from torch_geometric.utils import subgraph
+from Utils.Utils import to_device, calc_metrics, subgraph_mask, Logger
 from config import get_config, update_config
 import numpy as np
 import pickle
 from Models import get_pose_model
-from torch.utils.tensorboard import SummaryWriter
 import os
-
-
-class Logger(object):
-
-    def __init__(self, config):
-        self.writer = SummaryWriter(config.LOG_DIR)
-
-
-    def log_vars(self, name, iter, **kwargs):
-
-        for key in kwargs.keys():
-            if isinstance(kwargs[key], list):
-                if kwargs[key]:
-                    self.writer.add_scalar(f"{name}_{key}", np.mean(kwargs[key]), iter)
-                else:
-                    continue
-            else:
-                self.writer.add_scalar(f"{name}_{key}", kwargs[key], iter)
-
-    def log_loss(self, loss, name, iter):
-        self.writer.add_scalar(f"{name}", loss, iter)
 
 
 def create_train_validation_split(config):
@@ -98,7 +75,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             factors = factors.to(kwargs["device"])
             _, preds, preds_nodes, joint_det, _, edge_index, edge_labels, node_labels, label_mask, bb_output = model(imgs, keypoints, masks, factors)
 
-            label_mask = label_mask if kwargs["use_label_mask"] else None
+            label_mask = label_mask.detach() if kwargs["use_label_mask"] else None
 
             if isinstance(loss_func, MPNLossFactory):
                 loss = loss_func(preds, edge_labels, label_mask=label_mask)
@@ -146,7 +123,7 @@ def main():
     torch.manual_seed(seed)
 
     ##########################################################
-    config_name = "model_40"
+    config_name = "model_38_0"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 

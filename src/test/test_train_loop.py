@@ -2,9 +2,10 @@ import torch
 import numpy as np
 import pickle
 from config import get_config, update_config
-from torch_geometric.utils import recall, accuracy, precision, f1_score
+from torch_geometric.utils import recall, accuracy, precision, f1_score, subgraph
 from Utils.transforms import transforms_hr_train
-from Utils.loss import MPNLossFactory
+from Utils.loss import MPNLossFactory, MultiLossFactory, ClassMPNLossFactory
+from Utils.Utils import Logger, subgraph_mask, calc_metrics
 from Models import get_cached_model
 from data import CocoKeypoints_hr, HeatmapGenerator
 
@@ -22,9 +23,8 @@ def load_data(config, batch_size, device):
     masks = []
     keypoints = []
     factors = []
-    target_scoremaps = []
     for i in range(len(train)):
-        img, _, mask, keypoint, factor = train[i]
+        img, target_scoremap, mask, keypoint, factor = train[i]
         img = img.to(device)
         mask = torch.from_numpy(mask[-1]).to(device)
         keypoint = torch.from_numpy(keypoint).to(device)
@@ -38,76 +38,44 @@ def load_data(config, batch_size, device):
 
 def make_train_func(model, optimizer, loss_func, **kwargs):
     def func(batch):
-        if kwargs["end_to_end"]:
-            optimizer.zero_grad()
-            # split batch
-            imgs, masks, keypoints, factors, target_scoremaps = batch
-            imgs = imgs.to(kwargs["device"])
-            masks = masks.to(kwargs["device"])
-            keypoints = keypoints.to(kwargs["device"])
-            factors = factors.to(kwargs["device"])
-            target_scoremaps = target_scoremaps.to(kwargs["device"])
+        optimizer.zero_grad()
+        # split batch
+        imgs, masks, keypoints, factors = batch
+        imgs = imgs.to(kwargs["device"])
+        masks = masks.to(kwargs["device"])
+        keypoints = keypoints.to(kwargs["device"])
+        factors = factors.to(kwargs["device"])
 
-            loss = 0.0
-            preds, labels = [], []
-            batch_size = imgs.shape[0]
+        scoremaps, preds, preds_nodes, joint_det, _, edge_index, edge_labels, node_labels, label_mask = model(imgs, keypoints, masks, factors)
 
-            num_edges_in_batch = 0
-            for i in range(batch_size):
 
-                scoremaps, pred, joint_det, edge_index, edge_labels, label_mask, batch_index = model(imgs[None, i],
-                                                                                          keypoints[None, i],
-                                                                                          masks[None, i],
-                                                                                          factors[None, i])
 
-                label_mask = label_mask if kwargs["use_label_mask"] else None
-                batch_index = batch_index if kwargs["use_batch_index"] else None
+        label_mask = label_mask if kwargs["use_label_mask"] else None
 
-                local_loss = model.mpn_loss(pred, edge_labels, reduction=kwargs["loss_reduction"],
-                                            mask=label_mask, batch_index=batch_index)
-                # scoremap_loss = model.scoremap_loss(scoremaps, target_scoremaps[i], masks[None, i])
-                num_edges_in_batch += len(edge_labels)
-                # in case of loss_reduction="sum" the scaling is done at the gradient directly
-                local_loss.backward()
-                loss += local_loss.item()
-
-                preds.append(pred.detach())
-                labels.append(edge_labels.detach())
-
-            if kwargs["loss_reduction"] == "sum":
-                norm_const = num_edges_in_batch
-            elif kwargs["loss_reduction"] == "mean":
-                norm_const = batch_size
-            else:
-                raise NotImplementedError
-            loss /= norm_const  # this is for logging
-            for p in model.parameters():
-                if p.grad is not None:
-                    p.grad.data /= norm_const
-            optimizer.step()
-
-            preds = torch.cat(preds, 1)
-            edge_labels = torch.cat(labels)
-        else:
-            optimizer.zero_grad()
-            # split batch
-            imgs, masks, keypoints, factors = batch
-            imgs = imgs.to(kwargs["device"])
-            masks = masks.to(kwargs["device"])
-            keypoints = keypoints.to(kwargs["device"])
-            factors = factors.to(kwargs["device"])
-
-            scoremaps, preds, joint_det, _, edge_index, edge_labels, label_mask, batch_index = model(imgs, keypoints, masks, factors)
-
-            label_mask = label_mask if kwargs["use_label_mask"] else None
-            batch_index = batch_index if kwargs["use_batch_index"] else None
-
+        if isinstance(loss_func, MultiLossFactory):
             loss = loss_func(preds, edge_labels, label_mask=label_mask)
-            loss.backward()
-            optimizer.step()
-            loss = loss.item()
+        elif isinstance(loss_func, ClassMPNLossFactory):
+            # adapt labels and mask to reduced graph
+            true_positive_idx = preds_nodes[-1].detach() > 0.0
+            true_positive_idx[node_labels == 1.0] = True
+            mask = subgraph_mask(true_positive_idx, edge_index)
+            loss_mask = label_mask.clone()  # .[mask == 0] = 0.0
+            loss_mask[mask == 0] = 0.0
+            loss = loss_func(preds, preds_nodes, edge_labels, node_labels, loss_mask)
+            label_mask[mask == 0] = 1.0
+        else:
+            raise NotImplementedError
+        loss.backward()
+        optimizer.step()
 
-        return preds[-1][label_mask==1], edge_labels[label_mask==1], loss
+        loss = loss.item()
+        preds_edges = preds[-1].detach()
+        preds_nodes = None if preds_nodes is None else preds_nodes[-1].detach()
+        edge_labels = edge_labels.detach()
+        node_labels = None if preds_nodes is None else node_labels.detach()
+        edge_label_mask = label_mask.detach()
+
+        return loss, preds_nodes, preds_edges, node_labels, edge_labels, edge_label_mask
 
     return func
 
@@ -117,9 +85,11 @@ def main():
     seed = 0
     np.random.seed(seed)
     torch.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     ##########################################################
-    config_name = "model_35"
+    config_name = "model_35_3"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
@@ -133,10 +103,16 @@ def main():
         model.freeze_backbone(partial=True)
         optimizer = torch.optim.Adam([{"params": model.mpn.parameters(), "lr": config.TRAIN.LR},
                                       {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR}])
+        loss_func = MultiLossFactory(config)
     else:
-        model.freeze_backbone()
+        model.freeze_backbone(partial=False)
         optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR)
-        loss_func = MPNLossFactory(config)
+        if config.MODEL.LOSS.NAME == "edge_loss":
+            loss_func = MPNLossFactory(config)
+        elif config.MODEL.LOSS.NAME == "node_edge_loss":
+            loss_func = ClassMPNLossFactory(config)
+        else:
+            raise NotImplementedError
     model.to(device)
 
     update_model = make_train_func(model, optimizer, loss_func, use_batch_index=config.TRAIN.USE_BATCH_INDEX,
@@ -151,20 +127,35 @@ def main():
             model.stop_backbone_bn()
     for iter in range(10000):
 
-        pred, edge_labels, loss = update_model(batch)
+        loss, preds_nodes, preds_edges, node_labels, edge_labels, edge_label_mask = update_model(batch)
 
-        result = pred.sigmoid().squeeze()
-        result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
+        if preds_nodes is not None:
+            result_nodes = preds_nodes.sigmoid().squeeze()
+            result_nodes = torch.where(result_nodes < 0.5, torch.zeros_like(result_nodes),
+                                       torch.ones_like(result_nodes))
+        else:
+            result_nodes = None
+        result_edges = preds_edges.sigmoid().squeeze()
+        result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
 
-        prec = precision(result, edge_labels, 2)[1]
-        rec = recall(result, edge_labels, 2)[1]
-        acc = accuracy(result, edge_labels)
-        f1 = f1_score(result, edge_labels, 2)[1]
-        print(f"Iter: {iter}, loss:{loss:6f}, "
-              f"Precision : {prec:5f} "
-              f"Recall: {rec:5f} "
-              f"Accuracy: {acc:5f} "
-              f"F1 score: {f1:5f}")
+        node_metrics = calc_metrics(result_nodes, node_labels)
+        edge_metrics = calc_metrics(result_edges, edge_labels, edge_label_mask)
+
+
+        if preds_nodes is not None:
+            print(f"Iter: {iter}, loss:{loss:6f}, "
+                  f"Edge_Prec : {edge_metrics['prec']:5f} "
+                  f"Edge_Rec: {edge_metrics['rec']:5f} "
+                  f"Edge_Acc: {edge_metrics['acc']:5f} "
+                  f"Node_Prec: {node_metrics['prec']:5f} "
+                  f"Node_Rec: {node_metrics['rec']:5f} "
+                  )
+        else:
+            print(f"Iter: {iter}, loss:{loss:6f}, "
+                  f"Edge_Prec : {edge_metrics['prec']:5f} "
+                  f"Edge_Rec: {edge_metrics['rec']:5f} "
+                  f"Edge_Acc: {edge_metrics['acc']:5f} "
+                  )
 
 if __name__ == "__main__":
     main()
