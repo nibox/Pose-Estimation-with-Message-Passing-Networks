@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from config import get_config, update_config
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
-from Utils import pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics
+from Utils import pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics, subgraph_mask
 from Models.PoseEstimation import get_pose_model
 from Utils.transformations import reverse_affine_map
 from Utils.transforms import transforms_hg_eval, transforms_hr_eval
@@ -110,7 +110,7 @@ def main():
     torch.backends.cudnn.benchmark = False
     ######################################
 
-    config_name = "model_40"
+    config_name = "model_41"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
@@ -159,6 +159,8 @@ def main():
 
     anns = []
     anns_full = []
+    anns_perf_node = []  # need second
+    anns_perf_edge = []
     eval_ids = []
     imgs_fully_det = []
     with torch.no_grad():
@@ -168,12 +170,19 @@ def main():
             img, _, masks, keypoints, factors = eval_set[i]
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
+
             scoremaps, pred, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels,  _, _ = model(img, keypoints, masks, factors, with_logits=True)
 
-            preds_edges = pred[-1].sigmoid().squeeze()
+            preds_edges = pred[-1].sigmoid().squeeze() if pred is not None else None
             preds_nodes = preds_nodes[-1].sigmoid().squeeze()
 
-            result_edges = torch.where(preds_edges < 0.5, torch.zeros_like(preds_edges), torch.ones_like(preds_edges))
+            true_positive_idx = preds_nodes > 0.5
+            mask = subgraph_mask(true_positive_idx, edge_index)
+            result_edges = torch.zeros(edge_index.shape[1], dtype=torch.float, device=edge_index.device)
+            if preds_edges is not None:
+                result_edges[mask] = preds_edges
+            result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
+
             result_nodes = torch.where(preds_nodes < 0.5, torch.zeros_like(preds_nodes), torch.ones_like(preds_nodes))
             n, _ = num_non_detected_points(joint_det.cpu(), keypoints.cpu(), 6.0, config.MODEL.GC.USE_GT)
 
@@ -184,15 +193,54 @@ def main():
 
             ann = perd_to_ann(scoremaps[0], joint_det, preds_nodes, edge_index, preds_edges, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
                               , config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
+            perf_edges = edge_labels[mask]
+            ann_perf_edge = perd_to_ann(scoremaps[0], joint_det, preds_nodes, edge_index, perf_edges, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
+                              , config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
 
             anns.append(ann)
+            anns_perf_edge.append(ann_perf_edge)
             if int(n) == 0:
                 imgs_fully_det.append(eval_set.img_ids[i])
                 anns_full.append(ann)
+        model.train()
+        model.stop_backbone_bn()
+        for i in tqdm(range(config.TEST.NUM_EVAL)):
+            eval_ids.append(eval_set.img_ids[i])
+
+            img, _, masks, keypoints, factors = eval_set[i]
+            img = img.to(device)[None]
+            masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
+
+            scoremaps, pred, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels, _, _ = model(
+                img, keypoints, masks, factors, with_logits=True)
+
+            preds_edges = pred[-1].sigmoid().squeeze() if pred is not None else None
+            preds_nodes = preds_nodes[-1].sigmoid().squeeze()
+
+            true_positive_idx = preds_nodes > 0.5
+            true_positive_idx[node_labels == 1.0] = True
+            mask = subgraph_mask(true_positive_idx, edge_index)
+            result_edges = torch.zeros(edge_index.shape[1], dtype=torch.float, device=edge_index.device)
+            if pred is not None:
+                result_edges[mask] = preds_edges
+
+            _, preds_edges = subgraph(node_labels > 0.5, edge_index, result_edges)
+
+            img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
+
+            ann_perf_node = perd_to_ann(scoremaps[0], joint_det, node_labels, edge_index, preds_edges, img_info,
+                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
+                              , config.DATASET.SCALING_TYPE, config.TEST.ADJUST)
+
+            anns_perf_node.append(ann_perf_node)
 
         print("##################")
         print("General Evaluation")
         coco_eval(eval_set.coco, anns, np.array(eval_ids))
+        print("Perfect edge prediction")
+        coco_eval(eval_set.coco, anns_perf_edge, np.array(eval_ids))
+        print("Perfect node prediction")
+        coco_eval(eval_set.coco, anns_perf_node, np.array(eval_ids))
         print("##################")
         print("Real Evaluation on perfect images")
         print(f"Number of perfect images: {len(anns_full)}")
@@ -209,7 +257,7 @@ def main():
 
 def perd_to_ann(scoremaps, joint_det, joint_scores, edge_index, pred, img_info, img_id, cc_method, scaling_type, adjustment):
     true_positive_idx = joint_scores > 0.5
-    edge_index, pred = subgraph(true_positive_idx, edge_index, pred)
+    edge_index, _ = subgraph(true_positive_idx, edge_index)
     if edge_index.shape[1] != 0:
         persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, cc_method)
     else:

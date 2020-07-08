@@ -1,4 +1,4 @@
-from Utils.Utils import set_bn_eval
+from Utils.Utils import set_bn_eval, set_bn_feeze
 from Models.HigherHRNet import get_pose_net, hr_process_output
 from Models.Hourglass import PoseNet, hg_process_output
 from graph_constructor import get_graph_constructor
@@ -94,7 +94,8 @@ class PoseEstimationBaseline(nn.Module):
 
         preds, node_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels)
         if not with_logits:
-            preds[-1] = torch.sigmoid(preds[-1])
+            if preds is not None:
+                preds[-1] = torch.sigmoid(preds[-1])
             if node_pred is not None:
                 node_pred[-1] = torch.sigmoid(node_pred[-1])
 

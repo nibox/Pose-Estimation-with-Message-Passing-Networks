@@ -50,15 +50,13 @@ class MPLayer(MessagePassing):
         return aggr_out
 
 
-class ClassificationMPN(torch.nn.Module):
+class ClassificationMPNSimple(torch.nn.Module):
 
     def __init__(self, config):
         super().__init__()
         self.use_skip_connections = config.SKIP
         self.mpn_node_cls = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
                                   aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP)
-        self.mpn_grouping = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
-                                    aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP)
 
         self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, bn=config.BN,
                                         end_with_relu=config.NODE_EMB.END_WITH_RELU)
@@ -68,8 +66,7 @@ class ClassificationMPN(torch.nn.Module):
         self.edge_classification = _make_mlp(config.EDGE_FEATURE_DIM, config.EDGE_CLASS.OUTPUT_SIZES, bn=config.BN)
         self.node_classification = _make_mlp(config.NODE_FEATURE_DIM, config.NODE_CLASS.OUTPUT_SIZES, bn=config.BN)
 
-        self.node_steps = config.STEPS_NODE
-        self.grouping_steps = config.STEPS_GROUP
+        self.node_steps = config.STEPS
 
     def forward(self, x, edge_attr, edge_index, **kwargs):
 
@@ -93,19 +90,11 @@ class ClassificationMPN(torch.nn.Module):
             true_positive_idx[kwargs["node_labels"] == 1.0] = True
 
         mask = subgraph_mask(true_positive_idx, edge_index)
-        sub_edge_index = edge_index[:, mask]
         edge_features = edge_features[mask]
-        if self.use_skip_connections:
-            edge_features_initial = edge_features_initial[mask]
-        if len(edge_features) != 0:
 
-            for i in range(self.grouping_steps):
-                if self.use_skip_connections:
-                    node_features = torch.cat([node_features_initial, node_features], dim=1)
-                    edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
-                node_features, edge_features = self.mpn_grouping(node_features, edge_features, sub_edge_index)
+        if len(edge_features) != 0:
             preds_edge.append(self.edge_classification(edge_features).squeeze())
-        if not preds_edge:
+        else:
             preds_edge = None
 
         return preds_edge, preds_node

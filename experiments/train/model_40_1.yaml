@@ -1,0 +1,164 @@
+DATASET:
+  ROOT: '../../storage/user/kistern/coco'
+  MAX_NUM_PEOPLE: 30
+  SCALING_TYPE: short  # short for training
+  # training data augmentation
+  MAX_ROTATION : 0
+  MIN_SCALE : 1.0
+  MAX_SCALE : 1.0
+  MAX_TRANSLATE : 40
+  FLIP : 0.0
+
+LOG_DIR: "../log/PoseEstimationBaseline/Real_node/40_1"
+
+MODEL:
+  KP: hrnet
+  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/40_1/pose_estimation.pth"
+  AUX_STEPS: 1
+  KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
+  HG:
+    NAME: hourglass
+    PRETRAINED: "../PretrainedModels/pretrained/checkpoint.pth.tar"
+    NSTACK: 4
+    INPUT_DIM: 256
+    OUTPUT_DIM: 68
+  HRNET:
+    LOSS:
+      NUM_STAGES: 2
+      AE_LOSS_TYPE: exp
+      WITH_AE_LOSS: [True, False]
+      PUSH_LOSS_FACTOR: [0.001, 0.001]
+      PULL_LOSS_FACTOR: [0.001, 0.001]
+      WITH_HEATMAPS_LOSS: [True, True]
+      HEATMAPS_LOSS_FACTOR: [1.0, 1.0]
+    EXTRA:
+      FINAL_CONV_KERNEL: 1
+      PRETRAINED_LAYERS: ['*']
+      STEM_INPLANES: 64
+      STAGE2:
+        NUM_MODULES: 1
+        NUM_BRANCHES: 2
+        BLOCK: BASIC
+        NUM_BLOCKS:
+        - 4
+        - 4
+        NUM_CHANNELS:
+        - 32
+        - 64
+        FUSE_METHOD: SUM
+      STAGE3:
+        NUM_MODULES: 4
+        NUM_BRANCHES: 3
+        BLOCK: BASIC
+        NUM_BLOCKS:
+        - 4
+        - 4
+        - 4
+        NUM_CHANNELS:
+        - 32
+        - 64
+        - 128
+        FUSE_METHOD: SUM
+      STAGE4:
+        NUM_MODULES: 3
+        NUM_BRANCHES: 4
+        BLOCK: BASIC
+        NUM_BLOCKS:
+        - 4
+        - 4
+        - 4
+        - 4
+        NUM_CHANNELS:
+        - 32
+        - 64
+        - 128
+        - 256
+        FUSE_METHOD: SUM
+      DECONV:
+        NUM_DECONVS: 1
+        NUM_CHANNELS:
+        - 32
+        KERNEL_SIZE:
+        - 4
+        NUM_BASIC_BLOCKS: 4
+        CAT_OUTPUT:
+        - True
+    NAME: pose_higher_hrnet
+    NUM_JOINTS: 17
+    PRETRAINED: '../PretrainedModels/pose_higher_hrnet_w32_512.pth'
+    TAG_PER_JOINT: True
+    FEATURE_FUSION: small
+  MPN:
+    NAME: ClassificationMPN
+    STEPS_NODE: 10
+    STEPS_GROUP: 10
+    NODE_INPUT_DIM: 128
+    EDGE_INPUT_DIM: 17 + 2
+    NODE_FEATURE_DIM: 64
+    EDGE_FEATURE_DIM: 64
+    EDGE_FEATURE_HIDDEN: 64
+    NODE_EMB:
+      END_WITH_RELU: False
+      OUTPUT_SIZES:
+        - 128
+        - 64
+        - 64
+    EDGE_EMB:
+      END_WITH_RELU: False
+      OUTPUT_SIZES:
+        - 32
+        - 64
+        - 64
+        - 64
+    EDGE_CLASS:
+      OUTPUT_SIZES:
+        - 64
+        - 32
+        - 1
+    NODE_CLASS:
+      OUTPUT_SIZES:
+        - 64
+        - 32
+        - 1
+    BN: False
+    AGGR: max
+    SKIP: True
+  GC:
+    NAME: naive_graph_constructor
+    CHEAT: False
+    USE_GT: False
+    USE_NEIGHBOURS: True
+    EDGE_LABEL_METHOD: 4
+    MASK_CROWDS: True
+    DETECT_THRESHOLD: 0.1
+    MATCHING_RADIUS: 0.1
+    INCLUSION_RADIUS: 0.75
+    GRAPH_TYPE: knn
+    CC_METHOD: GAEC
+    NORM_NODE_DISTANCE: True
+  LOSS:
+    NAME: node_edge_loss
+    USE_FOCAL: True
+    FOCAL_GAMMA: 2.0
+    FOCAL_ALPHA: 1.0
+TEST:
+  NUM_EVAL: 500
+  SPLIT: coco_17_mini
+  ADJUST: True
+
+TRAIN:
+  SPLIT: coco_17_mini
+  LR: 3e-4
+  LR_FACTOR: 0.1
+  LR_STEP:
+    - 60
+    - 150
+  BATCH_SIZE: 8
+  START_EPOCH: 0
+  END_EPOCH: 100
+  END_TO_END: False
+  USE_LABEL_MASK: True
+  USE_BATCH_INDEX: False
+  LOSS_REDUCTION: mean
+  FREEZE_BN: True
+  CONTINUE: ""

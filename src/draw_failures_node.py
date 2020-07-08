@@ -80,17 +80,17 @@ def main():
             num_persons_gt = np.count_nonzero(keypoints[0, :, :, 2].sum(axis=1).cpu().numpy())
             _, preds_edges, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels, _ , _ = model(img_transformed, keypoints, masks, factors, with_logits=False)
 
-            preds_edges = preds_edges[-1]
+            preds_edges = preds_edges[-1] if preds_edges is not None else None
+            if preds_edges is None:
+                print(f"No detections for {i}")
+                continue
             preds_nodes = preds_nodes[-1]
             result_edges = torch.where(preds_edges < 0.5, torch.zeros_like(preds_edges), torch.ones_like(preds_edges))
             result_nodes = torch.where(preds_nodes < 0.5, torch.zeros_like(preds_nodes), torch.ones_like(preds_nodes))
 
             f1_s = f1_score(result_nodes, node_labels, 2)[1]
             # draw images that have low f1 score, that could not detect all persons or to many persons, or mutants
-            edge_index, preds_edges = subgraph(preds_nodes > 0.5, edge_index, preds_edges)
-            if edge_index.shape[1] == 0:
-                print(f"No detections for {i}")
-                continue
+            edge_index, _ = subgraph(preds_nodes > 0.5, edge_index)
 
             persons_pred, mutants, person_labels = pred_to_person(joint_det, preds_nodes, edge_index, preds_edges, config.MODEL.GC.CC_METHOD)
             # persons_pred_label, _, _ = pred_to_person(joint_det, joint_scores, edge_index, edge_labels, config.MODEL.GC.CC_METHOD)

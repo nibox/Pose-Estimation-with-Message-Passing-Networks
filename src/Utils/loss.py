@@ -109,6 +109,9 @@ class ClassMPNLossFactory(nn.Module):
             node_loss += self.classification_loss(outputs_nodes[i], node_labels, "mean", None)
         node_loss = node_loss / len(outputs_nodes)
 
+        if outputs_class is None:
+            return node_loss
+
         edge_loss = 0.0
         for i in range(len(outputs_class)):
             edge_loss += self.classification_loss(outputs_class[i], edge_labels, "mean", label_mask)

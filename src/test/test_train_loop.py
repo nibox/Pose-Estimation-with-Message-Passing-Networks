@@ -48,28 +48,34 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
 
         scoremaps, preds, preds_nodes, joint_det, _, edge_index, edge_labels, node_labels, label_mask = model(imgs, keypoints, masks, factors)
 
-
-
         label_mask = label_mask if kwargs["use_label_mask"] else None
 
         if isinstance(loss_func, MultiLossFactory):
             loss = loss_func(preds, edge_labels, label_mask=label_mask)
         elif isinstance(loss_func, ClassMPNLossFactory):
             # adapt labels and mask to reduced graph
-            true_positive_idx = preds_nodes[-1].detach() > 0.0
+            true_positive_idx = preds_nodes[-1] > 0.0
             true_positive_idx[node_labels == 1.0] = True
             mask = subgraph_mask(true_positive_idx, edge_index)
-            loss_mask = label_mask.clone()  # .[mask == 0] = 0.0
-            loss_mask[mask == 0] = 0.0
-            loss = loss_func(preds, preds_nodes, edge_labels, node_labels, loss_mask)
-            label_mask[mask == 0] = 1.0
+            loss_edge_labels = edge_labels[mask]
+            loss_mask = label_mask[mask]
+            loss = loss_func(preds, preds_nodes, loss_edge_labels, node_labels, loss_mask)
+
+            #
+            default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float, device=edge_index.device) - 1.0
+            default_pred[mask] = preds[-1].detach()
+
         else:
             raise NotImplementedError
+
         loss.backward()
         optimizer.step()
 
         loss = loss.item()
-        preds_edges = preds[-1].detach()
+        if isinstance(loss_func, ClassMPNLossFactory):
+            preds_edges = default_pred
+        else:
+            preds_edges = preds[-1].detach()
         preds_nodes = None if preds_nodes is None else preds_nodes[-1].detach()
         edge_labels = edge_labels.detach()
         node_labels = None if preds_nodes is None else node_labels.detach()
@@ -89,7 +95,7 @@ def main():
     torch.backends.cudnn.benchmark = False
 
     ##########################################################
-    config_name = "model_35_3"
+    config_name = "model_41"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 

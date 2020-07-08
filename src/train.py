@@ -81,15 +81,19 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
                 loss = loss_func(preds, edge_labels, label_mask=label_mask)
             elif isinstance(loss_func, ClassMPNLossFactory):
                 # adapt labels and mask to reduced graph
-                """
+                # """
                 true_positive_idx = preds_nodes[-1] > 0.0
                 true_positive_idx[node_labels == 1.0] = True
-                _, attr = subgraph(true_positive_idx, edge_index, torch.stack([edge_labels, label_mask], dim=1))
-                edge_labels = attr[:, 0]
-                label_mask = attr[:, 1]
-                loss = loss_func(preds, preds_nodes, edge_labels, node_labels, label_mask)
+                mask = subgraph_mask(true_positive_idx, edge_index)
+                loss_edge_labels = edge_labels[mask]
+                loss_label_mask = label_mask[mask]
+                loss = loss_func(preds, preds_nodes, loss_edge_labels, node_labels, loss_label_mask)
+                #
+                default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float,
+                                           device=edge_index.device) - 1.0
+                default_pred[mask] = preds[-1].detach()
                 # """
-                # """
+                """
                 true_positive_idx = preds_nodes[-1].detach() > 0.0
                 true_positive_idx[node_labels == 1.0] = True
                 mask = subgraph_mask(true_positive_idx, edge_index)
@@ -103,7 +107,10 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             loss.backward()
             optimizer.step()
         loss = loss.item()
-        preds_edges = preds[-1].detach()
+        if isinstance(loss_func, ClassMPNLossFactory):
+            preds_edges = default_pred
+        else:
+            preds_edges = preds[-1].detach()
         preds_nodes = None if preds_nodes is None else preds_nodes[-1].detach()
         edge_labels = edge_labels.detach()
         node_labels = None if preds_nodes is None else node_labels.detach()
@@ -206,35 +213,6 @@ def main():
                       f"Edge_Rec: {edge_metrics['rec']:5f} "
                       f"Edge_Acc: {edge_metrics['acc']:5f} "
                       )
-            """
-            result = result[label_mask==1.0]
-            edge_labels = edge_labels[label_mask==1.0]
-
-
-            # metrics
-            # edge_labels[edge_labels<0.99] = 0.0  # some edge labels might be
-            prec = precision(result, edge_labels, 2)[1]
-            rec = recall(result, edge_labels, 2)[1]
-            acc = accuracy(result, edge_labels)
-            f1 = f1_score(result, edge_labels, 2)[1]
-
-            node_rec = recall(result_nodes, node_labels, 2)[1]
-            node_prec = precision(result_nodes, node_labels, 2)[1]
-            node_acc = accuracy(result_nodes, node_labels)
-            print(f"Iter: {iter}, loss:{loss:6f}, "
-                  f"Precision : {prec:5f} "
-                  f"Recall: {rec:5f} "
-                  f"Accuracy: {acc:5f} "
-                  f"F1 score: {f1:5f}")
-
-            writer.add_scalar("Loss/train", loss, iter)
-            writer.add_scalar("Metric/train_f1:", f1, iter)
-            writer.add_scalar("Metric/train_prec:", prec, iter)
-            writer.add_scalar("Metric/train_rec:", rec, iter)
-            writer.add_scalar("Metrics/Node/train_prec", node_prec, iter)
-            writer.add_scalar("Metrics/Node/train_rec", node_rec, iter)
-            writer.add_scalar("Metrics/Node/train_acc", node_acc, iter)
-            """
         model.eval()
 
         print("#### BEGIN VALIDATION ####")
@@ -262,15 +240,23 @@ def main():
                         loss = loss_func(preds, edge_labels, label_mask=label_mask)
                     elif isinstance(loss_func, ClassMPNLossFactory):
                         # adapt labels and mask to reduced graph
-                        """
+                        # """
                         true_positive_idx = preds_nodes[-1] > 0.0
-                        true_positive_idx[node_labels == 1.0] = True
-                        _, attr = subgraph(true_positive_idx, edge_index, torch.stack([edge_labels, label_mask], dim=1))
-                        edge_labels = attr[:, 0]
-                        label_mask = attr[:, 1]
-                        loss = loss_func(preds, preds_nodes, edge_labels, node_labels, label_mask)
+                        #true_positive_idx[node_labels == 1.0] = True
+                        mask = subgraph_mask(true_positive_idx, edge_index)
+                        loss_edge_labels = edge_labels[mask]
+                        loss_label_mask = label_mask[mask]
+                        loss = loss_func(preds, preds_nodes, loss_edge_labels, node_labels, loss_label_mask)
+                        #
+                        default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float,
+                                                   device=edge_index.device) - 1.0
+                        if preds is not None:
+                            default_pred[mask] = preds[-1].detach()
+                            preds[-1] = default_pred
+                        else:
+                            preds = [default_pred]
                         # """
-                        # """
+                        """
                         true_positive_idx = preds_nodes[-1].detach() > 0.0
                         true_positive_idx[node_labels == 1.0] = True
                         mask = subgraph_mask(true_positive_idx, edge_index)
@@ -297,7 +283,6 @@ def main():
                 if len(result) == 0:
                     continue
                 """
-                print(result_nodes)
                 node_metrics = calc_metrics(result_nodes, node_labels)
                 edge_metrics = calc_metrics(result_edges, edge_labels, label_mask)
 
