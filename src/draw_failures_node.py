@@ -10,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
 from Utils.transforms import transforms_hr_eval
-from Utils import draw_detection, draw_poses, pred_to_person, to_tensor
+from Utils import draw_detection, draw_poses, pred_to_person, to_tensor, draw_detection_with_conf, draw_detection_with_cluster
 from Models import get_pose_model
 import matplotlib
 matplotlib.use("Agg")
@@ -21,7 +21,7 @@ def main():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     ######################################
-    config_name = "model_40"
+    config_name = "model_41"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
     # img_ids_to_use = [84015, 84381, 117772, 237976, 281133, 286645, 505421]
@@ -101,19 +101,20 @@ def main():
             if (num_persons_gt != num_persons_det) or mutants or f1_s < 0.9:
                 keypoints = keypoints[:, :num_persons_gt].squeeze().cpu().numpy()
                 joint_det = joint_det.squeeze().cpu().numpy()
+                preds_nodes = preds_nodes.squeeze().cpu().numpy()
                 if len(keypoints.shape) != 3:
                     keypoints = keypoints[np.newaxis]
                 saving_cause = SavingCause(f1=f1_s, additional_p=num_persons_det > num_persons_gt,
                                            missing_p=num_persons_det < num_persons_gt, mutants=mutants)
                 image_to_draw.append(
-                    (eval_set.img_ids[i], img, persons_pred, joint_det, keypoints, saving_cause))
+                    (eval_set.img_ids[i], img, persons_pred, joint_det, preds_nodes, person_labels, keypoints, saving_cause))
 
         # draw images
         # best image
         output_dir = f"tmp/output_{config_name}"
         os.makedirs(output_dir, exist_ok=True)
         for i, samples in enumerate(image_to_draw):
-            img_id, img, persons, joint_det, keypoints, saving_cause, = samples
+            img_id, img, persons, joint_det, joint_scores, person_labels, keypoints, saving_cause, = samples
             failures = filter(lambda x: x is not None,
                               [cause if getattr(saving_cause, cause) and cause != "f1" else None for cause in
                                saving_cause.__dict__.keys()])
@@ -121,7 +122,9 @@ def main():
             draw_poses(img, persons, f"{output_dir}/{i}_{img_id}_{int(saving_cause.f1 * 100)}_{failures}.png", output_size=output_size)
             # draw_poses(img, person_label, f"{output_dir}/{i}_{img_id}_gt_labels.png", output_size=output_size)
             draw_poses(img, keypoints, f"{output_dir}/{i}_{img_id}_gt.png", output_size=output_size)
+            draw_detection_with_conf(img, joint_det, joint_scores, keypoints, fname=f"{output_dir}/{i}_{img_id}_conf_det.png", output_size=output_size)
             draw_detection(img, joint_det, keypoints, fname=f"{output_dir}/{i}_{img_id}_det.png", output_size=output_size)
+            draw_detection_with_cluster(img, joint_det, person_labels, keypoints, fname=f"{output_dir}/{i}_{img_id}_clust_det.png", output_size=output_size)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ _C.MODEL.KP = "hrnet"
 _C.MODEL.PRETRAINED = ""  # means the path were the trained model is saved to and where the trained model is loaded from
 _C.MODEL.LOSS = CN()
 _C.MODEL.LOSS.NAME = "edge_loss"
+_C.MODEL.LOSS.LOSS_WEIGHTS = [1.0]
 _C.MODEL.LOSS.USE_FOCAL = True
 _C.MODEL.LOSS.FOCAL_ALPHA = 1.0
 _C.MODEL.LOSS.FOCAL_GAMMA = 2.0

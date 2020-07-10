@@ -96,6 +96,9 @@ class ClassMPNLossFactory(nn.Module):
     def __init__(self, config):
         super().__init__()
 
+        self.loss_weights = config.MODEL.LOSS.LOSS_WEIGHTS
+        assert len(self.loss_weights) == 2
+
         if config.MODEL.LOSS.USE_FOCAL:
             self.classification_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA,
                                                  logits=True)
@@ -110,14 +113,14 @@ class ClassMPNLossFactory(nn.Module):
         node_loss = node_loss / len(outputs_nodes)
 
         if outputs_class is None:
-            return node_loss
+            return node_loss * self.loss_weights[0]
 
         edge_loss = 0.0
         for i in range(len(outputs_class)):
             edge_loss += self.classification_loss(outputs_class[i], edge_labels, "mean", label_mask)
         edge_loss = edge_loss / len(outputs_class)
 
-        return node_loss + edge_loss
+        return self.loss_weights[0] * node_loss + edge_loss * self.loss_weights[1]
 
 
 class FocalLoss(nn.Module):

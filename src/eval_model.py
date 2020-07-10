@@ -172,7 +172,8 @@ def main():
             img, _, masks, keypoints, factors = eval_set[i]
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
-            scoremaps, pred, joint_det, joint_scores, edge_index, edge_labels, _, _, _, _ = model(img, keypoints, masks, factors, with_logits=True)
+            scoremaps, pred, _, joint_det, joint_scores, edge_index, edge_labels, node_labels,  _, _ = model(img, keypoints, masks, factors, with_logits=True)
+
 
             pred = pred[-1].sigmoid().squeeze()
             result = torch.where(pred < 0.5, torch.zeros_like(pred), torch.ones_like(pred))
@@ -214,7 +215,7 @@ def main():
                 img, _, masks, keypoints, factors = eval_set[i]
                 img = img.to(device)[None]
                 masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
-                scoremaps, pred, joint_det, joint_scores, edge_index, _, _, _, _, _ = model(img, keypoints, masks, factors, with_logits=True)
+                scoremaps, pred, _, joint_det, joint_scores, edge_index, _, _, _, _,  = model(img, keypoints, masks, factors, with_logits=True)
 
                 pred = pred[-1].sigmoid().squeeze()
 

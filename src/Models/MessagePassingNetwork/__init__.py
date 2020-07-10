@@ -2,6 +2,7 @@ from .VanillaMPN import VanillaMPN
 from .VanillaMPN2 import VanillaMPN2
 from .VanillaMPNFeatureDrop import VanillaMPNDrop
 from .ClassificationMPN import ClassificationMPN
+from .ClassificationMPNSimple import ClassificationMPNSimple
 
 
 def get_mpn_model(config, **kwargs):
@@ -11,6 +12,8 @@ def get_mpn_model(config, **kwargs):
         return VanillaMPN(config)
     elif config.NAME == "ClassificationMPN":
         return ClassificationMPN(config)
+    elif config.NAME == "ClassificationMPNSimple":
+        return ClassificationMPNSimple(config)
     elif config.NAME == "VanillaMPN2":
         return VanillaMPN2(config)
     else:

@@ -25,6 +25,104 @@ def to_numpy(array: [torch.Tensor, np.array]):
         return array
 
 
+def draw_detection_with_cluster(img, joint_det, joint_cluster, joint_gt, fname=None, output_size=128.0):
+    """
+    :param img: torcg.tensor. image
+    :param joint_det: shape: (num_joints, 2) list of xy positions of detected joints (without classes or clustering)
+    :param fname: optional - file name of image to save. If None the image is show with plt.show
+    :return:
+    """
+
+
+    img = to_numpy(img)
+    if img.dtype != np.uint8:
+        img = img * 255.0
+        img = img.astype(np.uint8)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    colors_joints = np.linspace(0, 179, joint_cluster.max() + 1, dtype=np.float)
+    # colors_joints[1::2] = colors_joints[-2::-2] # swap some colors to have clearer distinction between similar joint types
+
+    for i in range(len(joint_det)):
+        # scale up to 512 x 512
+        scale = 512.0 / output_size
+        x, y = int(joint_det[i, 0] * scale), int(joint_det[i, 1] * scale)
+        type = joint_det[i, 2]
+        cluster = joint_cluster[i]
+        if type != -1:  # not sure why that is here
+            color = (colors_joints[cluster], 255, 255)
+            cv2.circle(img, (x, y), 2, color, -1)
+    for person in range(len(joint_gt)):
+        if np.sum(joint_gt[person]) > 0.0:
+            for i in range(len(joint_gt[person])):
+                # scale up to 512 x 512
+                scale = 512.0 / output_size
+                x, y = int(joint_gt[person, i, 0] * scale), int(joint_gt[person, i, 1] * scale)
+                type = i
+                if type != -1:
+                    cv2.circle(img, (x, y), 2, (120, 255, 255), -1)
+    img = cv2.cvtColor(img, cv2.COLOR_HSV2RGB)
+
+    fig = plt.figure()
+    plt.imshow(img)
+    if fname is not None:
+        plt.savefig(fig=fig, fname=fname)
+        plt.close(fig)
+    else:
+        raise NotImplementedError
+
+def draw_detection_with_conf(img, joint_det, joint_score, joint_gt, fname=None, output_size=128.0):
+    """
+    :param img: torcg.tensor. image
+    :param joint_det: shape: (num_joints, 2) list of xy positions of detected joints (without classes or clustering)
+    :param fname: optional - file name of image to save. If None the image is show with plt.show
+    :return:
+    """
+
+
+    img = to_numpy(img)
+    if img.dtype != np.uint8:
+        img = img * 255.0
+        img = img.astype(np.uint8)
+    # img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    colors_joints = [(255, 0, 0), (0, 255, 0), (0, 0, 255)]# np.arange(0, 179, np.ceil(179 / 17), dtype=np.float)
+    # colors_joints[1::2] = colors_joints[-2::-2] # swap some colors to have clearer distinction between similar joint types
+
+    for i in range(len(joint_det)):
+        # scale up to 512 x 512
+        scale = 512.0 / output_size
+        x, y = int(joint_det[i, 0] * scale), int(joint_det[i, 1] * scale)
+        type = joint_det[i, 2]
+        conf = joint_score[i]
+        if conf < 0.33:
+            conf_class = 0
+        elif 0.33 <= conf <= 0.66:
+            conf_class = 2
+        elif conf > 0.66:
+            conf_class = 1
+        else:
+            raise NotImplementedError
+        if type != -1:  # not sure why that is here
+            color = colors_joints[conf_class]
+            cv2.circle(img, (x, y), 2, color, -1)
+    for person in range(len(joint_gt)):
+        if np.sum(joint_gt[person]) > 0.0:
+            for i in range(len(joint_gt[person])):
+                # scale up to 512 x 512
+                scale = 512.0 / output_size
+                x, y = int(joint_gt[person, i, 0] * scale), int(joint_gt[person, i, 1] * scale)
+                type = i
+                if type != -1:
+                    cv2.circle(img, (x, y), 2, (0, 0, 255), -1)
+    # img = cv2.cvtColor(img, cv2.COLOR_HSV2RGB)
+
+    fig = plt.figure()
+    plt.imshow(img)
+    if fname is not None:
+        plt.savefig(fig=fig, fname=fname)
+        plt.close(fig)
+    else:
+        raise NotImplementedError
+
 def draw_detection(img, joint_det, joint_gt, fname=None, output_size=128.0):
     """
     :param img: torcg.tensor. image
