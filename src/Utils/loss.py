@@ -69,6 +69,63 @@ class MultiLossFactory(nn.Module):
             edge_class_loss += self.classification_loss(outputs_class[i], edge_labels, "mean", label_mask)
         return heatmap_loss + edge_class_loss
 
+
+class ClassMultiLossFactory(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+        # init check
+
+        self.num_joints = config.MODEL.HRNET.NUM_JOINTS
+        self.num_stages = config.MODEL.HRNET.LOSS.NUM_STAGES
+        self.loss_weights = config.MODEL.LOSS.LOSS_WEIGHTS
+        assert len(self.loss_weights) == 2
+
+        self.heatmaps_loss = \
+            nn.ModuleList(
+                [
+                    HeatmapLoss()
+                    if with_heatmaps_loss else None
+                    for with_heatmaps_loss in config.MODEL.HRNET.LOSS.WITH_HEATMAPS_LOSS
+                ]
+            )
+        self.heatmaps_loss_factor = config.MODEL.HRNET.LOSS.HEATMAPS_LOSS_FACTOR
+        if config.MODEL.LOSS.USE_FOCAL:
+            self.classification_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA, logits=True)
+        else:
+            raise NotImplementedError
+        # removed ae loss
+
+
+    def forward(self, outputs_det, outputs_nodes, outputs_edges, heatmaps, node_labels, edge_labels, map_masks, edge_label_mask):
+
+        heatmap_loss = 0.0
+        for idx in range(len(outputs_det)):
+            if self.heatmaps_loss[idx]:
+                heatmaps_pred = outputs_det[idx][:, :self.num_joints]
+
+                heatmaps_loss = self.heatmaps_loss[idx](
+                    heatmaps_pred, heatmaps[idx], map_masks[idx]
+                )
+                heatmaps_loss = heatmaps_loss * self.heatmaps_loss_factor[idx]
+                heatmap_loss += heatmaps_loss.mean()  # average over batch
+
+        node_loss = 0.0
+        for i in range(len(outputs_nodes)):
+            node_loss += self.classification_loss(outputs_nodes[i], node_labels, "mean", None)
+        node_loss = node_loss / len(outputs_nodes)
+
+        if outputs_edges is None:
+            return node_loss * self.loss_weights[0]
+
+        edge_loss = 0.0
+        for i in range(len(outputs_edges)):
+            edge_loss += self.classification_loss(outputs_edges[i], edge_labels, "mean", edge_label_mask)
+        edge_loss = edge_loss / len(outputs_edges)
+
+        return self.loss_weights[0] * node_loss + edge_loss * self.loss_weights[1] + heatmap_loss
+
+
 class MPNLossFactory(nn.Module):
 
     def __init__(self, config):

@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
 from Utils.transforms import transforms_hr_train, transforms_hg_eval
-from Utils.loss import MPNLossFactory, MultiLossFactory, ClassMPNLossFactory
+from Utils.loss import MPNLossFactory, MultiLossFactory, ClassMPNLossFactory, ClassMultiLossFactory
 from Utils.Utils import to_device, calc_metrics, subgraph_mask, Logger
 from config import get_config, update_config
 import numpy as np
@@ -62,7 +62,27 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
 
             label_mask = label_mask if kwargs["use_label_mask"] else None
 
-            loss = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
+            if isinstance(loss_func, MultiLossFactory):
+                loss = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
+            elif isinstance(loss_func, ClassMultiLossFactory):
+                true_positive_idx = preds_nodes[-1] > 0.0
+                true_positive_idx[node_labels == 1.0] = True
+                mask = subgraph_mask(true_positive_idx, edge_index)
+                loss_edge_labels = edge_labels[mask]
+                loss_label_mask = label_mask[mask]
+                loss = loss_func(bb_output, preds_nodes, preds, heatmaps, node_labels, loss_edge_labels, masks,
+                                 loss_label_mask)
+                #
+                default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float,
+                                           device=edge_index.device) - 1.0
+                if preds is not None:
+                    default_pred[mask] = preds[-1].detach()
+                    preds[-1] = default_pred
+                else:
+                    preds = [default_pred]
+            else:
+                raise NotImplementedError
+
             loss.backward()
             optimizer.step()
         else:
@@ -130,7 +150,7 @@ def main():
     torch.manual_seed(seed)
 
     ##########################################################
-    config_name = "model_38_0"
+    config_name = "model_44"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
@@ -144,12 +164,18 @@ def main():
     model = get_pose_model(config, device)
     if config.TRAIN.END_TO_END:
         model.freeze_backbone(partial=True)
-        optimizer = torch.optim.Adam([{"params": model.mpn.parameters(), "lr": config.TRAIN.LR},
-                                      {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR}])
-        loss_func = MultiLossFactory(config)
+        optimizer = torch.optim.Adam([{"params": model.mpn.parameters(), "lr": config.TRAIN.LR, "weight_decay": config.TRAIN.W_DECAY},
+                                      {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR, "weight_decay": config.TRAIN.W_DECAY}])
+
+        if config.MODEL.LOSS.NAME == "edge_loss":
+            loss_func = MultiLossFactory(config)
+        elif config.MODEL.LOSS.NAME == "node_edge_loss":
+            loss_func = ClassMultiLossFactory(config)
+        else:
+            raise NotImplementedError
     else:
         model.freeze_backbone(partial=False)
-        optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR)
+        optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR, weight_decay=config.TRAIN.W_DECAY)
         if config.MODEL.LOSS.NAME == "edge_loss":
             loss_func = MPNLossFactory(config)
         elif config.MODEL.LOSS.NAME == "node_edge_loss":
@@ -234,7 +260,23 @@ def main():
 
                 label_mask = label_mask if config.TRAIN.USE_LABEL_MASK else None
                 if config.TRAIN.END_TO_END:
-                    loss = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
+                    if isinstance(loss_func, MultiLossFactory):
+                        loss = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
+                    elif isinstance(loss_func, ClassMultiLossFactory):
+                        true_positive_idx = preds_nodes[-1] > 0.0
+                        #true_positive_idx[node_labels == 1.0] = True
+                        mask = subgraph_mask(true_positive_idx, edge_index)
+                        loss_edge_labels = edge_labels[mask]
+                        loss_label_mask = label_mask[mask]
+                        loss = loss_func(bb_output, preds_nodes, preds, heatmaps, node_labels, loss_edge_labels, masks, loss_label_mask)
+                        #
+                        default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float,
+                                                   device=edge_index.device) - 1.0
+                        if preds is not None:
+                            default_pred[mask] = preds[-1].detach()
+                            preds[-1] = default_pred
+                        else:
+                            preds = [default_pred]
                 else:
                     if isinstance(loss_func, MPNLossFactory):
                         loss = loss_func(preds, edge_labels, label_mask=label_mask)
