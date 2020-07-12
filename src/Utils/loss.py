@@ -157,16 +157,22 @@ class ClassMPNLossFactory(nn.Module):
         assert len(self.loss_weights) == 2
 
         if config.MODEL.LOSS.USE_FOCAL:
-            self.classification_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA,
-                                                 logits=True)
+            self.edge_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA,
+                                       logits=True)
         else:
             raise NotImplementedError
+
+        if config.MODEL.LOSS.NODE_USE_FOCAL:
+            self.node_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA,
+                                       logits=True)
+        else:
+            self.node_loss = BCELossWtihLogits(pos_weight=config.MODEL.LOSS.NODE_BCE_POS_WEIGHT)
 
     def forward(self, outputs_class, outputs_nodes, edge_labels, node_labels, label_mask):
 
         node_loss = 0.0
         for i in range(len(outputs_nodes)):
-            node_loss += self.classification_loss(outputs_nodes[i], node_labels, "mean", None)
+            node_loss += self.node_loss(outputs_nodes[i], node_labels, "mean", None)
         node_loss = node_loss / len(outputs_nodes)
 
         if outputs_class is None:
@@ -174,7 +180,7 @@ class ClassMPNLossFactory(nn.Module):
 
         edge_loss = 0.0
         for i in range(len(outputs_class)):
-            edge_loss += self.classification_loss(outputs_class[i], edge_labels, "mean", label_mask)
+            edge_loss += self.edge_loss(outputs_class[i], edge_labels, "mean", label_mask)
         edge_loss = edge_loss / len(outputs_class)
 
         return self.loss_weights[0] * node_loss + edge_loss * self.loss_weights[1]
@@ -208,3 +214,18 @@ class FocalLoss(nn.Module):
                 return torch.sum(F_loss)
         else:
             return F_loss
+
+class BCELossWtihLogits(nn.Module):
+    def __init__(self, pos_weight=None):
+        super().__init__()
+        self.pos_weight = pos_weight
+        self.loss = nn.BCEWithLogitsLoss(reduction="none")
+
+    def forward(self, inputs, targets, reduction, mask=None, batch_index=None):
+        if mask is not None:
+            raise NotImplementedError
+        bce_loss = self.loss(inputs, targets)
+        if self.pos_weight is not None:
+            bce_loss[targets==1.0] *= self.pos_weight
+        return bce_loss.mean()
+

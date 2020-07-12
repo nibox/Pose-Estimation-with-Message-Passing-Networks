@@ -54,7 +54,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             loss = loss_func(preds, edge_labels, label_mask=label_mask)
         elif isinstance(loss_func, ClassMPNLossFactory):
             # adapt labels and mask to reduced graph
-            true_positive_idx = preds_nodes[-1] > 0.0
+            true_positive_idx = preds_nodes[-1].sigmoid() > kwargs["config"].MODEL.MPN.NODE_THRESHOLD
             true_positive_idx[node_labels == 1.0] = True
             mask = subgraph_mask(true_positive_idx, edge_index)
             loss_edge_labels = edge_labels[mask]
@@ -95,7 +95,7 @@ def main():
     torch.backends.cudnn.benchmark = False
 
     ##########################################################
-    config_name = "model_41"
+    config_name = "model_41_6"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
@@ -106,12 +106,9 @@ def main():
     print("Load model")
     model = get_cached_model(config, device)
     if config.TRAIN.END_TO_END:
-        model.freeze_backbone(partial=True)
-        optimizer = torch.optim.Adam([{"params": model.mpn.parameters(), "lr": config.TRAIN.LR},
-                                      {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR}])
-        loss_func = MultiLossFactory(config)
+        raise NotImplementedError
     else:
-        model.freeze_backbone(partial=False)
+        model.freeze_backbone(mode=config.TRAIN.KP_FREEZE_MODE)
         optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR)
         if config.MODEL.LOSS.NAME == "edge_loss":
             loss_func = MPNLossFactory(config)
@@ -124,7 +121,7 @@ def main():
     update_model = make_train_func(model, optimizer, loss_func, use_batch_index=config.TRAIN.USE_BATCH_INDEX,
                                    use_label_mask=config.TRAIN.USE_LABEL_MASK, device=device,
                                    end_to_end=config.TRAIN.END_TO_END, batch_size=config.TRAIN.BATCH_SIZE,
-                                   loss_reduction=config.TRAIN.LOSS_REDUCTION)
+                                   loss_reduction=config.TRAIN.LOSS_REDUCTION, config=config)
     print("#####Begin Training#####")
     batch = load_data(config, config.TRAIN.BATCH_SIZE, device)
 

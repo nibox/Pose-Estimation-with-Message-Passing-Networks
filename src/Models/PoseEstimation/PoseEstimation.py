@@ -121,12 +121,26 @@ class PoseEstimationBaseline(nn.Module):
             raise NotImplementedError
     """
 
-    def freeze_backbone(self, partial):
-        if partial:
+    def freeze_backbone(self, mode):
+        if mode == "complete":
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+        elif mode == "stem":
             self.backbone.apply(set_bn_feeze)
-            return
-        for param in self.backbone.parameters():
-            param.requires_grad = False
+            for param in self.backbone.conv1.parameters():
+                param.requires_grad = False
+            for param in self.backbone.bn1.parameters():
+                param.requires_grad = False
+            for param in self.backbone.conv2.parameters():
+                param.requires_grad = False
+            for param in self.backbone.bn2.parameters():
+                param.requires_grad = False
+            for param in self.backbone.layer1.parameters():
+                param.requires_grad = False
+        elif mode == "nothing":
+            self.backbone.apply(set_bn_feeze)
+        else:
+            raise NotImplementedError
 
     def stop_backbone_bn(self):
         self.backbone.apply(set_bn_eval)

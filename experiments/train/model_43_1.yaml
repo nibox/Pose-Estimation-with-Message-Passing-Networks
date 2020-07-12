@@ -9,11 +9,11 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.0
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real_node/41"
+LOG_DIR: "../log/PoseEstimationBaseline/Real_node/43_1"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/41/pose_estimation.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/43_1/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -91,40 +91,37 @@ MODEL:
   MPN:
     NAME: ClassificationMPNSimple
     STEPS: 10
-    NODE_INPUT_DIM: 128
+    NODE_INPUT_DIM: 32
     EDGE_INPUT_DIM: 17 + 2
-    NODE_FEATURE_DIM: 64
-    EDGE_FEATURE_DIM: 64
+    NODE_FEATURE_DIM: 32
+    EDGE_FEATURE_DIM: 32
     EDGE_FEATURE_HIDDEN: 64
     NODE_EMB:
-      BN: False
-      END_WITH_RELU: False
-      OUTPUT_SIZES:
-        - 128
-        - 64
-        - 64
-    EDGE_EMB:
-      BN: False
-      END_WITH_RELU: False
+      END_WITH_RELU: True
       OUTPUT_SIZES:
         - 32
-        - 64
-        - 64
-        - 64
+        - 32
+        - 32
+    EDGE_EMB:
+      END_WITH_RELU: True
+      OUTPUT_SIZES:
+        - 32
+        - 32
+        - 32
     EDGE_CLASS:
       OUTPUT_SIZES:
-        - 64
+        - 32
         - 32
         - 1
     NODE_CLASS:
       OUTPUT_SIZES:
-        - 64
+        - 32
         - 32
         - 1
     BN: False
     AGGR: max
     SKIP: True
-    NODE_THRESHOLD: 0.5
+    USE_NODE_UPDATE_MLP: True
   GC:
     NAME: naive_graph_constructor
     CHEAT: False

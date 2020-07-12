@@ -58,15 +58,16 @@ class ClassificationMPNSimple(torch.nn.Module):
         self.mpn_node_cls = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
                                   aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP)
 
-        self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, bn=config.BN,
+        self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, bn=config.EDGE_EMB.BN,
                                         end_with_relu=config.NODE_EMB.END_WITH_RELU)
-        self.node_embedding = _make_mlp(config.NODE_INPUT_DIM, config.NODE_EMB.OUTPUT_SIZES, bn=config.BN,
+        self.node_embedding = _make_mlp(config.NODE_INPUT_DIM, config.NODE_EMB.OUTPUT_SIZES, bn=config.NODE_EMB.BN,
                                         end_with_relu=config.NODE_EMB.END_WITH_RELU)
 
         self.edge_classification = _make_mlp(config.EDGE_FEATURE_DIM, config.EDGE_CLASS.OUTPUT_SIZES, bn=config.BN)
         self.node_classification = _make_mlp(config.NODE_FEATURE_DIM, config.NODE_CLASS.OUTPUT_SIZES, bn=config.BN)
 
         self.node_steps = config.STEPS
+        self.node_threshold = config.NODE_THRESHOLD
 
     def forward(self, x, edge_attr, edge_index, **kwargs):
 
@@ -85,7 +86,7 @@ class ClassificationMPNSimple(torch.nn.Module):
             node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index)
         preds_node.append(self.node_classification(node_features).squeeze())
 
-        true_positive_idx = preds_node[-1] > 0.0
+        true_positive_idx = preds_node[-1].sigmoid() > self.node_threshold
         if kwargs["node_labels"] is not None and self.training:
             true_positive_idx[kwargs["node_labels"] == 1.0] = True
 

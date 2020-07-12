@@ -88,7 +88,7 @@ class ClassificationMPN(torch.nn.Module):
             node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index)
         preds_node.append(self.node_classification(node_features).squeeze())
 
-        true_positive_idx = preds_node[-1] > 0.0
+        true_positive_idx = preds_node[-1].sigmoid() > 0.5
         if kwargs["node_labels"] is not None and self.training:
             true_positive_idx[kwargs["node_labels"] == 1.0] = True
 

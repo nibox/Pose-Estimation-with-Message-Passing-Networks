@@ -9,11 +9,11 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.0
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real_node/41"
+LOG_DIR: "../log/PoseEstimationBaseline/Real_node/44_2"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/41/pose_estimation.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/44_2/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -97,15 +97,15 @@ MODEL:
     EDGE_FEATURE_DIM: 64
     EDGE_FEATURE_HIDDEN: 64
     NODE_EMB:
-      BN: False
       END_WITH_RELU: False
+      BN: False
       OUTPUT_SIZES:
         - 128
         - 64
         - 64
     EDGE_EMB:
-      BN: False
       END_WITH_RELU: False
+      BN: False
       OUTPUT_SIZES:
         - 32
         - 64
@@ -146,6 +146,7 @@ MODEL:
     USE_FOCAL: True
     FOCAL_GAMMA: 2.0
     FOCAL_ALPHA: 1.0
+
 TEST:
   NUM_EVAL: 500
   SPLIT: coco_17_mini
@@ -154,16 +155,20 @@ TEST:
 TRAIN:
   SPLIT: coco_17_mini
   LR: 3e-4
+  KP_LR: 1e-6
+  # W_DECAY: 0.0001
+  KP_W_DECAY: 0.0001
   LR_FACTOR: 0.1
   LR_STEP:
     - 60
     - 150
   BATCH_SIZE: 8
   START_EPOCH: 0
-  END_EPOCH: 100
-  END_TO_END: False
+  END_EPOCH: 50
+  END_TO_END: True
   USE_LABEL_MASK: True
   USE_BATCH_INDEX: False
   LOSS_REDUCTION: mean
   FREEZE_BN: True
+  KP_FREEZE_MODE: stem
   CONTINUE: ""

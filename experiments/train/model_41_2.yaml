@@ -9,11 +9,11 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.0
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real_node/41"
+LOG_DIR: "../log/PoseEstimationBaseline/Real_node/41_2"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/41/pose_estimation.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/41_2/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -155,6 +155,7 @@ TRAIN:
   SPLIT: coco_17_mini
   LR: 3e-4
   LR_FACTOR: 0.1
+  W_DECAY: 0.0001
   LR_STEP:
     - 60
     - 150

@@ -65,7 +65,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             if isinstance(loss_func, MultiLossFactory):
                 loss = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
             elif isinstance(loss_func, ClassMultiLossFactory):
-                true_positive_idx = preds_nodes[-1] > 0.0
+                true_positive_idx = preds_nodes[-1].sigmoid() > kwargs["config"].MODEL.MPN.NODE_THRESHOLD
                 true_positive_idx[node_labels == 1.0] = True
                 mask = subgraph_mask(true_positive_idx, edge_index)
                 loss_edge_labels = edge_labels[mask]
@@ -102,7 +102,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             elif isinstance(loss_func, ClassMPNLossFactory):
                 # adapt labels and mask to reduced graph
                 # """
-                true_positive_idx = preds_nodes[-1] > 0.0
+                true_positive_idx = preds_nodes[-1].sigmoid() > kwargs["config"].MODEL.MPN.NODE_THRESHOLD
                 true_positive_idx[node_labels == 1.0] = True
                 mask = subgraph_mask(true_positive_idx, edge_index)
                 loss_edge_labels = edge_labels[mask]
@@ -150,7 +150,7 @@ def main():
     torch.manual_seed(seed)
 
     ##########################################################
-    config_name = "model_44"
+    config_name = "model_41_6"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
@@ -163,7 +163,8 @@ def main():
     print("Load model")
     model = get_pose_model(config, device)
     if config.TRAIN.END_TO_END:
-        model.freeze_backbone(partial=True)
+        assert config.TRAIN.KP_FREEZE_MODE != "complete"
+        model.freeze_backbone(mode=config.TRAIN.KP_FREEZE_MODE)
         optimizer = torch.optim.Adam([{"params": model.mpn.parameters(), "lr": config.TRAIN.LR, "weight_decay": config.TRAIN.W_DECAY},
                                       {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR, "weight_decay": config.TRAIN.W_DECAY}])
 
@@ -174,7 +175,7 @@ def main():
         else:
             raise NotImplementedError
     else:
-        model.freeze_backbone(partial=False)
+        model.freeze_backbone(mode="complete")
         optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR, weight_decay=config.TRAIN.W_DECAY)
         if config.MODEL.LOSS.NAME == "edge_loss":
             loss_func = MPNLossFactory(config)
@@ -197,7 +198,7 @@ def main():
     update_model = make_train_func(model, optimizer, loss_func, use_batch_index=config.TRAIN.USE_BATCH_INDEX,
                                    use_label_mask=config.TRAIN.USE_LABEL_MASK, device=device,
                                    end_to_end=config.TRAIN.END_TO_END, batch_size=config.TRAIN.BATCH_SIZE,
-                                   loss_reduction=config.TRAIN.LOSS_REDUCTION)
+                                   loss_reduction=config.TRAIN.LOSS_REDUCTION, config=config)
 
     print("#####Begin Training#####")
     epoch_len = len(train_loader)
@@ -263,8 +264,7 @@ def main():
                     if isinstance(loss_func, MultiLossFactory):
                         loss = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
                     elif isinstance(loss_func, ClassMultiLossFactory):
-                        true_positive_idx = preds_nodes[-1] > 0.0
-                        #true_positive_idx[node_labels == 1.0] = True
+                        true_positive_idx = preds_nodes[-1].sigmoid() > config.MODEL.MPN.NODE_THRESHOLD
                         mask = subgraph_mask(true_positive_idx, edge_index)
                         loss_edge_labels = edge_labels[mask]
                         loss_label_mask = label_mask[mask]
@@ -283,7 +283,7 @@ def main():
                     elif isinstance(loss_func, ClassMPNLossFactory):
                         # adapt labels and mask to reduced graph
                         # """
-                        true_positive_idx = preds_nodes[-1] > 0.0
+                        true_positive_idx = preds_nodes[-1].sigmoid() > config.MODEL.MPN.NODE_THRESHOLD
                         #true_positive_idx[node_labels == 1.0] = True
                         mask = subgraph_mask(true_positive_idx, edge_index)
                         loss_edge_labels = edge_labels[mask]
@@ -335,7 +335,7 @@ def main():
 
                 if node_metrics is not None:
                     for key in node_metrics.keys():
-                        valid_dict["edge"][key].append((node_metrics[key]))
+                        valid_dict["node"][key].append((node_metrics[key]))
 
         print(f"Epoch: {epoch}, loss:{np.mean(valid_loss):6f}, "
               f"Accuracy: {np.mean(valid_dict['edge']['acc']):5f}, "

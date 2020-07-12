@@ -26,8 +26,10 @@ _C.MODEL.LOSS = CN()
 _C.MODEL.LOSS.NAME = "edge_loss"
 _C.MODEL.LOSS.LOSS_WEIGHTS = [1.0]
 _C.MODEL.LOSS.USE_FOCAL = True
+_C.MODEL.LOSS.NODE_USE_FOCAL = True
 _C.MODEL.LOSS.FOCAL_ALPHA = 1.0
 _C.MODEL.LOSS.FOCAL_GAMMA = 2.0
+_C.MODEL.LOSS.NODE_BCE_POS_WEIGHT = 1.0
 _C.MODEL.AUX_STEPS = 1
 _C.MODEL.KP_OUTPUT_DIM = 32  # 256 for hg, 32 for HR
 # common params for Hourglass keypoint detector (for reproducibility of the old experiments)
@@ -180,6 +182,7 @@ _C.TRAIN.LOSS_REDUCTION = "mean"
 _C.TRAIN.USE_LABEL_MASK = True
 _C.TRAIN.USE_BATCH_INDEX = False
 _C.TRAIN.FREEZE_BN = True
+_C.TRAIN.KP_FREEZE_MODE = "complete"
 
 
 def get_config():
