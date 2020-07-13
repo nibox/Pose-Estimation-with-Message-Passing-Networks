@@ -54,12 +54,16 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             loss = loss_func(preds, edge_labels, label_mask=label_mask)
         elif isinstance(loss_func, ClassMPNLossFactory):
             # adapt labels and mask to reduced graph
-            true_positive_idx = preds_nodes[-1].sigmoid() > kwargs["config"].MODEL.MPN.NODE_THRESHOLD
-            true_positive_idx[node_labels == 1.0] = True
-            mask = subgraph_mask(true_positive_idx, edge_index)
-            loss_edge_labels = edge_labels[mask]
-            loss_mask = label_mask[mask]
-            loss = loss_func(preds, preds_nodes, loss_edge_labels, node_labels, loss_mask)
+            loss_masks = []
+            loss_edge_labels = []
+            for i in range(len(preds_nodes)):
+                true_positive_idx = preds_nodes[i].sigmoid() > kwargs["config"].MODEL.MPN.NODE_THRESHOLD
+                true_positive_idx[node_labels == 1.0] = True
+                mask = subgraph_mask(true_positive_idx, edge_index)
+                loss_edge_labels.append(edge_labels[mask])
+                loss_masks.append(label_mask[mask])
+
+            loss = loss_func(preds, preds_nodes, loss_edge_labels, node_labels, loss_masks)
 
             #
             default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float, device=edge_index.device) - 1.0

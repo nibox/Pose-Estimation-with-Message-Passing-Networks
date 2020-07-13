@@ -477,6 +477,7 @@ class PoseHigherResolutionNet(nn.Module):
         x = self.relu(x)
         x = self.layer1(x)
 
+        features_stem = x
         x_list = []
         for i in range(self.stage2_cfg['NUM_BRANCHES']):
             if self.transition1[i] is not None:
@@ -484,6 +485,7 @@ class PoseHigherResolutionNet(nn.Module):
             else:
                 x_list.append(x)
         y_list = self.stage2(x_list)
+        features_stage_2 = y_list[0]
 
         x_list = []
         for i in range(self.stage3_cfg['NUM_BRANCHES']):
@@ -492,6 +494,7 @@ class PoseHigherResolutionNet(nn.Module):
             else:
                 x_list.append(y_list[i])
         y_list = self.stage3(x_list)
+        features_stage_3 = y_list[0]
 
         x_list = []
         for i in range(self.stage4_cfg['NUM_BRANCHES']):
@@ -528,6 +531,11 @@ class PoseHigherResolutionNet(nn.Module):
             features = (features_big + features_small) / 2
         elif self.feature_fusion == "small":
             features = features_small
+        elif self.feature_fusion == "cat_multi":
+            features = torch.cat([features_stem, features_stage_2, features_stage_3], dim=1)
+            features = torch.nn.functional.interpolate(features, size=(features_big.shape[2], features_big.shape[3]),
+                                                       mode="bilinear", align_corners=False)
+            features = torch.cat([features, features_small], dim=1)
         else:
             raise NotImplementedError
 

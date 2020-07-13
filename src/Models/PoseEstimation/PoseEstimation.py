@@ -70,7 +70,8 @@ class PoseEstimationBaseline(nn.Module):
         self.gc_config = config.MODEL.GC
 
         self.pool = nn.MaxPool2d(3, 1, 1)  # not sure if used
-        self.feature_gather = nn.Conv2d(config.MODEL.KP_OUTPUT_DIM, config.MODEL.MPN.NODE_INPUT_DIM, 3, 1, 1, bias=True)
+        input_feature_size = config.MODEL.KP_OUTPUT_DIM if config.MODEL.HRNET.FEATURE_FUSION != "cat_multi" else 352
+        self.feature_gather = nn.Conv2d(input_feature_size, config.MODEL.MPN.NODE_INPUT_DIM, 3, 1, 1, bias=True)
         self.num_aux_steps = config.MODEL.AUX_STEPS
 
     def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None, factors=None, with_logits=True) -> torch.tensor:
@@ -90,9 +91,9 @@ class PoseEstimationBaseline(nn.Module):
                                                   joints_gt=keypoints_gt, factor_list=factors, masks=masks,
                                                   device=scoremaps.device)
 
-        x, edge_attr, edge_index, edge_labels, node_labels, joint_det, label_mask, joint_scores = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, node_labels, joint_det, label_mask, joint_scores, batch_index = graph_constructor.construct_graph()
 
-        preds, node_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels)
+        preds, node_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels, batch_index=batch_index)
         if not with_logits:
             if preds is not None:
                 preds[-1] = torch.sigmoid(preds[-1])

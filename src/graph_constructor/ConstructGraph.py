@@ -34,6 +34,7 @@ class NaiveGraphConstructor:
         joint_score_list = []
         node_label_list = []
         label_mask_list = []
+        batch_index = []
         num_node_list = [0]
         for batch in range(self.batch_size):
             if self.mask_crowds:
@@ -105,6 +106,7 @@ class NaiveGraphConstructor:
             node_labels[edge_index[0][edge_labels == 1]] = 1.0
 
             x_list.append(x)
+            batch_index.append(torch.ones_like(node_labels, dtype=torch.long) * batch)
             num_node_list.append(x.shape[0] + num_node_list[-1])
             edge_attr_list.append(edge_attr)
             edge_index_list.append(edge_index)
@@ -117,6 +119,7 @@ class NaiveGraphConstructor:
             edge_index_list[i] += num_node_list[i]
 
         x_list = torch.cat(x_list, 0)
+        batch_index = torch.cat(batch_index, 0)
         edge_attr_list = torch.cat(edge_attr_list, 0)
         edge_index_list = torch.cat(edge_index_list, 1)
         joint_det_list = torch.cat(joint_det_list, 0)
@@ -130,7 +133,7 @@ class NaiveGraphConstructor:
         else:
             label_mask_list = torch.cat(label_mask_list, 0)
 
-        return x_list, edge_attr_list, edge_index_list, edge_labels_list, node_label_list, joint_det_list, label_mask_list, joint_score_list
+        return x_list, edge_attr_list, edge_index_list, edge_labels_list, node_label_list, joint_det_list, label_mask_list, joint_score_list, batch_index
 
     def _construct_mpn_graph(self, joint_det, features, graph_type, joint_scores):
         """

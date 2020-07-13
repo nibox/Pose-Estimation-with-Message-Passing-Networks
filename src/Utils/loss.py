@@ -115,12 +115,11 @@ class ClassMultiLossFactory(nn.Module):
             node_loss += self.classification_loss(outputs_nodes[i], node_labels, "mean", None)
         node_loss = node_loss / len(outputs_nodes)
 
-        if outputs_edges is None:
-            return node_loss * self.loss_weights[0]
-
         edge_loss = 0.0
         for i in range(len(outputs_edges)):
-            edge_loss += self.classification_loss(outputs_edges[i], edge_labels, "mean", edge_label_mask)
+            if outputs_edges[i] is None:
+                continue
+            edge_loss += self.classification_loss(outputs_edges[i], edge_labels[i], "mean", edge_label_mask[i])
         edge_loss = edge_loss / len(outputs_edges)
 
         return self.loss_weights[0] * node_loss + edge_loss * self.loss_weights[1] + heatmap_loss
@@ -175,12 +174,11 @@ class ClassMPNLossFactory(nn.Module):
             node_loss += self.node_loss(outputs_nodes[i], node_labels, "mean", None)
         node_loss = node_loss / len(outputs_nodes)
 
-        if outputs_class is None:
-            return node_loss * self.loss_weights[0]
-
         edge_loss = 0.0
         for i in range(len(outputs_class)):
-            edge_loss += self.edge_loss(outputs_class[i], edge_labels, "mean", label_mask)
+            if outputs_class[i] is None:
+                continue
+            edge_loss += self.edge_loss(outputs_class[i], edge_labels[i], "mean", label_mask[i])
         edge_loss = edge_loss / len(outputs_class)
 
         return self.loss_weights[0] * node_loss + edge_loss * self.loss_weights[1]

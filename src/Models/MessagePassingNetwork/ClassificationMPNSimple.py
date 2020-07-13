@@ -96,6 +96,6 @@ class ClassificationMPNSimple(torch.nn.Module):
         if len(edge_features) != 0:
             preds_edge.append(self.edge_classification(edge_features).squeeze())
         else:
-            preds_edge = None
+            preds_edge = [None]
 
         return preds_edge, preds_node

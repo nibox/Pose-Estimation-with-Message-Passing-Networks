@@ -173,7 +173,7 @@ def main():
 
             scoremaps, pred, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels,  _, _ = model(img, keypoints, masks, factors, with_logits=True)
 
-            preds_edges = pred[-1].sigmoid().squeeze() if pred is not None else None
+            preds_edges = pred[-1].sigmoid().squeeze() if pred[-1] is not None else None
             preds_nodes = preds_nodes[-1].sigmoid().squeeze()
 
             true_positive_idx = preds_nodes > 0.5
@@ -214,14 +214,14 @@ def main():
             scoremaps, pred, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels, _, _ = model(
                 img, keypoints, masks, factors, with_logits=True)
 
-            preds_edges = pred[-1].sigmoid().squeeze() if pred is not None else None
+            preds_edges = pred[-1].sigmoid().squeeze() if pred[-1] is not None else None
             preds_nodes = preds_nodes[-1].sigmoid().squeeze()
 
             true_positive_idx = preds_nodes > 0.5
             true_positive_idx[node_labels == 1.0] = True
             mask = subgraph_mask(true_positive_idx, edge_index)
             result_edges = torch.zeros(edge_index.shape[1], dtype=torch.float, device=edge_index.device)
-            if pred is not None:
+            if pred[-1] is not None:
                 result_edges[mask] = preds_edges
 
             _, preds_edges = subgraph(node_labels > 0.5, edge_index, result_edges)
