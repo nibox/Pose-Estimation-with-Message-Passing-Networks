@@ -35,7 +35,8 @@ def main():
     num_detections = []
     num_edges = []
     num_det_failures = []
-    imbalance = []
+    imbalance_edge = []
+    imbalance_node = []
     deg = []
     # todo number of not detected keypoints
     with torch.no_grad():
@@ -44,9 +45,11 @@ def main():
             img, _, masks, keypoints, factors = img_set[i]
             img_transformed = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
-            _, pred, joint_det, edge_index, edge_labels, _ = model(img_transformed, keypoints, masks, factors)
+            _, pred, pred_node, joint_det, joint_scores, edge_index, edge_labels, node_labels, _ = model(img_transformed, keypoints, masks, factors)
+
             #deg.append(degree(edge_index[1], len(joint_det)).mean())
-            imbalance.append(edge_labels.mean().item())
+            imbalance_edge.append(edge_labels.mean().item())
+            imbalance_node.append(node_labels.mean().item())
             num_non_detected, num_gt = num_non_detected_points(joint_det, keypoints, 6.0,
                                                                config.MODEL.GC.USE_GT)
 
@@ -57,7 +60,8 @@ def main():
         print(f"Std number of detections:{np.std(num_detections)}")
         print(f"Average number of edges:{np.mean(num_edges)}")
         print(f"Std number of edges:{np.std(num_edges)}")
-        print(f"Average Imbalance: {np.mean(imbalance)}")
+        print(f"Average Edge Imbalance: {np.mean(imbalance_edge)}")
+        print(f"Average Node Imbalance: {np.mean(imbalance_node)}")
         print(f"Average detection failure: {np.mean(num_det_failures)}")
         #print(f"Average node degree: {np.mean(degree)}")
 

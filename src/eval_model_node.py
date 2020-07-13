@@ -110,7 +110,7 @@ def main():
     torch.backends.cudnn.benchmark = False
     ######################################
 
-    config_name = "model_41"
+    config_name = "model_41_0"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
@@ -152,6 +152,7 @@ def main():
     # eval model
     eval_node = {"acc": [], "prec": [], "rec": [], "f1": []}
     eval_edge = {"acc": [], "prec": [], "rec": [], "f1": []}
+    eval_node_per_type = {i: {"acc": [], "prec": [], "rec": [], "f1": []} for i in range(17)}
     def merge_dicts(dict_1, dict_2):
         for key in dict_1.keys():
             dict_1[key].append(dict_2[key])
@@ -188,6 +189,11 @@ def main():
 
             eval_node = merge_dicts(eval_node, calc_metrics(result_nodes, node_labels))
             eval_edge = merge_dicts(eval_edge, calc_metrics(result_edges, edge_labels))
+
+            for j in range(17):
+                m = joint_det[:, 2] == j
+                eval_node_per_type[j] = merge_dicts(eval_node_per_type[j], calc_metrics(result_nodes[m], node_labels[m]))
+
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
@@ -249,10 +255,24 @@ def main():
             eval_edge[k] = np.mean(eval_edge[k])
         for k in eval_node.keys():
             eval_node[k] = np.mean(eval_node[k])
+        for i in range(17):
+            for k in eval_node_per_type[i].keys():
+                eval_node_per_type[i][k] = np.mean(eval_node_per_type[i][k])
         print("node metrics")
         print(eval_node)
         print("edge metrics")
         print(eval_edge)
+        print("node metrics per type")
+        part_labels = ['nose','eye_l','eye_r','ear_l','ear_r',
+               'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
+               'hip_l','hip_r','kne_l','kne_r','ank_l','ank_r']
+        for i in range(17):
+            print(f"{part_labels[i]} "
+                  f"acc: {eval_node_per_type[i]['acc']:3f}  "
+                  f"prec: {eval_node_per_type[i]['prec']:3f} "
+                  f"rec: {eval_node_per_type[i]['rec']:3f} "
+                  f"f1: {eval_node_per_type[i]['f1']:3f}")
+
 
 
 def perd_to_ann(scoremaps, joint_det, joint_scores, edge_index, pred, img_info, img_id, cc_method, scaling_type, adjustment):
