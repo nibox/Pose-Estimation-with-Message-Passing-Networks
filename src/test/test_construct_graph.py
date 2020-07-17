@@ -51,7 +51,7 @@ def main():
             img, _, masks, keypoints, factor_list = img_set[i]
             mask, keypoints, factor_list = to_tensor(device, masks[-1], keypoints, factor_list)
             img = img.to(device)[None]
-            _, pred, preds_nodes, joint_det, joint_scores, edge_index, _, _, label_mask = model(img, keypoints, mask, factor_list)
+            _, pred, preds_nodes, joint_det, joint_scores, edge_index, _, _, label_mask, _ = model(img, keypoints, mask, factor_list)
 
             # construct poses
             persons_pred_cc, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, config.MODEL.GC.CC_METHOD)

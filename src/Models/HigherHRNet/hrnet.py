@@ -531,6 +531,8 @@ class PoseHigherResolutionNet(nn.Module):
             features = (features_big + features_small) / 2
         elif self.feature_fusion == "small":
             features = features_small
+        elif self.feature_fusion == "large":
+            features = features_big
         elif self.feature_fusion == "cat_multi":
             features = torch.cat([features_stem, features_stage_2, features_stage_3], dim=1)
             features = torch.nn.functional.interpolate(features, size=(features_big.shape[2], features_big.shape[3]),
@@ -582,17 +584,28 @@ def get_pose_net(cfg, is_train, **kwargs):
 
     return model
 
-def hr_process_output(output):
+def hr_process_output(output, mode):
     (scoremap_1, scoremap_2), features = output
+    if mode == "avg":
 
-    scoremap_1 = torch.nn.functional.interpolate(
-        scoremap_1,
-        size=(scoremap_2.shape[2], scoremap_2.shape[3]),
-        mode='bilinear',
-        align_corners=False
-    )
-    scoremaps = (scoremap_2 + scoremap_1[:, :17]) / 2
-    # scoremaps = torch.max(scoremap_1[:, :17], scoremap_2)
-    # scoremaps = scoremap_2
-    #features = torch.zeros(1, 256, scoremaps.shape[2], scoremaps.shape[3], dtype=torch.float32)
+        scoremap_1 = torch.nn.functional.interpolate(
+            scoremap_1,
+            size=(scoremap_2.shape[2], scoremap_2.shape[3]),
+            mode='bilinear',
+            align_corners=False
+        )
+        scoremaps = (scoremap_2 + scoremap_1[:, :17]) / 2
+    elif mode == "small":
+        scoremap_1 = torch.nn.functional.interpolate(
+            scoremap_1,
+            size=(scoremap_2.shape[2], scoremap_2.shape[3]),
+            mode='bilinear',
+            align_corners=False
+        )
+        scoremaps = scoremap_1
+    elif mode == "large":
+        scoremaps = scoremap_2
+    else:
+        raise NotImplementedError
+
     return scoremaps, features

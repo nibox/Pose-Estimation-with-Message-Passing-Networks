@@ -67,7 +67,10 @@ class MultiLossFactory(nn.Module):
         edge_class_loss = 0.0
         for i in range(len(outputs_class)):
             edge_class_loss += self.classification_loss(outputs_class[i], edge_labels, "mean", label_mask)
-        return heatmap_loss + edge_class_loss
+
+        logging = {"heatmap": heatmap_loss.cpu().item(),
+                   "edge": edge_class_loss.cpu().item()}
+        return heatmap_loss + edge_class_loss, logging
 
 
 class ClassMultiLossFactory(nn.Module):
@@ -97,7 +100,7 @@ class ClassMultiLossFactory(nn.Module):
         # removed ae loss
 
 
-    def forward(self, outputs_det, outputs_nodes, outputs_edges, heatmaps, node_labels, edge_labels, map_masks, edge_label_mask):
+    def forward(self, outputs_det, outputs_nodes, outputs_edges, heatmaps, node_labels, edge_labels, map_masks, edge_label_mask, node_label_mask):
 
         heatmap_loss = 0.0
         for idx in range(len(outputs_det)):
@@ -112,7 +115,7 @@ class ClassMultiLossFactory(nn.Module):
 
         node_loss = 0.0
         for i in range(len(outputs_nodes)):
-            node_loss += self.classification_loss(outputs_nodes[i], node_labels, "mean", None)
+            node_loss += self.classification_loss(outputs_nodes[i], node_labels, "mean", node_label_mask)
         node_loss = node_loss / len(outputs_nodes)
 
         edge_loss = 0.0
@@ -122,7 +125,11 @@ class ClassMultiLossFactory(nn.Module):
             edge_loss += self.classification_loss(outputs_edges[i], edge_labels[i], "mean", edge_label_mask[i])
         edge_loss = edge_loss / len(outputs_edges)
 
-        return self.loss_weights[0] * node_loss + edge_loss * self.loss_weights[1] + heatmap_loss
+        logging = {"heatmap": heatmap_loss.cpu().item(),
+                   "edge": edge_loss.cpu().item() if isinstance(edge_loss, torch.Tensor) else edge_loss,
+                   "node": node_loss.cpu().item()}
+
+        return self.loss_weights[0] * node_loss + edge_loss * self.loss_weights[1] + heatmap_loss, logging
 
 
 class MPNLossFactory(nn.Module):
@@ -145,7 +152,7 @@ class MPNLossFactory(nn.Module):
             loss += self.classification_loss(outputs_class[i], edge_labels, "mean", label_mask)
         loss = loss / len(outputs_class)
 
-        return loss
+        return loss, {}
 
 class ClassMPNLossFactory(nn.Module):
 
@@ -167,11 +174,11 @@ class ClassMPNLossFactory(nn.Module):
         else:
             self.node_loss = BCELossWtihLogits(pos_weight=config.MODEL.LOSS.NODE_BCE_POS_WEIGHT)
 
-    def forward(self, outputs_class, outputs_nodes, edge_labels, node_labels, label_mask):
+    def forward(self, outputs_class, outputs_nodes, edge_labels, node_labels, label_mask, label_mask_node):
 
         node_loss = 0.0
         for i in range(len(outputs_nodes)):
-            node_loss += self.node_loss(outputs_nodes[i], node_labels, "mean", None)
+            node_loss += self.node_loss(outputs_nodes[i], node_labels, "mean", label_mask_node)
         node_loss = node_loss / len(outputs_nodes)
 
         edge_loss = 0.0
@@ -181,7 +188,10 @@ class ClassMPNLossFactory(nn.Module):
             edge_loss += self.edge_loss(outputs_class[i], edge_labels[i], "mean", label_mask[i])
         edge_loss = edge_loss / len(outputs_class)
 
-        return self.loss_weights[0] * node_loss + edge_loss * self.loss_weights[1]
+        logging = {"edge": edge_loss.cpu().item() if isinstance(edge_loss, torch.Tensor) else edge_loss,
+                   "node": node_loss.cpu().item()}
+
+        return self.loss_weights[0] * node_loss + edge_loss * self.loss_weights[1], logging
 
 
 class FocalLoss(nn.Module):

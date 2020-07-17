@@ -24,7 +24,7 @@ class CocoKeypoints(Dataset):
         self.coco = COCO(ann_path)
         self.mask_crowds = mask_crowds
         self.transforms = transforms
-        assert self.transforms is not None
+        # assert self.transforms is not None
 
         assert isinstance(heatmap_generator, (list, tuple)) or heatmap_generator is None
         self.num_scales = len(heatmap_generator) if heatmap_generator is not None else 0
@@ -73,6 +73,8 @@ class CocoKeypoints(Dataset):
             assert len(self.img_ids) == len(set(self.img_ids))  # assert that the ids are unique
 
     def __getitem__(self, idx):
+        assert self.transforms is not None
+        assert self.heatmap_generator is not None
         img_id = int(self.img_ids[idx])  # img_ids is array of numpy.int32
         ann_ids = self.coco.getAnnIds(imgIds=img_id)  # keypoints, bbox, sem mask?
         img_info = self.coco.loadImgs(img_id)[0]

@@ -17,14 +17,14 @@ class MPLayer(MessagePassing):
         edge_factor = 2 if skip else 1
 
         self.mlp_edge = nn.Sequential(nn.Linear(node_feature_dim * 2 * node_factor + edge_feature_dim * edge_factor, edge_feature_hidden),
-                                      nn.ReLU(),
+                                      nn.ReLU(inplace=True),
                                       nn.Linear(edge_feature_hidden, edge_feature_dim),
-                                      nn.ReLU(),
+                                      nn.ReLU(inplace=True),
                                       )
 
         # self.mlp_edge = PerInvMLP(node_feature_dim, edge_feature_dim)
         self.mlp_node = nn.Sequential(nn.Linear(node_feature_dim * node_factor + edge_feature_dim, node_feature_dim),
-                                      nn.ReLU(),
+                                      nn.ReLU(inplace=True),
                                       )
         self.update_mlp = nn.Sequential(nn.Linear(node_feature_dim, node_feature_dim), nn.ReLU()) if use_node_update_mlp else None
 
@@ -89,6 +89,7 @@ class ClassificationMPNSimple(torch.nn.Module):
         true_positive_idx = preds_node[-1].sigmoid() > self.node_threshold
         if kwargs["node_labels"] is not None and self.training:
             true_positive_idx[kwargs["node_labels"] == 1.0] = True
+            true_positive_idx[kwargs["node_mask"] == 0.0] = False  # do not use ambiguous cases for edge classificatoni
 
         mask = subgraph_mask(true_positive_idx, edge_index)
         edge_features = edge_features[mask]

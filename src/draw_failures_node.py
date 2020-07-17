@@ -78,9 +78,9 @@ def main():
             img_transformed = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
             num_persons_gt = np.count_nonzero(keypoints[0, :, :, 2].sum(axis=1).cpu().numpy())
-            _, preds_edges, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels, _ , _ = model(img_transformed, keypoints, masks, factors, with_logits=False)
+            _, preds_edges, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels, _, _ , _ = model(img_transformed, keypoints, masks, factors, with_logits=False)
 
-            preds_edges = preds_edges[-1] if preds_edges is not None else None
+            preds_edges = preds_edges[-1] if preds_edges[-1] is not None else None
             if preds_edges is None:
                 print(f"No detections for {i}")
                 continue
@@ -90,7 +90,7 @@ def main():
 
             f1_s = f1_score(result_nodes, node_labels, 2)[1]
             # draw images that have low f1 score, that could not detect all persons or to many persons, or mutants
-            edge_index, _ = subgraph(preds_nodes > 0.5, edge_index)
+            edge_index, _ = subgraph(preds_nodes > 0.1, edge_index)
 
             persons_pred, mutants, person_labels = pred_to_person(joint_det, preds_nodes, edge_index, preds_edges, config.MODEL.GC.CC_METHOD)
             # persons_pred_label, _, _ = pred_to_person(joint_det, joint_scores, edge_index, edge_labels, config.MODEL.GC.CC_METHOD)

@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
-from CocoKeypoints import CocoKeypoints
+from data import CocoKeypoints_hr, CocoKeypoints_hg
 import numpy as np
 import pickle
 import os
@@ -15,7 +15,7 @@ def create_train_validation_split(data_root, variant, force):
             print("Mini dataset already exists!")
         else:
             print(f"Mini: Creating train validation split {tv_split_name}")
-            data_set = CocoKeypoints(data_root, mini=True, seed=0, mode="train")
+            data_set = CocoKeypoints_hg(data_root, mini=True, seed=0, mode="train")
             train, valid = torch.utils.data.random_split(data_set, [3500, 500])
             assert len(data_set.img_ids) == len(set(data_set.img_ids))
             train_valid_split = [train.dataset.img_ids[train.indices], valid.dataset.img_ids[valid.indices]]
@@ -32,7 +32,7 @@ def create_train_validation_split(data_root, variant, force):
 
             # what follows is a bit hacky but whatever
             # hacky: mini=True,
-            valid_set = CocoKeypoints(data_root, mini=True, seed=0, mode="val")
+            valid_set = CocoKeypoints_hg(data_root, mini=True, seed=0, mode="val")
 
             _, valid = torch.utils.data.random_split(valid_set, [3500, 500])
             assert len(valid_set.img_ids) == len(set(valid_set.img_ids))
@@ -67,11 +67,23 @@ def create_train_validation_split(data_root, variant, force):
             print("Mini dataset already exists!")
         else:
             print(f"Mini: Creating train validation split {tv_split_name}")
-            train_set = CocoKeypoints(data_root, mini=True, seed=0, mode="train", year=17)
+            train_set = CocoKeypoints_hr(data_root, mini=True, seed=0, mode="train", year=17)
             assert len(train_set.img_ids) == len(set(train_set.img_ids))
-            valid_set = CocoKeypoints(data_root, mini=True, seed=0, mode="val", year=17)
+            valid_set = CocoKeypoints_hr(data_root, mini=True, seed=0, mode="val", year=17)
             train_valid_split = [train_set.img_ids, valid_set.img_ids]
             pickle.dump(train_valid_split, open(tv_split_name, "wb"))
+    elif variant == "full_17":
+        tv_split_name = "tmp/coco_17_full_split.p"
+        if os.path.exists(tv_split_name):
+            print("Mini dataset already exists!")
+        else:
+            print(f"Mini: Creating train validation split {tv_split_name}")
+            train_set = CocoKeypoints_hr(data_root, mini=False, seed=0, mode="train", year=17)
+            assert len(train_set.img_ids) == len(set(train_set.img_ids))
+            valid_set = CocoKeypoints_hr(data_root, mini=False, seed=0, mode="val", year=17)
+            train_valid_split = [train_set.img_ids, valid_set.img_ids]
+            pickle.dump(train_valid_split, open(tv_split_name, "wb"))
+
 
 
 def main():
@@ -80,7 +92,7 @@ def main():
     torch.manual_seed(seed)
 
     dataset_path = "../../storage/user/kistern/coco"
-    split_variant = "mini_17"  # mini, mini_real, real, princeton, mini_17
+    split_variant = "full_17"  # mini, mini_real, real, princeton, mini_17, full_17
     # mini_17 contains train images from coco17 train set and validation images from coco17 valid set (all of them)
 
     create_train_validation_split(dataset_path, variant=split_variant, force=False)

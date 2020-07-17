@@ -60,13 +60,14 @@ class UpperBoundModel(nn.Module):
         self.backbone, self.process_output = load_back_bone(config)
         self.gc_config = config.MODEL.GC
         self.feature_gather = nn.AvgPool2d(3, 1, 1)
+        self.scoremap_mode = config.MODEL.HRNET.SCOREMAP_MODE
 
     def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None, factor_list=None) -> torch.tensor:
         if self.gc_config.MASK_CROWDS:
             assert masks is not None
 
         bb_output = self.backbone(imgs)
-        scoremaps, features = self.process_output(bb_output)
+        scoremaps, features = self.process_output(bb_output, self.scoremap_mode)
         features = self.feature_gather(features)
 
         graph_constructor = get_graph_constructor(self.gc_config, scoremaps=scoremaps, features=features,
@@ -74,7 +75,7 @@ class UpperBoundModel(nn.Module):
                                                   device=scoremaps.device)
 
 
-        x, edge_attr, edge_index, edge_labels, node_labels, joint_det, label_mask, joint_scores, _ = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, node_labels, joint_det, label_mask, label_mask_node, joint_scores, _ = graph_constructor.construct_graph()
 
-        return scoremaps, edge_labels, node_labels, joint_det, joint_scores, edge_index, edge_labels, node_labels, label_mask
+        return scoremaps, edge_labels, node_labels, joint_det, joint_scores, edge_index, edge_labels, node_labels, label_mask, label_mask_node
 

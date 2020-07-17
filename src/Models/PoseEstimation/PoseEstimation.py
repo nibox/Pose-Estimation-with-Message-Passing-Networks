@@ -73,12 +73,13 @@ class PoseEstimationBaseline(nn.Module):
         input_feature_size = config.MODEL.KP_OUTPUT_DIM if config.MODEL.HRNET.FEATURE_FUSION != "cat_multi" else 352
         self.feature_gather = nn.Conv2d(input_feature_size, config.MODEL.MPN.NODE_INPUT_DIM, 3, 1, 1, bias=True)
         self.num_aux_steps = config.MODEL.AUX_STEPS
+        self.scoremap_mode = config.MODEL.HRNET.SCOREMAP_MODE
 
     def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None, factors=None, with_logits=True) -> torch.tensor:
         if self.gc_config.MASK_CROWDS:
             assert masks is not None
         bb_output = self.backbone(imgs)
-        scoremaps, features = self.process_output(bb_output)
+        scoremaps, features = self.process_output(bb_output, self.scoremap_mode)
         """
         scoremaps, features, early_features = self.backbone(imgs)
         final_scoremap = scoremaps[:, -1, :17]
@@ -91,16 +92,16 @@ class PoseEstimationBaseline(nn.Module):
                                                   joints_gt=keypoints_gt, factor_list=factors, masks=masks,
                                                   device=scoremaps.device)
 
-        x, edge_attr, edge_index, edge_labels, node_labels, joint_det, label_mask, joint_scores, batch_index = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, node_labels, joint_det, label_mask, label_mask_node, joint_scores, batch_index = graph_constructor.construct_graph()
 
-        preds, node_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels, batch_index=batch_index)
+        preds, node_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels, batch_index=batch_index, node_mask=label_mask_node)
         if not with_logits:
-            if preds is not None:
+            if preds[-1] is not None:
                 preds[-1] = torch.sigmoid(preds[-1])
             if node_pred is not None:
                 node_pred[-1] = torch.sigmoid(node_pred[-1])
 
-        return scoremaps, preds, node_pred, joint_det, joint_scores, edge_index, edge_labels, node_labels, label_mask, bb_output[0]
+        return scoremaps, preds, node_pred, joint_det, joint_scores, edge_index, edge_labels, node_labels, label_mask, label_mask_node, bb_output[0]
 
     """
     def mpn_loss(self, outputs, targets, reduction, with_logits=True, mask=None, batch_index=None) -> torch.Tensor:

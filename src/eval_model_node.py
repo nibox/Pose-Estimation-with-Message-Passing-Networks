@@ -172,7 +172,7 @@ def main():
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
-            scoremaps, pred, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels,  _, _ = model(img, keypoints, masks, factors, with_logits=True)
+            scoremaps, pred, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels,  _, node_mask, _ = model(img, keypoints, masks, factors, with_logits=True)
 
             preds_edges = pred[-1].sigmoid().squeeze() if pred[-1] is not None else None
             preds_nodes = preds_nodes[-1].sigmoid().squeeze()
@@ -217,7 +217,7 @@ def main():
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
-            scoremaps, pred, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels, _, _ = model(
+            scoremaps, pred, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels, _, node_mask, _ = model(
                 img, keypoints, masks, factors, with_logits=True)
 
             preds_edges = pred[-1].sigmoid().squeeze() if pred[-1] is not None else None
@@ -225,6 +225,7 @@ def main():
 
             true_positive_idx = preds_nodes > 0.5
             true_positive_idx[node_labels == 1.0] = True
+            true_positive_idx[node_mask == 0.0] = False
             mask = subgraph_mask(true_positive_idx, edge_index)
             result_edges = torch.zeros(edge_index.shape[1], dtype=torch.float, device=edge_index.device)
             if pred[-1] is not None:

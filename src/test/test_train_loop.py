@@ -46,12 +46,12 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
         keypoints = keypoints.to(kwargs["device"])
         factors = factors.to(kwargs["device"])
 
-        scoremaps, preds, preds_nodes, joint_det, _, edge_index, edge_labels, node_labels, label_mask = model(imgs, keypoints, masks, factors)
+        scoremaps, preds, preds_nodes, joint_det, _, edge_index, edge_labels, node_labels, label_mask, label_mask_node = model(imgs, keypoints, masks, factors)
 
         label_mask = label_mask if kwargs["use_label_mask"] else None
 
         if isinstance(loss_func, MultiLossFactory):
-            loss = loss_func(preds, edge_labels, label_mask=label_mask)
+            loss, _ = loss_func(preds, edge_labels, label_mask=label_mask)
         elif isinstance(loss_func, ClassMPNLossFactory):
             # adapt labels and mask to reduced graph
             loss_masks = []
@@ -63,7 +63,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
                 loss_edge_labels.append(edge_labels[mask])
                 loss_masks.append(label_mask[mask])
 
-            loss = loss_func(preds, preds_nodes, loss_edge_labels, node_labels, loss_masks)
+            loss, _ = loss_func(preds, preds_nodes, loss_edge_labels, node_labels, loss_masks, label_mask_node)
 
             #
             default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float, device=edge_index.device) - 1.0
@@ -84,8 +84,9 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
         edge_labels = edge_labels.detach()
         node_labels = None if preds_nodes is None else node_labels.detach()
         edge_label_mask = label_mask.detach()
+        node_label_mask = label_mask_node.detach()
 
-        return loss, preds_nodes, preds_edges, node_labels, edge_labels, edge_label_mask
+        return loss, preds_nodes, preds_edges, node_labels, edge_labels, edge_label_mask, node_label_mask
 
     return func
 
@@ -99,7 +100,7 @@ def main():
     torch.backends.cudnn.benchmark = False
 
     ##########################################################
-    config_name = "model_41_6"
+    config_name = "model_46"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
 
@@ -134,7 +135,7 @@ def main():
             model.stop_backbone_bn()
     for iter in range(10000):
 
-        loss, preds_nodes, preds_edges, node_labels, edge_labels, edge_label_mask = update_model(batch)
+        loss, preds_nodes, preds_edges, node_labels, edge_labels, edge_label_mask, node_label_mask = update_model(batch)
 
         if preds_nodes is not None:
             result_nodes = preds_nodes.sigmoid().squeeze()
@@ -145,7 +146,7 @@ def main():
         result_edges = preds_edges.sigmoid().squeeze()
         result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
 
-        node_metrics = calc_metrics(result_nodes, node_labels)
+        node_metrics = calc_metrics(result_nodes, node_labels, node_label_mask)
         edge_metrics = calc_metrics(result_edges, edge_labels, edge_label_mask)
 
 
