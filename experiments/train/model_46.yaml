@@ -9,11 +9,11 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.0
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real_node/41"
+LOG_DIR: "../log/PoseEstimationBaseline/Real_node/46"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/41/pose_estimation.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/46/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -130,7 +130,7 @@ MODEL:
     CHEAT: False
     USE_GT: False
     USE_NEIGHBOURS: True
-    EDGE_LABEL_METHOD: 4
+    EDGE_LABEL_METHOD: 5
     MASK_CROWDS: True
     DETECT_THRESHOLD: 0.1
     MATCHING_RADIUS: 0.1
@@ -139,6 +139,8 @@ MODEL:
     CC_METHOD: GAEC
     NORM_NODE_DISTANCE: True
     IMAGE_CENTRIC_SAMPLING: False
+    NODE_MATCHING_RADIUS: 0.5
+    NODE_INCLUSION_RADIUS: 0.7
   LOSS:
     NAME: node_edge_loss
     LOSS_WEIGHTS:

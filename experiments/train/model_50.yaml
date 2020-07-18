@@ -9,11 +9,11 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.0
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real_node/41"
+LOG_DIR: "../log/PoseEstimationBaseline/Real_node/50"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/41/pose_estimation.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/50/pose_estimation_2.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -138,7 +138,6 @@ MODEL:
     GRAPH_TYPE: knn
     CC_METHOD: GAEC
     NORM_NODE_DISTANCE: True
-    IMAGE_CENTRIC_SAMPLING: False
   LOSS:
     NAME: node_edge_loss
     LOSS_WEIGHTS:
@@ -153,18 +152,18 @@ TEST:
   ADJUST: True
 
 TRAIN:
-  SPLIT: coco_17_mini
+  SPLIT: coco_17_full
   LR: 3e-4
   LR_FACTOR: 0.1
   LR_STEP:
     - 60
     - 150
   BATCH_SIZE: 8
-  START_EPOCH: 0
-  END_EPOCH: 100
+  START_EPOCH: 13
+  END_EPOCH: 25
   END_TO_END: False
   USE_LABEL_MASK: True
   USE_BATCH_INDEX: False
   LOSS_REDUCTION: mean
   FREEZE_BN: True
-  CONTINUE: ""
+  CONTINUE: "../log/PoseEstimationBaseline/Real_node/50/pose_estimation.pth"
