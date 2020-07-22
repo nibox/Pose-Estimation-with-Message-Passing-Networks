@@ -4,7 +4,7 @@ import torch.nn as nn
 import numpy as np
 from matplotlib import pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
-from torch_geometric.utils import dense_to_sparse, precision, recall, accuracy, f1_score
+from torch_geometric.utils import dense_to_sparse, precision, recall, accuracy, f1_score, subgraph
 
 from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
 from Utils.dataset_utils import Graph
@@ -123,6 +123,55 @@ def draw_detection_with_conf(img, joint_det, joint_score, joint_gt, fname=None, 
     else:
         raise NotImplementedError
 
+def draw_detection_scoremap(scoremaps, joint_det, joint_gt, inp_type, fname=None, output_size=128.0):
+    """
+    :param img: torcg.tensor. image
+    :param joint_det: shape: (num_joints, 2) list of xy positions of detected joints (without classes or clustering)
+    :param fname: optional - file name of image to save. If None the image is show with plt.show
+    :return:
+    """
+
+    scoremap = scoremaps.cpu().numpy().squeeze()
+    scoremap = scoremap[None, inp_type].clip(0, 1.0) * 255
+    scoremap = np.repeat(scoremap, repeats=3, axis=0).astype(np.uint8).transpose(1, 2, 0)
+    scoremap = cv2.resize(scoremap, (512, 512))
+
+    img = to_numpy(scoremap)
+    if img.dtype != np.uint8:
+        img = img * 255.0
+        img = img.astype(np.uint8)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    colors_joints = np.arange(0, 179, np.ceil(179 / 17), dtype=np.float)
+    colors_joints[1::2] = colors_joints[-2::-2] # swap some colors to have clearer distinction between similar joint types
+
+    for i in range(len(joint_det)):
+        # scale up to 512 x 512
+        scale = 512.0 / output_size
+        x, y = int(joint_det[i, 0] * scale), int(joint_det[i, 1] * scale)
+        j_type = joint_det[i, 2]
+        if j_type == inp_type:
+            color = (colors_joints[j_type], 255, 255)
+            cv2.circle(img, (x, y), 2, color, -1)
+    for person in range(len(joint_gt)):
+        if np.sum(joint_gt[person]) > 0.0:
+            for i in range(len(joint_gt[person])):
+                # scale up to 512 x 512
+                scale = 512.0 / output_size
+                x, y = int(joint_gt[person, i, 0] * scale), int(joint_gt[person, i, 1] * scale)
+                j_type = i
+                if j_type == inp_type:
+                    cv2.circle(img, (x, y), 2, (120, 255, 255), -1)
+    img = cv2.cvtColor(img, cv2.COLOR_HSV2RGB)
+
+    fig = plt.figure()
+    plt.imshow(img)
+    if fname is not None:
+        plt.savefig(fig=fig, fname=fname)
+        plt.close(fig)
+    else:
+        raise NotImplementedError
+
+
 def draw_detection(img, joint_det, joint_gt, fname=None, output_size=128.0):
     """
     :param img: torcg.tensor. image
@@ -218,6 +267,63 @@ def draw_poses(img: [torch.tensor, np.array], persons, fname=None, output_size=1
                 cv2.line(img, (x_1, y_1), (center_joint[0], center_joint[1]), color)
 
     img = cv2.cvtColor(img, cv2.COLOR_HSV2RGB)
+    fig = plt.figure()
+    plt.imshow(img)
+    if fname is not None:
+        plt.savefig(fig=fig, fname=fname)
+        plt.close(fig)
+    else:
+        raise NotImplementedError
+
+
+def draw_edges_conf(img, joint_det, person_labels, node_labels, edge_index, preds_edges, fname=None, output_size=128.0):
+    # filter nodes using the node labels -> subgraph
+    # for node in nodes
+    # draw node in color of cluster
+    # get all connections and draw them in color of confidence
+    tp_idx = node_labels > 0.5
+    mask = subgraph_mask(node_labels > 0.5, edge_index, )
+    edge_index, _ = subgraph(torch.from_numpy(tp_idx), torch.from_numpy(edge_index), None, relabel_nodes=True)
+    edge_index = edge_index.numpy()
+    joint_det = joint_det[tp_idx]
+    person_labels = person_labels[tp_idx]
+    preds_edges = preds_edges[mask]
+
+    img = to_numpy(img)
+    if img.dtype != np.uint8:
+        img = img * 255.0
+        img = img.astype(np.uint8)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    colors_joints = np.linspace(0, 179, person_labels.max() + 1, dtype=np.float)
+    colors_edges = [0, 20, 50] #np.linspace(0, 179, 3, dtype=np.float)
+
+    for i in range(len(joint_det)):
+        scale = 512.0 / output_size
+        x, y = int(joint_det[i, 0] * scale), int(joint_det[i, 1] * scale)
+        cluster = person_labels[i]
+
+        color = (colors_joints[cluster], 255, 255)
+        cv2.circle(img, (x, y), 2, color, -1)
+        # draw connections
+        edges = edge_index[0] == i
+        sub_preds_edges = preds_edges[edges]
+        target_node_idxs = edge_index[1, edges]
+        for j in range(len(target_node_idxs)):
+            x_t, y_t = int(joint_det[j, 0] * scale), int(joint_det[j, 1] * scale)
+            conf = sub_preds_edges[j]
+            if conf < 0.33:
+                conf_class = 0
+            elif 0.33 <= conf <= 0.66:
+                conf_class = 2
+            elif conf > 0.66:
+                conf_class = 1
+            else:
+                raise NotImplementedError
+            color = (colors_edges[conf_class], 255, 255)
+            cv2.line(img, (x, y), (x_t, y_t), color)
+
+    img = cv2.cvtColor(img, cv2.COLOR_HSV2RGB)
+
     fig = plt.figure()
     plt.imshow(img)
     if fname is not None:

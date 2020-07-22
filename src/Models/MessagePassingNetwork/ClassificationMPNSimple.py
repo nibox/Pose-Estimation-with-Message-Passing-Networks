@@ -86,17 +86,6 @@ class ClassificationMPNSimple(torch.nn.Module):
             node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index)
         preds_node.append(self.node_classification(node_features).squeeze())
 
-        true_positive_idx = preds_node[-1].sigmoid() > self.node_threshold
-        if kwargs["node_labels"] is not None and self.training:
-            true_positive_idx[kwargs["node_labels"] == 1.0] = True
-            true_positive_idx[kwargs["node_mask"] == 0.0] = False  # do not use ambiguous cases for edge classificatoni
-
-        mask = subgraph_mask(true_positive_idx, edge_index)
-        edge_features = edge_features[mask]
-
-        if len(edge_features) != 0:
-            preds_edge.append(self.edge_classification(edge_features).squeeze())
-        else:
-            preds_edge = [None]
+        preds_edge.append(self.edge_classification(edge_features).squeeze())
 
         return preds_edge, preds_node

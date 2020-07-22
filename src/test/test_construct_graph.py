@@ -5,7 +5,7 @@ import pickle
 from config import get_config, update_config
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
 from Utils.transforms import transforms_hr_train, transforms_hr_eval, transforms_hg_eval
-from Utils import draw_detection, draw_clusters, draw_poses, pred_to_person, graph_cluster_to_persons, to_device, to_tensor
+from Utils import draw_detection, draw_clusters, draw_poses, pred_to_person, graph_cluster_to_persons, to_device, to_tensor, draw_detection_scoremap
 from Models import get_upper_bound_model
 import matplotlib;matplotlib.use("Agg")
 
@@ -40,7 +40,7 @@ def main():
 
     imgs_without_det = 0
     with torch.no_grad():
-        for i in range(3500):  # just test the first 100 images
+        for i in range(100):  # just test the first 100 images
             # split batch
             img_id = img_set.img_ids[i]
             if use_subset:
@@ -48,10 +48,10 @@ def main():
                     continue
             print(f"Iter : {i}")
             print(f"img_idx: {img_set.img_ids[i]}")
-            img, _, masks, keypoints, factor_list = img_set[i]
+            img, heatmaps, masks, keypoints, factor_list = img_set[i]
             mask, keypoints, factor_list = to_tensor(device, masks[-1], keypoints, factor_list)
             img = img.to(device)[None]
-            _, pred, preds_nodes, joint_det, joint_scores, edge_index, _, _, label_mask, _ = model(img, keypoints, mask, factor_list)
+            sm_avg, pred, preds_nodes, joint_det, joint_scores, edge_index, _, _, label_mask, _, scoremaps = model(img, keypoints, mask, factor_list)
 
             # construct poses
             persons_pred_cc, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, config.MODEL.GC.CC_METHOD)
@@ -67,10 +67,26 @@ def main():
             clean_joint_det = joint_det[preds_nodes == 1]
             keypoints = keypoints.cpu().numpy().squeeze()
 
+            heatmaps = torch.from_numpy(heatmaps[1])
             img = np.array(transforms_inv(img.cpu().squeeze()))
+            """
             draw_detection(img, joint_det, keypoints,
                            fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_det.png",
                            output_size=256)
+            """
+            draw_detection_scoremap(heatmaps, joint_det[preds_nodes==1.0], keypoints, 6,
+                           fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_shoulder.png",
+                           output_size=256)
+            draw_detection_scoremap(sm_avg[0], joint_det[preds_nodes==1.0], keypoints, 6,
+                                    fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_shoulder_avg.png",
+                                    output_size=256)
+            draw_detection_scoremap(sm_avg[0], joint_det[preds_nodes==1.0], keypoints, 11,
+                                    fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_hip_avg.png",
+                                    output_size=256)
+            draw_detection_scoremap(heatmaps, joint_det[preds_nodes==1.0], keypoints, 11,
+                                    fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_hip.png",
+                                    output_size=256)
+            """
             draw_detection(img, clean_joint_det, keypoints,
                            fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_clean.png",
                            output_size=256)
@@ -84,6 +100,7 @@ def main():
             # draw_poses(imgs, persons_pred_cc, fname=f"../tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_cc.png")
             draw_poses(img, persons_pred_gt, fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt_labels.png",
                        output_size=256)
+            """
 
             # """
         print(f"num images without detection :{imgs_without_det}")

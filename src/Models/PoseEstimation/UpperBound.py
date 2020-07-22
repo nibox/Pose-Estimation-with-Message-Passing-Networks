@@ -77,5 +77,5 @@ class UpperBoundModel(nn.Module):
 
         x, edge_attr, edge_index, edge_labels, node_labels, joint_det, label_mask, label_mask_node, joint_scores, _ = graph_constructor.construct_graph()
 
-        return scoremaps, edge_labels, node_labels, joint_det, joint_scores, edge_index, edge_labels, node_labels, label_mask, label_mask_node
+        return scoremaps, edge_labels, node_labels, joint_det, joint_scores, edge_index, edge_labels, node_labels, label_mask, label_mask_node, bb_output
 

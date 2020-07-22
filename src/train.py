@@ -79,24 +79,18 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             elif isinstance(loss_func, ClassMultiLossFactory):
                 loss_masks = []
                 loss_edge_labels = []
+                # first the graph reduction
+                mask = None
                 for i in range(len(preds_nodes)):
                     true_positive_idx = preds_nodes[i].sigmoid() > kwargs["config"].MODEL.MPN.NODE_THRESHOLD
                     true_positive_idx[node_labels == 1.0] = True
-                    true_positive_idx[label_mask_node == 0.0] = False
                     mask = subgraph_mask(true_positive_idx, edge_index)
-                    loss_edge_labels.append(edge_labels[mask])
-                    loss_masks.append(label_mask[mask])
+                    loss_edge_labels.append(edge_labels)
+                    loss_masks.append(label_mask * mask.float())
 
                 loss, _ = loss_func(bb_output, preds_nodes, preds, heatmaps, node_labels, loss_edge_labels, masks,
                                  loss_masks, label_mask_node)
-                #
-                default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float,
-                                           device=edge_index.device) - 1.0
-                if preds is not None:
-                    default_pred[mask] = preds[-1].detach()
-                    preds[-1] = default_pred
-                else:
-                    preds = [default_pred]
+                label_mask = label_mask * mask.float()
             else:
                 raise NotImplementedError
 
@@ -124,35 +118,18 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
                 for i in range(len(preds_nodes)):
                     true_positive_idx = preds_nodes[i].sigmoid() > kwargs["config"].MODEL.MPN.NODE_THRESHOLD
                     true_positive_idx[node_labels == 1.0] = True
-                    true_positive_idx[label_mask_node== 0.0] = False
                     mask = subgraph_mask(true_positive_idx, edge_index)
-                    loss_edge_labels.append(edge_labels[mask])
-                    loss_masks.append(label_mask[mask])
+                    loss_edge_labels.append(edge_labels)
+                    loss_masks.append(label_mask * mask.float())
 
                 loss, _ = loss_func(preds, preds_nodes, loss_edge_labels, node_labels, loss_masks, label_mask_node)
-                #
-                default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float,
-                                           device=edge_index.device) - 1.0
-                default_pred[mask] = preds[-1].detach()
-                # """
-                """
-                true_positive_idx = preds_nodes[-1].detach() > 0.0
-                true_positive_idx[node_labels == 1.0] = True
-                mask = subgraph_mask(true_positive_idx, edge_index)
-                loss_mask = label_mask.clone() # .[mask == 0] = 0.0
-                loss_mask[mask==0] = 0.0
-                loss = loss_func(preds, preds_nodes, edge_labels, node_labels, loss_mask)
-                label_mask[mask == 0] = 1.0
-                # """
+                label_mask = label_mask * mask.float()
             else:
                 raise NotImplementedError
             loss.backward()
             optimizer.step()
         loss = loss.item()
-        if isinstance(loss_func, ClassMPNLossFactory):
-            preds_edges = default_pred
-        else:
-            preds_edges = preds[-1].detach()
+        preds_edges = preds[-1].detach()
         preds_nodes = None if preds_nodes is None else preds_nodes[-1].detach()
         edge_labels = edge_labels.detach()
         node_labels = None if preds_nodes is None else node_labels.detach()
@@ -246,7 +223,7 @@ def main():
             result_edges = preds_edges.sigmoid().squeeze()
             result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
 
-            node_metrics = calc_metrics(result_nodes, node_labels, node_label_mask)  #  not sure
+            node_metrics = calc_metrics(result_nodes, node_labels, node_label_mask)
             edge_metrics = calc_metrics(result_edges, edge_labels, edge_label_mask)
 
             logger.log_vars("Metric/train", iter, **edge_metrics)
@@ -272,7 +249,8 @@ def main():
         print("#### BEGIN VALIDATION ####")
 
         valid_dict = {"node": {"acc": [], "prec": [], "rec": [], "f1": []},
-                      "edge": {"acc": [], "prec": [], "rec": [], "f1": []}}
+                      "edge": {"acc": [], "prec": [], "rec": [], "f1": []},
+                      "edge_masked": {"prec": [], "rec": []}}
         valid_loss = []
         valid_heatmap = []
         with torch.no_grad():
@@ -291,21 +269,24 @@ def main():
                 if config.TRAIN.END_TO_END:
                     if isinstance(loss_func, MultiLossFactory):
                         loss, logging = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
+                        loss_mask = label_mask
                     elif isinstance(loss_func, ClassMultiLossFactory):
                         loss_masks = []
                         loss_edge_labels = []
                         for i in range(len(preds_nodes)):
-                            true_positive_idx = preds_nodes[i].sigmoid() > config.MODEL.MPN.NODE_THRESHOLD
+                            true_positive_idx = preds_nodes[i].sigmoid() > 0.5
                             mask = subgraph_mask(true_positive_idx, edge_index)
-                            loss_edge_labels.append(edge_labels[mask])
-                            loss_masks.append(label_mask[mask])
+
+                            loss_edge_labels.append(edge_labels)
+                            loss_masks.append(label_mask * mask.float())
 
                         loss, logging = loss_func(bb_output, preds_nodes, preds, heatmaps, node_labels, loss_edge_labels, masks, loss_masks, label_mask_node)
                         #
+                        loss_mask = loss_masks[-1].detach()
                         default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float,
                                                    device=edge_index.device) - 1.0
                         if preds[-1] is not None:
-                            default_pred[mask] = preds[-1].detach()
+                            default_pred[mask] = preds[-1][mask].detach()
                             preds[-1] = default_pred
                         else:
                             preds = [default_pred]
@@ -313,36 +294,28 @@ def main():
                     if isinstance(loss_func, MPNLossFactory):
 
                         loss, logging = loss_func(preds, edge_labels, label_mask=label_mask)
+                        loss_mask = label_mask
                     elif isinstance(loss_func, ClassMPNLossFactory):
                         # adapt labels and mask to reduced graph
                         # """
                         loss_masks = []
                         loss_edge_labels = []
                         for i in range(len(preds_nodes)):
-                            true_positive_idx = preds_nodes[i].sigmoid() > config.MODEL.MPN.NODE_THRESHOLD
+                            true_positive_idx = preds_nodes[i].sigmoid() > 0.5
                             mask = subgraph_mask(true_positive_idx, edge_index)
-                            loss_edge_labels.append(edge_labels[mask])
-                            loss_masks.append(label_mask[mask])
+                            loss_edge_labels.append(edge_labels)
+                            loss_masks.append(label_mask * mask.float())
 
                         loss, logging = loss_func(preds, preds_nodes, loss_edge_labels, node_labels, loss_masks, label_mask_node)
                         #
                         default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float,
                                                    device=edge_index.device) - 1.0
+                        loss_mask = loss_masks[-1].detach()
                         if preds[-1] is not None:
-                            default_pred[mask] = preds[-1].detach()
+                            default_pred[mask] = preds[-1][mask].detach()
                             preds[-1] = default_pred
                         else:
                             preds = [default_pred]
-                        # """
-                        """
-                        true_positive_idx = preds_nodes[-1].detach() > 0.0
-                        true_positive_idx[node_labels == 1.0] = True
-                        mask = subgraph_mask(true_positive_idx, edge_index)
-                        loss_mask = label_mask.clone()  # .[mask == 0] = 0.0
-                        loss_mask[mask == 0] = 0.0
-                        loss = loss_func(preds, preds_nodes, edge_labels, node_labels, loss_mask)
-                        label_mask[mask == 0] = 1.0
-                        # """
                     else:
                         raise NotImplementedError
 
@@ -356,20 +329,19 @@ def main():
                     result_nodes = None
                     node_labels = None
 
-                # remove masked connections from score calculation
-                """
-                if len(result) == 0:
-                    continue
-                """
                 node_metrics = calc_metrics(result_nodes, node_labels, label_mask_node)
-                edge_metrics = calc_metrics(result_edges, edge_labels, label_mask)
+                edge_metrics_complete = calc_metrics(result_edges, edge_labels, label_mask)
+                edge_metrics_masked = calc_metrics(result_edges, edge_labels, loss_mask)
 
                 valid_loss.append(loss.item())
                 if "heatmap" in logging:
                     valid_heatmap.append(logging["heatmap"])
-                if edge_metrics is not None:
-                    for key in edge_metrics.keys():
-                        valid_dict["edge"][key].append((edge_metrics[key]))
+                if edge_metrics_complete is not None:
+                    for key in edge_metrics_complete.keys():
+                        valid_dict["edge"][key].append((edge_metrics_complete[key]))
+                if edge_metrics_masked is not None:
+                    for key in ["prec", "rec"]:
+                        valid_dict["edge_masked"][key].append((edge_metrics_masked[key]))
 
                 if node_metrics is not None:
                     for key in node_metrics.keys():
@@ -384,6 +356,7 @@ def main():
         logger.log_loss(np.mean(valid_loss), "Loss/valid", epoch)
         logger.log_loss(np.mean(valid_heatmap), "Loss/valid_heat", epoch)
         logger.log_vars("Metric/valid", epoch, **valid_dict['edge'])
+        logger.log_vars("Metric/valid_masked", epoch, **valid_dict['edge_masked'])
         logger.log_vars("Metric/Node/valid", epoch, **valid_dict['node'])
 
         torch.save({"epoch": epoch,
@@ -391,6 +364,13 @@ def main():
                     "optimizer_state_dict": optimizer.state_dict(),
                     "lr_scheduler_state_dict": scheduler.state_dict()
                     }, config.MODEL.PRETRAINED)
+        if epoch + 1 in config.TRAIN.LR_STEP:
+            save_name = config.LOG_DIR + f"/pose_estimation_epoch_{epoch}.pth"
+            torch.save({"epoch": epoch,
+                        "model_state_dict": model.state_dict(),
+                        "optimizer_state_dict": optimizer.state_dict(),
+                        "lr_scheduler_state_dict": scheduler.state_dict()
+                        }, save_name)
 
 
 if __name__ == "__main__":

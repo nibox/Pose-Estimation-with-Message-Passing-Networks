@@ -60,14 +60,14 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
                 true_positive_idx = preds_nodes[i].sigmoid() > kwargs["config"].MODEL.MPN.NODE_THRESHOLD
                 true_positive_idx[node_labels == 1.0] = True
                 mask = subgraph_mask(true_positive_idx, edge_index)
-                loss_edge_labels.append(edge_labels[mask])
-                loss_masks.append(label_mask[mask])
+                loss_edge_labels.append(edge_labels)
+                loss_masks.append(label_mask * mask.float())
 
             loss, _ = loss_func(preds, preds_nodes, loss_edge_labels, node_labels, loss_masks, label_mask_node)
 
             #
             default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float, device=edge_index.device) - 1.0
-            default_pred[mask] = preds[-1].detach()
+            default_pred[mask] = preds[-1][mask].detach()
 
         else:
             raise NotImplementedError

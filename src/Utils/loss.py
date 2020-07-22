@@ -166,7 +166,7 @@ class ClassMPNLossFactory(nn.Module):
             self.edge_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA,
                                        logits=True)
         else:
-            raise NotImplementedError
+            self.edge_loss = BCELossWtihLogits(pos_weight=1.0)
 
         if config.MODEL.LOSS.NODE_USE_FOCAL:
             self.node_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA,
@@ -202,6 +202,7 @@ class FocalLoss(nn.Module):
         self.logits = logits
 
     def forward(self, inputs, targets, reduction, mask=None, batch_index=None):
+        assert batch_index is None
         if self.logits:
             BCE_loss = F.binary_cross_entropy_with_logits(inputs, targets, reduce=False)
         else:
@@ -212,12 +213,10 @@ class FocalLoss(nn.Module):
             F_loss = F_loss * mask
 
         if reduction is not None:
-            if batch_index is not None and reduction == "mean":
-                F_loss = scatter_mean(F_loss, batch_index)
-                assert len(F_loss) == batch_index.max() + 1
+            if reduction == "mean" and mask is None:
                 return torch.mean(F_loss)
-            elif reduction == "mean" and batch_index is None:
-                return torch.mean(F_loss)
+            elif reduction == "mean" and mask is not None:
+                return torch.sum(F_loss) / mask.sum()
             elif reduction == "sum":
                 return torch.sum(F_loss)
         else:
@@ -230,9 +229,9 @@ class BCELossWtihLogits(nn.Module):
         self.loss = nn.BCEWithLogitsLoss(reduction="none")
 
     def forward(self, inputs, targets, reduction, mask=None, batch_index=None):
-        if mask is not None:
-            raise NotImplementedError
         bce_loss = self.loss(inputs, targets)
+        if mask is not None:
+            bce_loss = bce_loss * mask
         if self.pos_weight is not None:
             bce_loss[targets==1.0] *= self.pos_weight
         return bce_loss.mean()
