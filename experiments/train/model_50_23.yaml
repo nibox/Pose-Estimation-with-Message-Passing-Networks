@@ -9,11 +9,11 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.0
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real_node/50_2"
+LOG_DIR: "../log/PoseEstimationBaseline/Real_node/50_23"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/50_2/pose_estimation.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/50_23/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -146,6 +146,8 @@ MODEL:
     USE_FOCAL: True
     FOCAL_GAMMA: 2.0
     FOCAL_ALPHA: 1.0
+  FEATURE_GATHER_KERNEL: 1
+  FEATURE_GATHER_PADDING: 0
 TEST:
   NUM_EVAL: 500
   SPLIT: coco_17_mini

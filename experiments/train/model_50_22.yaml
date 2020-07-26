@@ -7,13 +7,13 @@ DATASET:
   MIN_SCALE : 1.0
   MAX_SCALE : 1.0
   MAX_TRANSLATE : 40
-  FLIP : 0.0
+  FLIP : 0.5
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real_node/50_2"
+LOG_DIR: "../log/PoseEstimationBaseline/Real_node/50_22"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/50_2/pose_estimation.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/50_22/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -91,6 +91,7 @@ MODEL:
   MPN:
     NAME: ClassificationMPNSimple
     STEPS: 10
+    EDGE_STEPS: 5
     NODE_INPUT_DIM: 128
     EDGE_INPUT_DIM: 17 + 2
     NODE_FEATURE_DIM: 64
