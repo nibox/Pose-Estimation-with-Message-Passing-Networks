@@ -187,6 +187,8 @@ class ClassMPNLossFactory(nn.Module):
                 continue
             edge_loss += self.edge_loss(outputs_class[i], edge_labels[i], "mean", label_mask[i])
         edge_loss = edge_loss / len(outputs_class)
+        if torch.isnan(edge_loss):
+            edge_loss = 0.0
 
         logging = {"edge": edge_loss.cpu().item() if isinstance(edge_loss, torch.Tensor) else edge_loss,
                    "node": node_loss.cpu().item()}

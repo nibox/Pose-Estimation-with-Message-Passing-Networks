@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
-from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
+from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, ScaleAwareHeatmapGenerator
 from Utils.transforms import transforms_hr_train, transforms_hg_eval
 from Utils.loss import MPNLossFactory, MultiLossFactory, ClassMPNLossFactory, ClassMultiLossFactory
 from Utils.Utils import to_device, calc_metrics, subgraph_mask, Logger
@@ -35,7 +35,7 @@ def create_train_validation_split(config):
                    DataLoader(valid, batch_size=1, num_workers=8)
     elif config.TRAIN.SPLIT == "coco_17_mini":
         train_ids, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
-        heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
+        heatmap_generator = [HeatmapGenerator(128, 17, config.DATASET.SIGMA), HeatmapGenerator(256, 17, config.DATASET.SIGMA)]
         transforms, _ = transforms_hr_train(config)
         train = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=train_ids, year=17,
                                     transforms=transforms, heatmap_generator=heatmap_generator)
@@ -46,7 +46,12 @@ def create_train_validation_split(config):
     elif config.TRAIN.SPLIT == "coco_17_full":
         train_ids, _ = pickle.load(open("tmp/coco_17_full_split.p", "rb"))  # mini_train_valid_split_4 old one
         _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
-        heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
+        if config.DATASET.HEAT_GENERATOR == "default":
+            heatmap_generator = [HeatmapGenerator(128, 17, config.DATASET.SIGMA),
+                                 HeatmapGenerator(256, 17, config.DATASET.SIGMA)]
+        elif config.DATASET.HEAT_GENERATOR == "scale_aware":
+            heatmap_generator = [ScaleAwareHeatmapGenerator(128, 17, config.DATASET.SIGMA),
+                                 ScaleAwareHeatmapGenerator(256, 17, config.DATASET.SIGMA)]
         transforms, _ = transforms_hr_train(config)
         train = CocoKeypoints_hr(config.DATASET.ROOT, mini=False, seed=0, mode="train", img_ids=train_ids, year=17,
                                  transforms=transforms, heatmap_generator=heatmap_generator)

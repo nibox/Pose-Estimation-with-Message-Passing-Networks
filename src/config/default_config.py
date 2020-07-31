@@ -22,6 +22,8 @@ _C.MULTIPROCESSING_DISTRIBUTED = True
 _C.MODEL = CN()
 _C.MODEL.KP = "hrnet"
 _C.MODEL.PRETRAINED = ""  # means the path were the trained model is saved to and where the trained model is loaded from
+_C.MODEL.FEATURE_GATHER_KERNEL = 3
+_C.MODEL.FEATURE_GATHER_PADDING = 1
 _C.MODEL.LOSS = CN()
 _C.MODEL.LOSS.NAME = "edge_loss"
 _C.MODEL.LOSS.LOSS_WEIGHTS = [1.0]
@@ -116,6 +118,7 @@ _C.MODEL.MPN.AGGR = "max"
 _C.MODEL.MPN.SKIP = False
 _C.MODEL.MPN.AUX_LOSS_STEPS = 0  # 0 means only the last prediction is used for loss
 _C.MODEL.MPN.DROP_FEATURE = ""
+_C.MODEL.MPN.EDGE_STEPS = 0
 
 
 # configuration for the Graph Constructor
@@ -142,6 +145,8 @@ _C.DATASET = CN()
 _C.DATASET.ROOT = '../../storage/user/kistern/coco'
 _C.DATASET.MAX_NUM_PEOPLE = 30
 _C.DATASET.SCALING_TYPE = "short"
+_C.DATASET.SIGMA = 2
+_C.DATASET.HEAT_GENERATOR = "default"
 # training data augmentation
 _C.DATASET.MAX_ROTATION = 30
 _C.DATASET.MIN_SCALE = 0.75

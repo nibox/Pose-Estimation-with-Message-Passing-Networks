@@ -67,6 +67,7 @@ class ClassificationMPNSimple(torch.nn.Module):
         self.node_classification = _make_mlp(config.NODE_FEATURE_DIM, config.NODE_CLASS.OUTPUT_SIZES, bn=config.BN)
 
         self.node_steps = config.STEPS
+        self.edge_steps = config.EDGE_STEPS
         self.node_threshold = config.NODE_THRESHOLD
 
     def forward(self, x, edge_attr, edge_index, **kwargs):
@@ -85,6 +86,12 @@ class ClassificationMPNSimple(torch.nn.Module):
                 edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
             node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index)
         preds_node.append(self.node_classification(node_features).squeeze())
+
+        for i in range(self.edge_steps):
+            if self.use_skip_connections:
+                node_features = torch.cat([node_features_initial, node_features], dim=1)
+                edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
+            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index)
 
         preds_edge.append(self.edge_classification(edge_features).squeeze())
 

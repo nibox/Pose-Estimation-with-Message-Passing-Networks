@@ -30,6 +30,16 @@ def reverse_affine_map(keypoints, img_size_orig, scaling_type):
         inv_mat = get_affine_transform(center, scale, (int(resized_img[0] / 2), int(resized_img[1] / 2)), inv=True)
         keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], inv_mat)
         return keypoints
+    elif scaling_type == "short_with_resize":
+        resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], 512, 1., 1.)
+        o_size =(int(resized_img[0]/2), int(resized_img[1]/2))
+        mat = get_affine_transform(center, scale, o_size)
+        mat_2 = np.eye(3, dtype=np.float32)
+        mat_2[:2] = mat
+        mat = mat_2
+        inv_mat = get_affine_transform(center, scale, (int(resized_img[0]), int(resized_img[1])), inv=True)
+        keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], inv_mat)
+        return keypoints
 
     elif scaling_type == "long":
         gt_width = img_size_orig[0]

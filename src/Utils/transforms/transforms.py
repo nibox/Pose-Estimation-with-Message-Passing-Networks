@@ -97,6 +97,113 @@ class RandomHorizontalFlip(object):
 
         return image, mask, joints, factors
 
+class OCHumanTransform(object):
+    def __init__(self,
+                 input_size,
+                 scale_type,
+                 ):
+        self.input_size = input_size
+        self.output_size = int(input_size / 2)
+
+        self.scale_type = scale_type if scale_type != "short_with_resize" else "short"
+        assert self.scale_type == "short"
+
+    def _get_multi_scale_size(self, image, input_size, current_scale, min_scale):
+        h, w, _ = image.shape
+        center = np.array([int(w / 2.0 + 0.5), int(h / 2.0 + 0.5)])
+
+        # calculate the size for min_scale
+        min_input_size = int((min_scale * input_size + 63) // 64 * 64)
+        if w < h:
+            w_resized = int(min_input_size * current_scale / min_scale)
+            h_resized = int(
+                int((min_input_size / w * h + 63) // 64 * 64) * current_scale / min_scale
+            )
+            scale_w = w / 200.0
+            scale_h = h_resized / w_resized * w / 200.0
+        else:
+            h_resized = int(min_input_size * current_scale / min_scale)
+            w_resized = int(
+                int((min_input_size / h * w + 63) // 64 * 64) * current_scale / min_scale
+            )
+            scale_h = h / 200.0
+            scale_w = w_resized / h_resized * h / 200.0
+
+        return (w_resized, h_resized), center, np.array([scale_w, scale_h])
+
+
+    def _get_affine_transform(self, center, scale, output_size):
+
+        def get_3rd_point(a, b):
+            direct = a - b
+            return b + np.array([-direct[1], direct[0]], dtype=np.float32)
+
+        def get_dir(src_point, rot_rad):
+            sn, cs = np.sin(rot_rad), np.cos(rot_rad)
+
+            src_result = [0, 0]
+            src_result[0] = src_point[0] * cs - src_point[1] * sn
+            src_result[1] = src_point[0] * sn + src_point[1] * cs
+
+            return src_result
+
+        if not isinstance(scale, np.ndarray) and not isinstance(scale, list):
+            print(scale)
+            scale = np.array([scale, scale])
+
+        scale_tmp = scale * 200.0
+        src_w = scale_tmp[0]
+        dst_w = output_size[0]
+        dst_h = output_size[1]
+
+        src_dir = get_dir([0, src_w * -0.5], 0.0)
+        dst_dir = np.array([0, dst_w * -0.5], np.float32)
+
+        src = np.zeros((3, 2), dtype=np.float32)
+        dst = np.zeros((3, 2), dtype=np.float32)
+        src[0, :] = center
+        src[1, :] = center + src_dir
+        dst[0, :] = [dst_w * 0.5, dst_h * 0.5]
+        dst[1, :] = np.array([dst_w * 0.5, dst_h * 0.5]) + dst_dir
+
+        src[2:, :] = get_3rd_point(src[0, :], src[1, :])
+        dst[2:, :] = get_3rd_point(dst[0, :], dst[1, :])
+
+        trans = cv2.getAffineTransform(np.float32(src), np.float32(dst))
+
+        return trans
+
+
+    def __call__(self, image, mask, joints, factors):
+
+        size_resized, center, scale = get_multi_scale_size(image.shape[0], image.shape[1], self.input_size, 1.0, 1.0)
+
+        matrices = []
+        factor = 2
+
+        new_width = int(size_resized[0] / factor)
+        new_height = int(size_resized[1] / factor)
+
+        mat_output = self._get_affine_transform(
+            center, scale, (new_width, new_height))[:2]
+        mask = cv2.warpAffine(
+            (mask*255).astype(np.uint8), mat_output,
+            (new_width, new_height)
+        ) / 255
+
+        mask = (mask > 0.5).astype(np.float32)
+
+        matrices.append(mat_output)
+
+
+        mat_input = get_affine_transform(
+            center, scale, size_resized)
+        image = cv2.warpAffine(
+            image, mat_input, size_resized
+        )
+
+        return image, mask, joints, factors
+
 
 class HRNetEvalTransform(object):
     def __init__(self,
@@ -106,8 +213,8 @@ class HRNetEvalTransform(object):
         self.input_size = input_size
         self.output_size = [int(input_size / 4), int(input_size / 2)]
 
-        self.scale_type = scale_type
-        assert scale_type == "short"
+        self.scale_type = scale_type if scale_type != "short_with_resize" else "short"
+        assert self.scale_type == "short"
 
     def _get_multi_scale_size(self, image, input_size, current_scale, min_scale):
         h, w, _ = image.shape
@@ -206,9 +313,10 @@ class HRNetEvalTransform(object):
 
             mask[i] = (mask[i] > 0.5).astype(np.float32)
 
-            joints[i][:, :, 0:2] = self._affine_joints(
-                joints[i][:, :, 0:2], mat_output
-            )
+            if len(joints[0]) != 0:
+                joints[i][:, :, 0:2] = self._affine_joints(
+                    joints[i][:, :, 0:2], mat_output
+                )
             matrices.append(mat_output)
             factor = factor * 2
 

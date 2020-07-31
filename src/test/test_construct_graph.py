@@ -2,8 +2,9 @@ import torch
 import torchvision
 import numpy as np
 import pickle
+import cv2
 from config import get_config, update_config
-from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
+from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, ScaleAwareHeatmapGenerator
 from Utils.transforms import transforms_hr_train, transforms_hr_eval, transforms_hg_eval
 from Utils import draw_detection, draw_clusters, draw_poses, pred_to_person, graph_cluster_to_persons, to_device, to_tensor, draw_detection_scoremap
 from Models import get_upper_bound_model
@@ -67,18 +68,24 @@ def main():
             clean_joint_det = joint_det[preds_nodes == 1]
             keypoints = keypoints.cpu().numpy().squeeze()
 
-            heatmaps = torch.from_numpy(heatmaps[1])
+            heatmaps = torch.from_numpy(heatmaps[0])
             img = np.array(transforms_inv(img.cpu().squeeze()))
-            """
+
             draw_detection(img, joint_det, keypoints,
                            fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_det.png",
                            output_size=256)
-            """
-            draw_detection_scoremap(heatmaps, joint_det[preds_nodes==1.0], keypoints, 6,
-                           fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_shoulder.png",
+
+            draw_detection_scoremap(heatmaps, joint_det[preds_nodes==1.0], keypoints, 0,
+                           fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_nose.png",
                            output_size=256)
+            draw_detection_scoremap(sm_avg[0], joint_det[preds_nodes==1.0], keypoints, 0,
+                                    fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_nose_avg.png",
+                                    output_size=256)
             draw_detection_scoremap(sm_avg[0], joint_det[preds_nodes==1.0], keypoints, 6,
                                     fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_shoulder_avg.png",
+                                    output_size=256)
+            draw_detection_scoremap(heatmaps, joint_det[preds_nodes==1.0], keypoints, 6,
+                                    fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_shoulder.png",
                                     output_size=256)
             draw_detection_scoremap(sm_avg[0], joint_det[preds_nodes==1.0], keypoints, 11,
                                     fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_hip_avg.png",

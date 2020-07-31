@@ -84,7 +84,7 @@ def draw_detection_with_conf(img, joint_det, joint_score, joint_gt, fname=None, 
         img = img * 255.0
         img = img.astype(np.uint8)
     # img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
-    colors_joints = [(255, 0, 0), (0, 255, 0), (0, 0, 255)]# np.arange(0, 179, np.ceil(179 / 17), dtype=np.float)
+    colors_joints = [(255, 0, 0), (255, 170, 0), (0, 26, 255), (0, 255, 0)]# np.arange(0, 179, np.ceil(179 / 17), dtype=np.float)
     # colors_joints[1::2] = colors_joints[-2::-2] # swap some colors to have clearer distinction between similar joint types
 
     for i in range(len(joint_det)):
@@ -95,10 +95,12 @@ def draw_detection_with_conf(img, joint_det, joint_score, joint_gt, fname=None, 
         conf = joint_score[i]
         if conf < 0.33:
             conf_class = 0
-        elif 0.33 <= conf <= 0.66:
+        elif 0.33 <= conf < 0.5:
+            conf_class = 1
+        elif 0.5 <= conf <= 0.66:
             conf_class = 2
         elif conf > 0.66:
-            conf_class = 1
+            conf_class = 3
         else:
             raise NotImplementedError
         if type != -1:  # not sure why that is here
@@ -295,7 +297,7 @@ def draw_edges_conf(img, joint_det, person_labels, node_labels, edge_index, pred
         img = img.astype(np.uint8)
     img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
     colors_joints = np.linspace(0, 179, person_labels.max() + 1, dtype=np.float)
-    colors_edges = [0, 20, 50] #np.linspace(0, 179, 3, dtype=np.float)
+    colors_edges = [0, 20, int(234/2), 50] #np.linspace(0, 179, 3, dtype=np.float)
 
     for i in range(len(joint_det)):
         scale = 512.0 / output_size
@@ -313,10 +315,12 @@ def draw_edges_conf(img, joint_det, person_labels, node_labels, edge_index, pred
             conf = sub_preds_edges[j]
             if conf < 0.33:
                 conf_class = 0
-            elif 0.33 <= conf <= 0.66:
+            elif 0.33 <= conf < 0.5:
+                conf_class = 1
+            elif 0.5 <= conf < 0.66:
                 conf_class = 2
             elif conf > 0.66:
-                conf_class = 1
+                conf_class = 3
             else:
                 raise NotImplementedError
             color = (colors_edges[conf_class], 255, 255)

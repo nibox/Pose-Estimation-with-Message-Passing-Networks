@@ -11,9 +11,8 @@ class NaiveGraphConstructor:
     def __init__(self, scoremaps, features, joints_gt, factor_list, masks, device, config):
         self.scoremaps = scoremaps.to(device)
         self.features = features.to(device)
-        self.joints_gt = joints_gt.to(device)
+        self.joints_gt = joints_gt.to(device) if joints_gt is not None else None
         self.factor_list = factor_list
-        assert factor_list.shape[0] == self.joints_gt.shape[0] and factor_list.shape[1] == self.joints_gt.shape[1]
         self.masks = masks.to(device)
         self.batch_size = scoremaps.shape[0]
         self.device = device
@@ -33,6 +32,7 @@ class NaiveGraphConstructor:
 
         self.node_matching_radius = config.NODE_MATCHING_RADIUS
         self.node_inclusion_radius = config.NODE_INCLUSION_RADIUS
+
 
     def construct_graph(self):
         x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list = [], [], [], [], []
@@ -101,6 +101,10 @@ class NaiveGraphConstructor:
 
             # sol maps nodes to gt joints/  gt joints to nodes and connectivity maps between gt joints
             edge_labels = None
+            node_labels = None
+            # label_mask_node = torch.ones(joint_det.shape[0], dtype=torch.float, device=self.device)
+            label_mask_node = None
+            label_mask = None
             if self.use_gt:
                 if self.edge_label_method == 1:
                     edge_labels = self._construct_edge_labels_1(joint_det, self.joints_gt[batch], edge_index)
@@ -124,8 +128,8 @@ class NaiveGraphConstructor:
                 if edge_labels.max() == 0:
                     label_mask = torch.zeros_like(label_mask, device=self.device, dtype=torch.float)
 
-            if self.edge_label_method != 5:
-                assert label_mask_node.sum() == label_mask_node.shape[0]
+                if self.edge_label_method != 5:
+                    assert label_mask_node.sum() == label_mask_node.shape[0]
             # old label code
             # node_labels_2 = torch.zeros(joint_det.shape[0], device=joint_det.device, dtype=torch.float32)
             # node_labels_2[edge_index[0][edge_labels == 1]] = 1.0
@@ -153,7 +157,7 @@ class NaiveGraphConstructor:
 
 
             x_list.append(x)
-            batch_index.append(torch.ones_like(node_labels, dtype=torch.long) * batch)
+            batch_index.append(torch.ones(joint_det.shape[0], dtype=torch.long) * batch)
             num_node_list.append(x.shape[0] + num_node_list[-1])
             edge_attr_list.append(edge_attr)
             edge_index_list.append(edge_index)
@@ -173,15 +177,14 @@ class NaiveGraphConstructor:
         edge_index_list = torch.cat(edge_index_list, 1)
         joint_det_list = torch.cat(joint_det_list, 0)
         joint_score_list = torch.cat(joint_score_list, 0)
-        node_label_list = torch.cat(node_label_list, 0)
         if self.joints_gt is not None:
             assert edge_labels_list[0] is not None
             edge_labels_list = torch.cat(edge_labels_list, 0)
-        if len(label_mask_list) == 0:
-            label_mask_list = None  # preperation for label mask
-        else:
+            node_label_list = torch.cat(node_label_list, 0)
             label_mask_list = torch.cat(label_mask_list, 0)
-        label_mask_node_list = torch.cat(label_mask_node_list, 0)
+            label_mask_node_list = torch.cat(label_mask_node_list, 0)
+        else:
+            edge_labels_list, node_label_list, label_mask_list, label_mask_node_list = None, None, None, None
 
         return x_list, edge_attr_list, edge_index_list, edge_labels_list, node_label_list, joint_det_list, label_mask_list, label_mask_node_list, joint_score_list, batch_index
 
@@ -623,9 +626,9 @@ class NaiveGraphConstructor:
         label_mask_edge = NaiveGraphConstructor.create_loss_mask(joint_det_idx[ambiguous_dets], edge_index)
         label_mask_node = torch.ones_like(node_labels, dtype=torch.float32, device=self.device)
         if num_joints_gt != 0:
-            similarity_orig[:, col_1] = 1.0
+            # similarity_orig[:, col_1] = 1.0
             similarity_orig, _ = similarity_orig.max(dim=0)
-            label_mask_node[(similarity_orig >= 0.3) & (similarity_orig <= self.node_inclusion_radius)] = 0.0
+            label_mask_node[(similarity_orig >= 0.1) & (similarity_orig <= 0.8)] = 0.0
 
         return edge_labels, node_labels, label_mask_edge, label_mask_node
 
@@ -719,7 +722,7 @@ def joint_det_from_scoremap(scoremap, threshold=0.007, mask=None):
         joint_positions_det = cat_unique(top_joint_pos, thresh_joint_pos)
         joint_scores = scoremap[joint_positions_det[:, 2], joint_positions_det[:, 1], joint_positions_det[:, 0]]
     else:
-        k = 30
+        k = 20
         scoremap_shape = scoremap.shape
         scores, indices = scoremap.view(17, -1).topk(k=k, dim=1)
         container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.float).reshape(17, -1)

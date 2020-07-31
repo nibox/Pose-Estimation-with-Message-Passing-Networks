@@ -36,7 +36,7 @@ class CocoKeypoints(Dataset):
         self.data_dir =f"train20{year}" if mode == "train" else f"val20{year}"
 
         self.cat_ids = self.coco.getCatIds(catNms=["person"])
-        self.img_ids = img_ids if img_ids is not None else self.coco.getImgIds(catIds=self.cat_ids)
+        self.img_ids = img_ids if img_ids is not None else list(self.coco.imgs.keys())
         assert len(self.img_ids) == len(set(self.img_ids))
         if filter_empty and img_ids is None:
             filtered_ids_fname = f"tmp/usable_ids_{mode}_{year}.p"
@@ -95,13 +95,16 @@ class CocoKeypoints(Dataset):
         distance_factor[0:num_people] = (kpt_oks_sigmas * 2) ** 2
         keypoints_list = []
         factor_list = []
+        scale_list = []
         for i in range(num_people):
             if ann[i]["num_keypoints"] > 0:
                 keypoints_list.append(np.array(ann[i]["keypoints"]).reshape([-1, 3]))
                 factor_list.append(np.array(kpt_oks_sigmas * 2) ** 2 * (ann[i]["area"] + np.spacing(1)) * 2.0)
+                scale_list.append((ann[i]["area"] + np.spacing(1)) * 2.0)
 
         keypoints = np.array(keypoints_list).astype(np.float)
         factors = np.array(factor_list)
+        scales = np.array(scale_list)
         # in the code keypoints2 is created (seems to include only persons with atleast one visible keypoint)
         # not sure if it is necessary
 
@@ -122,36 +125,6 @@ class CocoKeypoints(Dataset):
 
         mask = (mask < 0.5).astype(np.float32)
 
-        """
-        center = np.array([img_width / 2, img_height / 2])  # probably for opencv?
-        scale = max(img_height, img_width) / 200
-        scale = np.array([scale, scale])
-        input_size, center, scale = get_multi_scale_size(img.shape[0], img.shape[1], self.input_size, 1.0, 1.0)
-
-        dx = 0
-        dy = 0
-        center[0] += dx * center[0]
-        center[1] += dy * center[1]
-
-        mat_mask = get_transform(center, scale, (int(input_size[0]/2), int(input_size[1]/2)), 0)[:2]
-        mask = cv2.warpAffine((mask * 255).astype(np.uint8), mat_mask, (int(input_size[0]/2), int(input_size[1]/2))) / 255.0
-        # mat_mask = get_transform(center, scale, (self.output_size, self.output_size), 0)[:2]
-        # mask = cv2.warpAffine((mask * 255).astype(np.uint8), mat_mask, (self.output_size, self.output_size)) / 255.0
-        mask = (mask > 0.5).astype(np.float32)
-
-
-        mat = get_transform(center, scale, input_size, 0)[:2]
-        img = cv2.warpAffine(img, mat, input_size).astype(np.float32) / 255.0
-        # mat = get_transform(center, scale, (self.input_size, self.input_size), 0)[:2]
-        # img = cv2.warpAffine(img, mat, (self.input_size, self.input_size)).astype(np.float32) / 255.0
-
-        keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], mat_mask).astype(np.float32)
-        keypoints = pack_keypoints_for_batch(keypoints, max_num_people=self.max_num_people)
-
-        factors = factor_affine(factors, mat_mask)
-        factors = pack_for_batch(factors, self.max_num_people)
-        # """
-
         mask_list = [mask.copy() for _ in range(self.num_scales)]
         keypoint_list = [keypoints.copy() for _ in range(self.num_scales)]
         heatmaps = []
@@ -161,7 +134,7 @@ class CocoKeypoints(Dataset):
 
         if self.heatmap_generator is not None:
             for scale_idx in range(self.num_scales):
-                heatmap = self.heatmap_generator[scale_idx](keypoint_list[scale_idx])
+                heatmap = self.heatmap_generator[scale_idx](keypoint_list[scale_idx], scales)
                 keypoint_list[scale_idx] = _filter_visible(keypoint_list[scale_idx], mask[scale_idx].shape)
 
                 heatmaps.append(heatmap.astype(np.float32))
@@ -214,7 +187,7 @@ class HeatmapGenerator():
         x0, y0 = 3*sigma + 1, 3*sigma + 1
         self.g = np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
 
-    def __call__(self, joints):
+    def __call__(self, joints, factors=None):
         hms = np.zeros((self.num_joints, self.output_res, self.output_res),
                        dtype=np.float32)
         sigma = self.sigma
@@ -237,6 +210,45 @@ class HeatmapGenerator():
                     hms[idx, aa:bb, cc:dd] = np.maximum(
                         hms[idx, aa:bb, cc:dd], self.g[a:b, c:d])
         return hms
+
+class ScaleAwareHeatmapGenerator():
+    def __init__(self, output_res, num_joints, sigma=-1):
+        self.output_res = output_res
+        self.num_joints = num_joints
+
+    def __call__(self, joints, factors):
+        hms = np.zeros((self.num_joints, self.output_res, self.output_res),
+                       dtype=np.float32)
+        for p_idx, p in enumerate(joints):
+            for j_idx, pt in enumerate(p):
+                if pt[2] > 0:
+                    x, y = int(pt[0]), int(pt[1])
+                    if x < 0 or y < 0 or \
+                            x >= self.output_res or y >= self.output_res:
+                        continue
+                    sigma = np.sqrt(factors[p_idx] / 2) * 0.04
+                    sigma = int(np.round(sigma))
+                    g = ScaleAwareHeatmapGenerator.get_gaussian(sigma)
+
+                    ul = int(np.round(x - 3 * sigma - 1)), int(np.round(y - 3 * sigma - 1))
+                    br = int(np.round(x + 3 * sigma + 2)), int(np.round(y + 3 * sigma + 2))
+
+                    c, d = max(0, -ul[0]), min(br[0], self.output_res) - ul[0]
+                    a, b = max(0, -ul[1]), min(br[1], self.output_res) - ul[1]
+
+                    cc, dd = max(0, ul[0]), min(br[0], self.output_res)
+                    aa, bb = max(0, ul[1]), min(br[1], self.output_res)
+                    hms[j_idx, aa:bb, cc:dd] = np.maximum(
+                        hms[j_idx, aa:bb, cc:dd], g[a:b, c:d])
+        return hms
+
+    @staticmethod
+    def get_gaussian(sigma):
+        size = int(np.round(6*sigma + 3))
+        x = np.arange(0, size, 1, float)
+        y = x[:, np.newaxis]
+        x0, y0 = 3*sigma + 1, 3*sigma + 1
+        return np.exp(- ((x - x0) ** 2 + (y - y0) ** 2) / (2 * sigma ** 2))
 
 if __name__ == "__main__":
     dataset_path = "../../storage/user/kistern/coco"

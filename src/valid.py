@@ -107,11 +107,14 @@ def gen_ann_format(pred, image_id=0):
         # how are missing joints handled ?
         tmp = {'image_id': int(image_id), "category_id": 1, "keypoints": [], "score": 1.0}
         score = 0.0
+        max_score = 0.0
         for j in range(len(person)):
             tmp["keypoints"] += [float(person[j, 0]), float(person[j, 1]), float(person[j, 2])]
             score += float(person[j, 2])
+            max_score = max(float(person[j, 2]), max_score)
         tmp["score"] = score #/ 17.0
-        ans.append(tmp)
+        if max_score > 0.0:
+            ans.append(tmp)
     return ans
 
 
@@ -144,41 +147,20 @@ def coco_eval(coco, dt, image_ids, tmp_dir="tmp", log=True):
 
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
-    dataset_path = "../../storage/user/kistern/coco"
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     ######################################
 
-    config_name = "model_50_2"
+    config_name = "model_54_0"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
     eval_writer = EvalWriter(config)
 
-    if config.TEST.SPLIT == "mini":
-        train_ids, valid_ids = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))
-        assert len(set(train_ids).intersection(set(valid_ids))) == 0
-
-        transforms = transforms_hg_eval(config)
-        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="train",
-                                    img_ids=valid_ids, transforms=transforms)
-    elif config.TEST.SPLIT == "mini_real":
-        train_ids, valid_ids = pickle.load(open("tmp/mini_real_train_valid_split_1.p", "rb"))
-        assert len(set(train_ids).intersection(set(valid_ids))) == 0
-        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="val", img_ids=valid_ids)
-    elif config.TEST.SPLIT == "princeton":
-        train_ids, valid_ids = pickle.load(open("tmp/princeton_split.p", "rb"))
-        assert len(set(train_ids).intersection(set(valid_ids))) == 0
-        transforms = transforms_hg_eval(config)
-        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids,
-                                    transforms=transforms, mask_crowds=False)
-    elif config.TEST.SPLIT == "coco_17_mini":
-        _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
-        heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
-        transforms, _ = transforms_hr_eval(config)
-        eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
-                                    transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False)
-    else:
-        raise NotImplementedError
+    heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
+    transforms, _ = transforms_hr_eval(config)
+    eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=False, seed=0, mode="val", img_ids=None, year=17,
+                                transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
+                                filter_empty=False)
 
     model = get_pose_model(config, device)
     state_dict = torch.load(config.MODEL.PRETRAINED)
@@ -190,86 +172,38 @@ def main():
     # baseline: upper bound
 
     # eval model
-    eval_node = {"acc": [], "prec": [], "rec": [], "f1": []}
-    eval_edge = {"acc": [], "prec": [], "rec": [], "f1": []}
-    eval_edge_masked = {"acc": [], "prec": [], "rec": [], "f1": []}
-    eval_node_per_type = {i: {"acc": [], "prec": [], "rec": [], "f1": []} for i in range(17)}
-    def merge_dicts(dict_1, dict_2):
-        for key in dict_1.keys():
-            dict_1[key].append(dict_2[key])
-        return dict_1
 
     anns = []
-    anns_full = []
-    anns_perf_node = []  # need second
-    anns_perf_edge = []
+    anns_with_people = []
+    imgs_with_people = []
     eval_ids = []
-    imgs_fully_det = []
     with torch.no_grad():
-        for i in tqdm(range(config.TEST.NUM_EVAL)):
+        for i in tqdm(range(len(eval_set))):
             eval_ids.append(eval_set.img_ids[i])
 
             img, _, masks, keypoints, factors = eval_set[i]
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
-            scoremaps, pred, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels,  _, node_mask, _ = model(img, keypoints, masks, factors, with_logits=True)
+            scoremaps, pred, preds_nodes, joint_det, joint_scores, edge_index, _, node_labels,  _, _, _ = model(img, None, masks, factors, with_logits=True)
 
+
+            preds_nodes = preds_nodes[-1].sigmoid()
             preds_edges = pred[-1].sigmoid().squeeze() if pred[-1] is not None else None
-            preds_nodes = preds_nodes[-1].sigmoid().squeeze()
-
-            true_positive_idx = preds_nodes > config.MODEL.MPN.NODE_THRESHOLD
-            mask = subgraph_mask(true_positive_idx, edge_index)
-            result_edges = preds_edges * mask.float()
-
-            result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
-            result_nodes = torch.where(preds_nodes < config.MODEL.MPN.NODE_THRESHOLD, torch.zeros_like(preds_nodes), torch.ones_like(preds_nodes))
-            n, _ = num_non_detected_points(joint_det.cpu(), keypoints.cpu(), 6.0, config.MODEL.GC.USE_GT)
-
-            eval_node = merge_dicts(eval_node, calc_metrics(result_nodes, node_labels))
-            eval_edge = merge_dicts(eval_edge, calc_metrics(result_edges, edge_labels))
-
-            """
-            if node_labels.sum() > 1.0:
-                true_positive_idx = node_labels == 1.0
-                mask = subgraph_mask(true_positive_idx, edge_index)
-                result_edges_2 = torch.where(preds_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
-                eval_edge_masked = merge_dicts(eval_edge_masked, calc_metrics(result_edges_2[mask], edge_labels[mask]))
-            """
-
-            for j in range(17):
-                m = joint_det[:, 2] == j
-                eval_node_per_type[j] = merge_dicts(eval_node_per_type[j], calc_metrics(result_nodes[m], node_labels[m]))
-
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
-            ann = perd_to_ann(scoremaps[0], joint_det, preds_nodes, edge_index, preds_edges, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
+            ann = perd_to_ann(scoremaps[0], joint_det, joint_scores, edge_index, preds_edges, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
                               , config.DATASET.SCALING_TYPE, config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD)
-
-            ann_perf_edge = perd_to_ann(scoremaps[0], joint_det, preds_nodes, edge_index, edge_labels, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
-                              , config.DATASET.SCALING_TYPE, config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD)
-            ann_perf_node = perd_to_ann(scoremaps[0], joint_det, node_labels, edge_index, preds_edges, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
-                                        , config.DATASET.SCALING_TYPE, config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD)
 
             anns.append(ann)
-            anns_perf_edge.append(ann_perf_edge)
-            anns_perf_node.append(ann_perf_node)
-            if int(n) == 0:
-                imgs_fully_det.append(eval_set.img_ids[i])
-                anns_full.append(ann)
+            if keypoints.sum() != 0:
+                imgs_with_people.append(int(eval_set.img_ids[i]))
+                anns_with_people.append(ann)
 
-        print("##################")
+
         eval_writer.eval_coco(eval_set.coco, anns, np.array(eval_ids), "General Evaluation")
-        eval_writer.eval_coco(eval_set.coco, anns_perf_edge, np.array(eval_ids), "Perfect edge prediction")
-        eval_writer.eval_coco(eval_set.coco, anns_perf_node, np.array(eval_ids), "Perfect node prediction")
-        eval_writer.eval_coco(eval_set.coco, anns_full, imgs_fully_det, f"Evaluation on perfect images {len(anns_full)}")
-
-        eval_writer.eval_metrics(eval_node, "Node metrics")
-        eval_writer.eval_metrics(eval_edge, "Edge metrics")
-        eval_writer.eval_metrics(eval_edge_masked, "Edge metrics masked")
-        eval_writer.eval_part_metrics(eval_node_per_type, "Node metrics per type")
-
+        eval_writer.eval_coco(eval_set.coco, anns_with_people, np.array(imgs_with_people), f"General Evaluation on not empty images {len(anns_with_people)}")
         eval_writer.close()
 
 
@@ -286,7 +220,6 @@ def perd_to_ann(scoremaps, joint_det, joint_scores, edge_index, pred, img_info, 
     if adjustment:
         persons_pred = adjust(persons_pred, scoremaps)
     persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]), scaling_type=scaling_type)
-
 
     ann = gen_ann_format(persons_pred_orig, img_id)
     return ann

@@ -7,27 +7,6 @@ from Models.MessagePassingNetwork import get_mpn_model
 import torch
 import torch.nn as nn
 
-"""
-default_config = {"backbone": PoseNet,
-                  "backbone_config": {"nstack": 4,
-                                      "inp_dim": 256,
-                                      "oup_dim": 68},
-                  "message_passing": VanillaMPN,
-                  "graph_constructor": NaiveGraphConstructor,
-                  "cheat": True,
-                  "use_gt": True,
-                  "use_focal_loss": False,
-                  "use_neighbours": False,
-                  "edge_label_method": 1,
-                  "mask_crowds": False,
-                  "detect_threshold": 0.007,
-                  "inclusion_radius": 5.0,
-                  "matching_radius": None,
-                  "mpn_graph_type": "knn"
-                  }
-"""
-
-
 def get_pose_model(config, device):
 
     def rename_key(key):
@@ -71,7 +50,8 @@ class PoseEstimationBaseline(nn.Module):
 
         self.pool = nn.MaxPool2d(3, 1, 1)  # not sure if used
         input_feature_size = config.MODEL.KP_OUTPUT_DIM if config.MODEL.HRNET.FEATURE_FUSION != "cat_multi" else 352
-        self.feature_gather = nn.Conv2d(input_feature_size, config.MODEL.MPN.NODE_INPUT_DIM, 3, 1, 1, bias=True)
+        self.feature_gather = nn.Conv2d(input_feature_size, config.MODEL.MPN.NODE_INPUT_DIM,
+                                        config.MODEL.FEATURE_GATHER_KERNEL, 1, config.MODEL.FEATURE_GATHER_PADDING, bias=True)
         self.num_aux_steps = config.MODEL.AUX_STEPS
         self.scoremap_mode = config.MODEL.HRNET.SCOREMAP_MODE
 
@@ -102,26 +82,6 @@ class PoseEstimationBaseline(nn.Module):
                 node_pred[-1] = torch.sigmoid(node_pred[-1])
 
         return scoremaps, preds, node_pred, joint_det, joint_scores, edge_index, edge_labels, node_labels, label_mask, label_mask_node, bb_output[0]
-
-    """
-    def mpn_loss(self, outputs, targets, reduction, with_logits=True, mask=None, batch_index=None) -> torch.Tensor:
-
-        if self.focal is not None:
-            assert with_logits
-            
-            for i in range(self.num_aux_steps):
-                loss += self.focal(outputs[idx_offset + i], targets, reduction, mask, batch_index)
-            
-            return loss / self.num_aux_steps
-            
-            loss = 0.0
-            idx_offset = self.mpn.steps - self.num_aux_steps
-            loss = self.focal(outputs, targets, reduction, mask, batch_index)
-            return loss
-
-        else:
-            raise NotImplementedError
-    """
 
     def freeze_backbone(self, mode):
         if mode == "complete":

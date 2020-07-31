@@ -100,3 +100,27 @@ def transforms_hr_eval(config):
                                                      torchvision.transforms.ToPILImage()])
 
     return transforms, transforms_inv
+
+
+def transforms_ochuman(config):
+
+    input_size = 512
+    scale_type = config.DATASET.SCALING_TYPE
+
+    affine_transform = T.HRNetMineTransformation if scale_type == "short_mine" else T.OCHumanTransform
+
+    transforms = T.Compose(
+        [
+            affine_transform(
+                input_size,
+                scale_type,
+            ),
+            T.ToTensor(),
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ]
+    )
+
+    transforms_inv = torchvision.transforms.Compose([T.NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                                                     torchvision.transforms.ToPILImage()])
+
+    return transforms, transforms_inv
