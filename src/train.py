@@ -75,7 +75,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             factors = factors.to(kwargs["device"])
             heatmaps = to_device(kwargs["device"], heatmaps)
 
-            _, preds, preds_nodes, joint_det, _, edge_index, edge_labels, node_labels, label_mask, label_mask_node, bb_output = model(imgs, keypoints, masks[-1], factors)
+            _, preds, preds_nodes, preds_classes, joint_det, _, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node, bb_output = model(imgs, keypoints, masks[-1], factors)
 
             label_mask = label_mask if kwargs["use_label_mask"] else None
 
@@ -109,7 +109,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             masks = masks[-1].to(kwargs["device"])
             keypoints = keypoints.to(kwargs["device"])
             factors = factors.to(kwargs["device"])
-            _, preds, preds_nodes, joint_det, _, edge_index, edge_labels, node_labels, label_mask, label_mask_node, bb_output = model(imgs, keypoints, masks, factors)
+            _, preds, preds_nodes, preds_classes, joint_det, _, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node, bb_output = model(imgs, keypoints, masks, factors)
 
             label_mask = label_mask.detach() if kwargs["use_label_mask"] else None
 
@@ -127,7 +127,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
                     loss_edge_labels.append(edge_labels)
                     loss_masks.append(label_mask * mask.float())
 
-                loss, _ = loss_func(preds, preds_nodes, loss_edge_labels, node_labels, loss_masks, label_mask_node)
+                loss, _ = loss_func(preds, preds_nodes, preds_classes, loss_edge_labels, node_labels, class_labels, loss_masks, label_mask_node)
                 label_mask = label_mask * mask.float()
             else:
                 raise NotImplementedError
@@ -136,12 +136,13 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
         loss = loss.item()
         preds_edges = preds[-1].detach()
         preds_nodes = None if preds_nodes is None else preds_nodes[-1].detach()
+        preds_classes = None if preds_classes is None else preds_classes[-1].detach()
         edge_labels = edge_labels.detach()
         node_labels = None if preds_nodes is None else node_labels.detach()
         edge_label_mask = label_mask.detach()
         node_label_mask = label_mask_node.detach()
 
-        return loss, preds_nodes, preds_edges, node_labels, edge_labels, edge_label_mask, node_label_mask
+        return loss, preds_nodes, preds_edges, preds_classes, node_labels, edge_labels, class_labels, edge_label_mask, node_label_mask
 
     return func
 
@@ -218,21 +219,25 @@ def main():
         for i, batch in enumerate(train_loader):
             iter = i + (epoch_len * epoch)
 
-            loss, preds_nodes, preds_edges, node_labels, edge_labels, edge_label_mask, node_label_mask = update_model(batch)
+            loss, preds_nodes, preds_edges, preds_classes, node_labels, edge_labels, class_labels, edge_label_mask, node_label_mask = update_model(batch)
 
             if preds_nodes is not None:
                 result_nodes = preds_nodes.sigmoid().squeeze()
                 result_nodes = torch.where(result_nodes < 0.5, torch.zeros_like(result_nodes), torch.ones_like(result_nodes))
             else:
                 result_nodes = None
+            result_classes = preds_classes.argmax(dim=1).squeeze() if preds_classes is not None else None
             result_edges = preds_edges.sigmoid().squeeze()
             result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
 
             node_metrics = calc_metrics(result_nodes, node_labels, node_label_mask)
             edge_metrics = calc_metrics(result_edges, edge_labels, edge_label_mask)
+            class_metrics = calc_metrics(result_classes, class_labels, node_labels)
 
             logger.log_vars("Metric/train", iter, **edge_metrics)
             logger.log_vars("Metric/Node/train", iter, **(node_metrics or {}))
+            if class_metrics is not None:
+                logger.log_vars("Metric/Node/train_class", iter, acc=class_metrics["acc"])
             logger.log_loss(loss, "Loss/train", iter)
 
             if preds_nodes is not None:
@@ -257,6 +262,7 @@ def main():
                       "edge": {"acc": [], "prec": [], "rec": [], "f1": []},
                       "edge_masked": {"prec": [], "rec": []}}
         valid_loss = []
+        class_valid_acc = []
         valid_heatmap = []
         with torch.no_grad():
             for batch in valid_loader:
@@ -268,7 +274,7 @@ def main():
                 factors = factors.to(device)
                 heatmaps = to_device(device, heatmaps)
 
-                _, preds, preds_nodes, joint_det, _, edge_index, edge_labels, node_labels, label_mask, label_mask_node, bb_output = model(imgs, keypoints, masks[-1], factors)
+                _, preds, preds_nodes, preds_classes, joint_det, _, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node, bb_output = model(imgs, keypoints, masks[-1], factors)
 
                 label_mask = label_mask if config.TRAIN.USE_LABEL_MASK else None
                 if config.TRAIN.END_TO_END:
@@ -311,7 +317,7 @@ def main():
                             loss_edge_labels.append(edge_labels)
                             loss_masks.append(label_mask * mask.float())
 
-                        loss, logging = loss_func(preds, preds_nodes, loss_edge_labels, node_labels, loss_masks, label_mask_node)
+                        loss, logging = loss_func(preds, preds_nodes, preds_classes, loss_edge_labels, node_labels, class_labels, loss_masks, label_mask_node)
                         #
                         default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float,
                                                    device=edge_index.device) - 1.0
@@ -333,8 +339,10 @@ def main():
                 else:
                     result_nodes = None
                     node_labels = None
+                result_classes = preds_classes[-1].argmax(dim=1).squeeze() if preds_classes is not None else None
 
                 node_metrics = calc_metrics(result_nodes, node_labels, label_mask_node)
+                class_metrics = calc_metrics(result_classes, class_labels, node_labels)
                 edge_metrics_complete = calc_metrics(result_edges, edge_labels, label_mask)
                 edge_metrics_masked = calc_metrics(result_edges, edge_labels, loss_mask)
 
@@ -343,14 +351,16 @@ def main():
                     valid_heatmap.append(logging["heatmap"])
                 if edge_metrics_complete is not None:
                     for key in edge_metrics_complete.keys():
-                        valid_dict["edge"][key].append((edge_metrics_complete[key]))
+                        valid_dict["edge"][key].append(edge_metrics_complete[key])
                 if edge_metrics_masked is not None:
                     for key in ["prec", "rec"]:
-                        valid_dict["edge_masked"][key].append((edge_metrics_masked[key]))
+                        valid_dict["edge_masked"][key].append(edge_metrics_masked[key])
+                if class_metrics is not None:
+                    class_valid_acc.append(class_metrics["acc"])
 
                 if node_metrics is not None:
                     for key in node_metrics.keys():
-                        valid_dict["node"][key].append((node_metrics[key]))
+                        valid_dict["node"][key].append(node_metrics[key])
 
         print(f"Epoch: {epoch}, loss:{np.mean(valid_loss):6f}, "
               f"Accuracy: {np.mean(valid_dict['edge']['acc']):5f}, "
@@ -363,6 +373,8 @@ def main():
         logger.log_vars("Metric/valid", epoch, **valid_dict['edge'])
         logger.log_vars("Metric/valid_masked", epoch, **valid_dict['edge_masked'])
         logger.log_vars("Metric/Node/valid", epoch, **valid_dict['node'])
+        if len(class_valid_acc) != 0:
+            logger.log_vars("Metric/Node/valid_class", epoch, acc=class_valid_acc)
 
         torch.save({"epoch": epoch,
                     "model_state_dict": model.state_dict(),

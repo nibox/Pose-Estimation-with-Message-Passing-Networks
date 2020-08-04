@@ -75,7 +75,16 @@ class UpperBoundModel(nn.Module):
                                                   device=scoremaps.device)
 
 
-        x, edge_attr, edge_index, edge_labels, node_labels, joint_det, label_mask, label_mask_node, joint_scores, _ = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, node_labels, node_class_labels, joint_det, label_mask, label_mask_node, joint_scores, _ = graph_constructor.construct_graph()
 
-        return scoremaps, edge_labels, node_labels, joint_det, joint_scores, edge_index, edge_labels, node_labels, label_mask, label_mask_node, bb_output
+        # prepare class output
+        if node_class_labels is not None:
+            # one hot encode the class labels
+            node_classes = torch.zeros(len(node_class_labels), 17, dtype=torch.float, device=node_class_labels.device)
+            node_classes[list(range(0, len(node_class_labels))), node_class_labels] = 1
+
+        else:
+            node_classes = None
+
+        return scoremaps, edge_labels, node_labels, node_classes, joint_det, joint_scores, edge_index, edge_labels, node_labels, node_class_labels, label_mask, label_mask_node, bb_output
 

@@ -38,6 +38,7 @@ class NaiveGraphConstructor:
         x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list = [], [], [], [], []
         joint_score_list = []
         node_label_list = []
+        node_class_list = []
         label_mask_list = []
         label_mask_node_list = []
         batch_index = []
@@ -102,6 +103,7 @@ class NaiveGraphConstructor:
             # sol maps nodes to gt joints/  gt joints to nodes and connectivity maps between gt joints
             edge_labels = None
             node_labels = None
+            node_classes = None
             # label_mask_node = torch.ones(joint_det.shape[0], dtype=torch.float, device=self.device)
             label_mask_node = None
             label_mask = None
@@ -114,7 +116,7 @@ class NaiveGraphConstructor:
                 if edge_labels.max() == 0:
                     label_mask = torch.zeros_like(label_mask, device=self.device, dtype=torch.float)
             elif self.joints_gt is not None:
-                assert self.edge_label_method in [3, 4, 5]
+                assert self.edge_label_method in [3, 4, 5, 6]
                 label_mask_node = torch.ones(joint_det.shape[0], dtype=torch.float, device=self.device)
 
                 if self.edge_label_method == 3:
@@ -124,6 +126,8 @@ class NaiveGraphConstructor:
                     edge_labels, node_labels, label_mask = self._construct_edge_labels_4(joint_det.detach(), self.joints_gt[batch], self.factor_list[batch], edge_index.detach())
                 elif self.edge_label_method == 5:
                     edge_labels, node_labels, label_mask, label_mask_node = self._construct_edge_labels_5(joint_det.detach(), self.joints_gt[batch], self.factor_list[batch], edge_index.detach())
+                elif self.edge_label_method == 6:
+                    edge_labels, node_labels, node_classes, label_mask = self._construct_edge_labels_6(joint_det.detach(), self.joints_gt[batch], self.factor_list[batch], edge_index.detach())
 
                 if edge_labels.max() == 0:
                     label_mask = torch.zeros_like(label_mask, device=self.device, dtype=torch.float)
@@ -165,6 +169,7 @@ class NaiveGraphConstructor:
             joint_det_list.append(joint_det)
             joint_score_list.append(joint_scores)
             node_label_list.append(node_labels)
+            node_class_list.append(node_classes)
             label_mask_list.append(label_mask)
             label_mask_node_list.append(label_mask_node)
         # update edge_indices for batching
@@ -183,10 +188,12 @@ class NaiveGraphConstructor:
             node_label_list = torch.cat(node_label_list, 0)
             label_mask_list = torch.cat(label_mask_list, 0)
             label_mask_node_list = torch.cat(label_mask_node_list, 0)
+            node_class_list = torch.cat(node_class_list, 0) if self.edge_label_method == 6 else None
         else:
             edge_labels_list, node_label_list, label_mask_list, label_mask_node_list = None, None, None, None
+            node_class_list = None
 
-        return x_list, edge_attr_list, edge_index_list, edge_labels_list, node_label_list, joint_det_list, label_mask_list, label_mask_node_list, joint_score_list, batch_index
+        return x_list, edge_attr_list, edge_index_list, edge_labels_list, node_label_list, node_class_list, joint_det_list, label_mask_list, label_mask_node_list, joint_score_list, batch_index
 
     def _construct_mpn_graph(self, joint_det, features, graph_type, joint_scores):
         """
@@ -631,6 +638,123 @@ class NaiveGraphConstructor:
             label_mask_node[(similarity_orig >= 0.1) & (similarity_orig <= 0.8)] = 0.0
 
         return edge_labels, node_labels, label_mask_edge, label_mask_node
+
+    def _construct_edge_labels_6(self, joint_det, joints_gt, factors, edge_index):
+        assert not self.use_gt
+        assert not self.use_gt_for_end2end
+        num_joints_det = len(joint_det)
+        person_idx_gt, joint_idx_gt = joints_gt[:, :, 2].nonzero(as_tuple=True)
+        num_joints_gt = len(person_idx_gt)
+
+        clamp_max = max(self.scoremaps.shape[2], self.scoremaps.shape[3])
+        distance = (joints_gt[person_idx_gt, joint_idx_gt, :2].unsqueeze(1).round().float().clamp(0, clamp_max) - joint_det[:, :2].float()).pow(2).sum(dim=2)
+        factor_per_joint = factors[person_idx_gt, joint_idx_gt]
+        similarity = torch.exp(-distance / factor_per_joint[:, None])
+
+        method = 3
+        # """
+        if method == 1:
+            different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
+            similarity_constrained = similarity.clone()
+            similarity_constrained[similarity_constrained < self.matching_radius] = 0.0  # 0.1 worked well for threshold + knn graph
+            similarity_constrained[similarity_constrained == 0.0] -= 1.0  # 0.1 worked well for threshold + knn graph
+            similarity_constrained[different_type] -= 1.0
+
+            cost_mat = similarity_constrained.cpu().numpy()
+            sol = linear_sum_assignment(cost_mat, maximize=True)
+            row_con, col_con = sol
+            # remove mappings with cost 0.0
+            valid_match = cost_mat[row_con, col_con] != -1.0
+            row_con = row_con[valid_match]
+            col_con = col_con[valid_match]
+            person_idx_gt_1 = person_idx_gt[row_con]
+            joint_idx_gt_1 = joint_idx_gt[row_con]
+        elif method==2:
+            different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
+            similarity_same = similarity.clone()
+            similarity_diff = similarity.clone()
+            similarity_same[different_type] = 0.0
+            similarity_same[similarity_same < self.matching_radius] = 0.0  # 0.1 worked well for threshold + knn graph
+            similarity_diff[torch.logical_not(different_type)] = 0.0
+            similarity_diff[similarity_diff < self.matching_radius] = 0.0
+
+            cost_mat_same = similarity_same.cpu().numpy()
+            cost_mat_diff = similarity_diff.cpu().numpy()
+            sol_same = linear_sum_assignment(cost_mat_same, maximize=True)
+            sol_diff = linear_sum_assignment(cost_mat_diff, maximize=True)
+            row_con, col_con = sol_same
+            # remove mappings with cost 0.0
+            valid_match = cost_mat_same[row_con, col_con] != 0.0
+            fill_in = np.logical_not(valid_match)
+            col_con[fill_in] = sol_diff[1][fill_in]
+            valid_match = cost_mat_diff[sol_diff] + cost_mat_same[sol_same] != 0.0
+            row_con = row_con[valid_match]
+            col_con = col_con[valid_match]
+            person_idx_gt_1 = person_idx_gt[row_con]
+            joint_idx_gt_1 = joint_idx_gt[row_con]
+        elif method == 3:
+            similarity_constrained = similarity.clone()
+            similarity_constrained[similarity_constrained < self.matching_radius] = 0.0  # 0.1 worked well for threshold + knn graph
+
+            cost_mat = similarity_constrained.cpu().numpy()
+            sol = linear_sum_assignment(cost_mat, maximize=True)
+            row_con, col_con = sol
+            # remove mappings with cost 0.0
+            valid_match = cost_mat[row_con, col_con] != -1.0
+            row_con = row_con[valid_match]
+            col_con = col_con[valid_match]
+            person_idx_gt_1 = person_idx_gt[row_con]
+            joint_idx_gt_1 = joint_idx_gt[row_con]
+        else:
+            raise NotImplementedError
+
+        row_1 = np.arange(0, len(row_con), dtype=np.int64)
+        row_1, col_1 = torch.from_numpy(row_1).to(self.device), torch.from_numpy(col_con).to(self.device)
+
+        ambiguous_dets = []
+        if self.include_neighbouring_keypoints:
+            cost_mat = similarity.cpu().numpy()
+            # use inclusion radius to filter more aggressively
+            cost_mat[cost_mat < self.inclusion_radius] = 0.0
+            # remove already chosen keypoints from next selection
+            cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), col_con] = 0.0
+            # "remove" ambiguous cases
+            # identify them
+            ambiguous_dets = (cost_mat != 0.0).sum(axis=0) > 1.0
+            # remove them
+            cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), ambiguous_dets] = 0.0
+            row_2, col_2 = np.nonzero(cost_mat)
+            # it might happen that there are more gt joints than detected joints and if matching does not work out
+            bad_rows = np.array(list(set((set(list(row_2)).difference(set(list(row_con)))))))
+            for r in bad_rows:
+                cost_mat[r] = 0.0
+            row_2, col_2 = np.nonzero(cost_mat)
+            if not (set(list(row_2)).issubset(set(list(row_con)))):
+                print("sdfad")
+            assert (set(list(row_2)).issubset(set(list(row_con))))
+
+            # some gt joints have no match and have to be removed for the next step
+            # create translation table for new indices in order to translate row_2
+            mapping = np.zeros(num_joints_gt, dtype=np.int64) - 1
+            mapping[row_con] = np.arange(0, len(row_con), dtype=np.int64)
+            row_2 = mapping[row_2]
+            assert (row_2 == -1).sum() == 0
+            row_2, col_2 = torch.from_numpy(row_2).to(self.device), torch.from_numpy(col_2).to(self.device)
+
+            row_1 = torch.cat([row_1, row_2], dim=0)
+            col_1 = torch.cat([col_1, col_2], dim=0)
+
+        sol = row_1, col_1
+        node_labels = torch.zeros(joint_det.shape[0], dtype=torch.float32, device=self.device)
+        node_labels[col_1] = 1.0
+
+        edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt_1, joint_det, edge_index, sol)
+        joint_det_idx = torch.arange(0, len(joint_det), dtype=torch.int64, device=self.device)
+        label_mask = NaiveGraphConstructor.create_loss_mask(joint_det_idx[ambiguous_dets], edge_index)
+
+        node_classes = torch.zeros(num_joints_det, dtype=torch.long, device=self.device)
+        node_classes[col_1] = joint_idx_gt_1[row_1]
+        return edge_labels, node_labels, node_classes, label_mask
 
     @staticmethod
     def match_cc(a_to_clusters, nodes_b, edges_b, edges_a_to_b):

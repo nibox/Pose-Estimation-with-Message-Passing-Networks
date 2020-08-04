@@ -337,9 +337,11 @@ def draw_edges_conf(img, joint_det, person_labels, node_labels, edge_index, pred
         raise NotImplementedError
 
 
-def draw_clusters(img: [torch.tensor, np.array], joints, joint_connections, fname=None, output_size=128.0):
+def draw_clusters(img: [torch.tensor, np.array], joints, joint_classes, joint_connections, fname=None,
+                  output_size=128.0):
     """
 
+    :param joint_classes:
     :param img:
     :param persons: (N,17,3) array containing the person in the image img. Detected or ground truth does not matter.
     :param fname: If not none an image will be saved under this name , otherwise the image will be displayed
@@ -379,6 +381,8 @@ def draw_clusters(img: [torch.tensor, np.array], joints, joint_connections, fnam
         person_joints = joints[person_labels == i]
         if len(person_joints) == 1:
             continue
+        if joint_classes is not None:
+            person_joints[:, 2] = np.argmax(joint_classes[person_labels==i], axis=1)
 
         joint_centers = []
         for joint_type in range(17):  # 17 different joint types
@@ -410,21 +414,24 @@ def draw_clusters(img: [torch.tensor, np.array], joints, joint_connections, fnam
         raise NotImplementedError
 
 
-def pred_to_person(joint_det, joint_scores, edge_index, pred, cc_method):
+def pred_to_person(joint_det, joint_scores, edge_index, pred, class_pred, cc_method):
     test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
     sol = cluster_graph(test_graph, cc_method, complete=False)
     sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
-    persons_pred, mutants, person_labels = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol)  # might crash
+    persons_pred, mutants, person_labels = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol,
+                                                                    class_pred)  # might crash
     return persons_pred, mutants, person_labels
 
 
-def graph_cluster_to_persons(joints, scores, joint_connections):
+def graph_cluster_to_persons(joints, edge_scores, joint_connections, class_pred):
     """
+    :param class_pred:
     :param joints: (N, 2) vector of joints
     :param joint_connections: (2, E) array/tensor that indicates which joint are connected thus belong to the same person
     :return: (N persons, 17, 3) array. 17 joints, 2 positions + visibiilty flag (in case joints are missing)
     """
-    joints, joint_connections, scores = to_numpy(joints), to_numpy(joint_connections), to_numpy(scores)
+    joints, joint_connections, edge_scores = to_numpy(joints), to_numpy(joint_connections), to_numpy(edge_scores)
+    joint_classes = to_numpy(class_pred) if class_pred is not None else None
     from scipy.sparse import csr_matrix
     from scipy.sparse.csgraph import connected_components
     # construct dense adj matrix
@@ -438,7 +445,11 @@ def graph_cluster_to_persons(joints, scores, joint_connections):
     for i in range(n_components):
         # check if cc has more than one node
         person_joints = joints[person_labels == i]
-        person_scores = scores[person_labels == i]
+        person_scores = edge_scores[person_labels == i]
+        if joint_classes is not None:
+            c = person_joints[:, 2]
+            d = np.argmax(joint_classes[person_labels == i], axis=1)
+            person_joints[:, 2] = np.argmax(joint_classes[person_labels == i], axis=1)
         if len(person_joints) > 17:
             # print(f"Mutant detected!! It has {len(person_joints)} joints!!")
             # todo change meaning of mutant
@@ -551,7 +562,7 @@ def set_bn_feeze(module):
             param.requires_grad = False
 
 
-def calc_metrics(output, targets, mask=None):
+def calc_metrics(output, targets, mask=None, num_classes=2):
     if output is None and targets is None:
         # do nothing
         return None
@@ -562,10 +573,10 @@ def calc_metrics(output, targets, mask=None):
         if len(output) == 0:
             return None
 
-    prec = precision(output, targets, 2)[1]
-    rec = recall(output, targets, 2)[1]
+    prec = precision(output, targets, num_classes)[1]
+    rec = recall(output, targets, num_classes)[1]
     acc = accuracy(output, targets)
-    f1 = f1_score(output, targets, 2)[1]
+    f1 = f1_score(output, targets, num_classes)[1]
 
     return {"acc": acc, "prec": prec, "rec": rec, "f1": f1}
 
@@ -582,6 +593,15 @@ def subgraph_mask(subset, edge_index):
     mask = subset[edge_index[0]] & subset[edge_index[1]]
 
     return mask
+
+
+def one_hot_encode(tensor, num_classes, dtype=None, device=None):
+    assert len(tensor.shape) == 1
+    dtype = tensor.dtype if dtype is None else dtype
+    device = tensor.device if device is None else device
+    one_hot = torch.zeros(len(tensor), num_classes, dtype=dtype, device=device)
+    one_hot[list(range(0, len(tensor))), tensor] = 1
+    return one_hot
 
 
 class Logger(object):

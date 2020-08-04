@@ -82,8 +82,10 @@ def main():
             result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
             f1_s = f1_score(result, edge_labels, 2)[1]
             # draw images that have low f1 score, that could not detect all persons or to many persons, or mutants
-            persons_pred, mutants, person_labels = pred_to_person(joint_det, joint_scores, edge_index, result, config.MODEL.GC.CC_METHOD)
-            persons_pred_label, _, _ = pred_to_person(joint_det, joint_scores, edge_index, edge_labels, config.MODEL.GC.CC_METHOD)
+            persons_pred, mutants, person_labels = pred_to_person(joint_det, joint_scores, edge_index, result, None,
+                                                                  config.MODEL.GC.CC_METHOD)
+            persons_pred_label, _, _ = pred_to_person(joint_det, joint_scores, edge_index, edge_labels, None,
+                                                      config.MODEL.GC.CC_METHOD)
             num_persons_det = len(persons_pred)
 
 

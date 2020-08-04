@@ -3,6 +3,9 @@ from .VanillaMPN2 import VanillaMPN2
 from .VanillaMPNFeatureDrop import VanillaMPNDrop
 from .ClassificationMPN import ClassificationMPN
 from .ClassificationMPNSimple import ClassificationMPNSimple
+from .ClassificationNaive import ClassificationNaive
+from .NodeClassificationMPNSimple import NodeClassificationMPNSimple
+
 
 
 def get_mpn_model(config, **kwargs):
@@ -16,5 +19,9 @@ def get_mpn_model(config, **kwargs):
         return ClassificationMPNSimple(config)
     elif config.NAME == "VanillaMPN2":
         return VanillaMPN2(config)
+    elif config.NAME == "ClassificationNaive":
+        return ClassificationNaive(config)
+    elif config.NAME == "NodeClassificationMPN":
+        return NodeClassificationMPNSimple(config)
     else:
         raise NotImplementedError

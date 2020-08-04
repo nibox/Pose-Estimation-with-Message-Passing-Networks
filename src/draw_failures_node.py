@@ -81,9 +81,6 @@ def main():
             _, preds_edges, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels, _, _ , _ = model(img_transformed, keypoints, masks, factors, with_logits=False)
 
             preds_edges = preds_edges[-1] if preds_edges[-1] is not None else None
-            if preds_edges is None:
-                print(f"No detections for {i}")
-                continue
             preds_nodes = preds_nodes[-1]
             result_edges = torch.where(preds_edges < 0.5, torch.zeros_like(preds_edges), torch.ones_like(preds_edges))
             result_nodes = torch.where(preds_nodes < 0.5, torch.zeros_like(preds_nodes), torch.ones_like(preds_nodes))
@@ -93,7 +90,8 @@ def main():
             mask = subgraph_mask(preds_nodes > config.MODEL.MPN.NODE_THRESHOLD, edge_index)
             sub_preds_edges = result_edges * mask.float()
 
-            persons_pred, mutants, person_labels = pred_to_person(joint_det, preds_nodes, edge_index, sub_preds_edges, config.MODEL.GC.CC_METHOD)
+            persons_pred, mutants, person_labels = pred_to_person(joint_det, preds_nodes, edge_index, sub_preds_edges,
+                                                                  None, config.MODEL.GC.CC_METHOD)
             # persons_pred_label, _, _ = pred_to_person(joint_det, joint_scores, edge_index, edge_labels, config.MODEL.GC.CC_METHOD)
             num_persons_det = len(persons_pred)
 

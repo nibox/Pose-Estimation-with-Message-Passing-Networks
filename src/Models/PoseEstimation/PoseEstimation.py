@@ -60,10 +60,6 @@ class PoseEstimationBaseline(nn.Module):
             assert masks is not None
         bb_output = self.backbone(imgs)
         scoremaps, features = self.process_output(bb_output, self.scoremap_mode)
-        """
-        scoremaps, features, early_features = self.backbone(imgs)
-        final_scoremap = scoremaps[:, -1, :17]
-        """
 
         features = self.feature_gather(features)
         scoremaps = scoremaps.detach()
@@ -72,16 +68,19 @@ class PoseEstimationBaseline(nn.Module):
                                                   joints_gt=keypoints_gt, factor_list=factors, masks=masks,
                                                   device=scoremaps.device)
 
-        x, edge_attr, edge_index, edge_labels, node_labels, joint_det, label_mask, label_mask_node, joint_scores, batch_index = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, node_labels, class_labels, joint_det, label_mask, label_mask_node, joint_scores, batch_index = graph_constructor.construct_graph()
 
-        preds, node_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels, batch_index=batch_index, node_mask=label_mask_node)
+        edge_pred, node_pred, class_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels, batch_index=batch_index, node_mask=label_mask_node)
+
         if not with_logits:
-            if preds[-1] is not None:
-                preds[-1] = torch.sigmoid(preds[-1])
+            if edge_pred[-1] is not None:
+                edge_pred[-1] = torch.sigmoid(edge_pred[-1])
             if node_pred is not None:
                 node_pred[-1] = torch.sigmoid(node_pred[-1])
+            if class_pred is not None:
+                class_pred[-1] = torch.softmax(class_pred[-1], dim=1)
 
-        return scoremaps, preds, node_pred, joint_det, joint_scores, edge_index, edge_labels, node_labels, label_mask, label_mask_node, bb_output[0]
+        return scoremaps, edge_pred, node_pred, class_pred, joint_det, joint_scores, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node, bb_output[0]
 
     def freeze_backbone(self, mode):
         if mode == "complete":

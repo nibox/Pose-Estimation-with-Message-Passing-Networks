@@ -586,7 +586,7 @@ def get_pose_net(cfg, is_train, **kwargs):
 
 def hr_process_output(output, mode):
     (scoremap_1, scoremap_2), features = output
-    if mode == "avg":
+    if mode == "avg" or mode == "small":
 
         scoremap_1 = torch.nn.functional.interpolate(
             scoremap_1,
@@ -594,14 +594,10 @@ def hr_process_output(output, mode):
             mode='bilinear',
             align_corners=False
         )
+
+    if mode == "avg":
         scoremaps = (scoremap_2 + scoremap_1[:, :17]) / 2
     elif mode == "small":
-        scoremap_1 = torch.nn.functional.interpolate(
-            scoremap_1,
-            size=(scoremap_2.shape[2], scoremap_2.shape[3]),
-            mode='bilinear',
-            align_corners=False
-        )
         scoremaps = scoremap_1
     elif mode == "large":
         scoremaps = scoremap_2
