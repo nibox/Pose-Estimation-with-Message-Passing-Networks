@@ -29,6 +29,7 @@ class NaiveGraphConstructor:
         self.normalize_node_distance = config.NORM_NODE_DISTANCE
         self.image_centric_sampling = config.IMAGE_CENTRIC_SAMPLING
         self.use_gt_for_end2end = config.GT_FOR_END2END
+        self.edge_features_to_use = config.EDGE_FEATURES_TO_USE
 
         self.node_matching_radius = config.NODE_MATCHING_RADIUS
         self.node_inclusion_radius = config.NODE_INCLUSION_RADIUS
@@ -98,7 +99,7 @@ class NaiveGraphConstructor:
                 # joint_scores[-len(joints_gt_position):] = 1.0
 
             x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch], self.mpn_graph_type,
-                                                                 joint_scores)
+                                                                 joint_scores, self.edge_features_to_use)
 
             # sol maps nodes to gt joints/  gt joints to nodes and connectivity maps between gt joints
             edge_labels = None
@@ -195,7 +196,7 @@ class NaiveGraphConstructor:
 
         return x_list, edge_attr_list, edge_index_list, edge_labels_list, node_label_list, node_class_list, joint_det_list, label_mask_list, label_mask_node_list, joint_score_list, batch_index
 
-    def _construct_mpn_graph(self, joint_det, features, graph_type, joint_scores):
+    def _construct_mpn_graph(self, joint_det, features, graph_type, joint_scores, edge_features_to_use):
         """
 
         :param joint_scores:
@@ -203,6 +204,7 @@ class NaiveGraphConstructor:
         :param features: Shape: (C, H, W)
         :return: x (Num_dets, feature_dim), edge_attr (Num_edges, feature_dim), edge_index (2, Num_dets)
         """
+        assert len(edge_features_to_use) >= 1
 
         joint_x = joint_det[:, 0]
         joint_y = joint_det[:, 1]
@@ -263,7 +265,12 @@ class NaiveGraphConstructor:
         edge_attr_y = (joint_y[edge_index[1]] - joint_y[edge_index[0]]).float() / norm_factor
         edge_attr_x = (joint_x[edge_index[1]] - joint_x[edge_index[0]]).float() / norm_factor
 
-        edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1), connection_label_2.float()], dim=1)
+        if {"position", "connection_type"} == set(edge_features_to_use):
+            edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1), connection_label_2.float()], dim=1)
+        elif {"position"} == set(edge_features_to_use):
+            edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1)], dim=1)
+        else:
+            raise NotImplementedError
 
         return x, edge_attr, edge_index
 

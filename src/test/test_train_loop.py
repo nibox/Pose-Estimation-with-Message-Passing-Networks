@@ -151,7 +151,7 @@ def main():
         result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
 
         node_metrics = calc_metrics(result_nodes, node_labels, node_label_mask)
-        class_metrics = calc_metrics(result_classes, class_labels, node_label_mask, 17)
+        class_metrics = calc_metrics(result_classes, class_labels, node_labels, 17)
         edge_metrics = calc_metrics(result_edges, edge_labels, edge_label_mask)
 
 

@@ -3,9 +3,10 @@ import torch.nn as nn
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from Utils.Utils import subgraph_mask
-from .layers import _make_mlp
+from .layers import _make_mlp, MPLayer
 
 
+"""
 class MPLayer(MessagePassing):
 
     # todo with or without inital feature skip connection
@@ -49,6 +50,7 @@ class MPLayer(MessagePassing):
             aggr_out = self.update_mlp(aggr_out)
         return aggr_out
 
+"""
 
 class NodeClassificationMPNSimple(torch.nn.Module):
 

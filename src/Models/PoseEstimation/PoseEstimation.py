@@ -70,7 +70,8 @@ class PoseEstimationBaseline(nn.Module):
 
         x, edge_attr, edge_index, edge_labels, node_labels, class_labels, joint_det, label_mask, label_mask_node, joint_scores, batch_index = graph_constructor.construct_graph()
 
-        edge_pred, node_pred, class_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels, batch_index=batch_index, node_mask=label_mask_node)
+        edge_pred, node_pred, class_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels, edge_labels=edge_labels
+                                                    , batch_index=batch_index, node_mask=label_mask_node)
 
         if not with_logits:
             if edge_pred[-1] is not None:

@@ -7,7 +7,7 @@ from tqdm import tqdm
 
 from config import get_config, update_config
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
-from Utils import pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics, subgraph_mask
+from Utils import pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics, subgraph_mask, one_hot_encode
 from Models.PoseEstimation import get_pose_model
 from Utils.transformations import reverse_affine_map
 from Utils.transforms import transforms_hg_eval, transforms_hr_eval
@@ -35,6 +35,14 @@ class EvalWriter(object):
         print(eval_dict)
         self.f.write(descirption + "\n")
         self.f.write(str(eval_dict) + "\n")
+
+    def eval_metric(self, eval_list, description):
+        value = np.mean(eval_list)
+        print(description)
+        print(value)
+        self.f.write(description + "\n")
+        self.f.write(str(value) + "\n")
+
     def eval_part_metrics(self, eval_dict, description):
         part_labels = ['nose','eye_l','eye_r','ear_l','ear_r',
                        'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
@@ -149,7 +157,7 @@ def main():
     torch.backends.cudnn.benchmark = False
     ######################################
 
-    config_name = "model_50_2"
+    config_name = "model_56_003"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
     eval_writer = EvalWriter(config)
@@ -194,6 +202,8 @@ def main():
     eval_edge = {"acc": [], "prec": [], "rec": [], "f1": []}
     eval_edge_masked = {"acc": [], "prec": [], "rec": [], "f1": []}
     eval_node_per_type = {i: {"acc": [], "prec": [], "rec": [], "f1": []} for i in range(17)}
+    eval_classes_baseline_acc = []
+    eval_classes_acc = []
     def merge_dicts(dict_1, dict_2):
         for key in dict_1.keys():
             dict_1[key].append(dict_2[key])
@@ -203,6 +213,7 @@ def main():
     anns_full = []
     anns_perf_node = []  # need second
     anns_perf_edge = []
+    anns_class_infl = []
     eval_ids = []
     imgs_fully_det = []
     with torch.no_grad():
@@ -213,10 +224,14 @@ def main():
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
-            scoremaps, pred, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels,  _, node_mask, _ = model(img, keypoints, masks, factors, with_logits=True)
+            scoremaps, preds_edges, preds_nodes, preds_classes, joint_det, joint_scores, edge_index, edge_labels, node_labels, class_labels,  _, node_mask, _ = model(img, keypoints, masks, factors, with_logits=True)
 
-            preds_edges = pred[-1].sigmoid().squeeze() if pred[-1] is not None else None
+            preds_edges = preds_edges[-1].sigmoid().squeeze() if preds_edges[-1] is not None else None
+            preds_classes = preds_classes[-1].softmax(dim=1) if preds_classes is not None else None
             preds_nodes = preds_nodes[-1].sigmoid().squeeze()
+
+            preds_classes_gt = one_hot_encode(class_labels, 17, torch.float) if class_labels is not None else None
+            preds_baseline_class = joint_det[:, 2]
 
             true_positive_idx = preds_nodes > config.MODEL.MPN.NODE_THRESHOLD
             mask = subgraph_mask(true_positive_idx, edge_index)
@@ -228,6 +243,8 @@ def main():
 
             eval_node = merge_dicts(eval_node, calc_metrics(result_nodes, node_labels))
             eval_edge = merge_dicts(eval_edge, calc_metrics(result_edges, edge_labels))
+            eval_classes_baseline_acc.append(calc_metrics(preds_baseline_class, class_labels, node_labels, 17)["acc"])
+            eval_classes_acc.append(calc_metrics(preds_classes.argmax(dim=1), class_labels, node_labels, 17)["acc"])
 
             """
             if node_labels.sum() > 1.0:
@@ -244,17 +261,27 @@ def main():
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
-            ann = perd_to_ann(scoremaps[0], joint_det, preds_nodes, edge_index, preds_edges, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
-                              , config.DATASET.SCALING_TYPE, config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD)
+            ann = perd_to_ann(scoremaps[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE,
+                              config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD, preds_classes)
 
-            ann_perf_edge = perd_to_ann(scoremaps[0], joint_det, preds_nodes, edge_index, edge_labels, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
-                              , config.DATASET.SCALING_TYPE, config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD)
-            ann_perf_node = perd_to_ann(scoremaps[0], joint_det, node_labels, edge_index, preds_edges, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD
-                                        , config.DATASET.SCALING_TYPE, config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD)
+            ann_perf_edge = perd_to_ann(scoremaps[0], joint_det, preds_nodes, edge_index, edge_labels, img_info,
+                                        int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+                                        config.DATASET.SCALING_TYPE, config.TEST.ADJUST,
+                                        config.MODEL.MPN.NODE_THRESHOLD, preds_classes_gt)
+            ann_perf_node = perd_to_ann(scoremaps[0], joint_det, node_labels * preds_nodes, edge_index, preds_edges, img_info,
+                                        int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+                                        config.DATASET.SCALING_TYPE, config.TEST.ADJUST,
+                                        config.MODEL.MPN.NODE_THRESHOLD, preds_classes_gt)
+            ann_class_infl = perd_to_ann(scoremaps[0], joint_det, node_labels * preds_nodes, edge_index, preds_edges, img_info,
+                                        int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+                                        config.DATASET.SCALING_TYPE, config.TEST.ADJUST,
+                                        config.MODEL.MPN.NODE_THRESHOLD, preds_classes)
 
             anns.append(ann)
             anns_perf_edge.append(ann_perf_edge)
             anns_perf_node.append(ann_perf_node)
+            anns_class_infl.append(ann_class_infl)
             if int(n) == 0:
                 imgs_fully_det.append(eval_set.img_ids[i])
                 anns_full.append(ann)
@@ -263,21 +290,25 @@ def main():
         eval_writer.eval_coco(eval_set.coco, anns, np.array(eval_ids), "General Evaluation")
         eval_writer.eval_coco(eval_set.coco, anns_perf_edge, np.array(eval_ids), "Perfect edge prediction")
         eval_writer.eval_coco(eval_set.coco, anns_perf_node, np.array(eval_ids), "Perfect node prediction")
+        eval_writer.eval_coco(eval_set.coco, anns_class_infl, np.array(eval_ids), "Perfect node and edge prediction")
         eval_writer.eval_coco(eval_set.coco, anns_full, imgs_fully_det, f"Evaluation on perfect images {len(anns_full)}")
 
         eval_writer.eval_metrics(eval_node, "Node metrics")
         eval_writer.eval_metrics(eval_edge, "Edge metrics")
         eval_writer.eval_metrics(eval_edge_masked, "Edge metrics masked")
+        eval_writer.eval_metric(eval_classes_baseline_acc, "Type classification using backbone detections as baseline")
+        eval_writer.eval_metric(eval_classes_acc, "Type classification")
         eval_writer.eval_part_metrics(eval_node_per_type, "Node metrics per type")
 
         eval_writer.close()
 
 
-def perd_to_ann(scoremaps, joint_det, joint_scores, edge_index, pred, img_info, img_id, cc_method, scaling_type, adjustment, th):
+def perd_to_ann(scoremaps, joint_det, joint_scores, edge_index, preds_edges, img_info, img_id, cc_method, scaling_type,
+                adjustment, th, preds_classes):
     true_positive_idx = joint_scores > th
-    edge_index, pred = subgraph(true_positive_idx, edge_index, pred)
+    edge_index, preds_edges = subgraph(true_positive_idx, edge_index, preds_edges)
     if edge_index.shape[1] != 0:
-        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, cc_method)
+        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, preds_edges, preds_classes, cc_method)
     else:
         persons_pred = np.zeros([1, 17, 3])
     # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
