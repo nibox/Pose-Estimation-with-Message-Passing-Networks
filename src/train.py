@@ -93,7 +93,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
                     loss_edge_labels.append(edge_labels)
                     loss_masks.append(label_mask * mask.float())
 
-                loss, _ = loss_func(bb_output, preds_nodes, preds, heatmaps, node_labels, loss_edge_labels, masks,
+                loss, _ = loss_func(bb_output, preds_nodes, preds, preds_classes, heatmaps, node_labels, loss_edge_labels, class_labels, masks,
                                  loss_masks, label_mask_node)
                 label_mask = label_mask * mask.float()
             else:
@@ -158,7 +158,7 @@ def main():
     ##########################################################
     config_name = sys.argv[1]
     config = get_config()
-    config = update_config(config, f"../experiments/train/{config_name}.yaml")
+    config = update_config(config, f"../experiments/{config_name}.yaml")
 
     os.makedirs(config.LOG_DIR, exist_ok=True)
     logger = Logger(config)
@@ -291,7 +291,7 @@ def main():
                             loss_edge_labels.append(edge_labels)
                             loss_masks.append(label_mask * mask.float())
 
-                        loss, logging = loss_func(bb_output, preds_nodes, preds, heatmaps, node_labels, loss_edge_labels, masks, loss_masks, label_mask_node)
+                        loss, logging = loss_func(bb_output, preds_nodes, preds, preds_classes, heatmaps, node_labels, loss_edge_labels, class_labels, masks, loss_masks, label_mask_node)
                         #
                         loss_mask = loss_masks[-1].detach()
                         default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float,

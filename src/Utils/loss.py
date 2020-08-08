@@ -82,7 +82,7 @@ class ClassMultiLossFactory(nn.Module):
         self.num_joints = config.MODEL.HRNET.NUM_JOINTS
         self.num_stages = config.MODEL.HRNET.LOSS.NUM_STAGES
         self.loss_weights = config.MODEL.LOSS.LOSS_WEIGHTS
-        assert len(self.loss_weights) == 2
+        assert len(self.loss_weights) in [2,3]
 
         self.heatmaps_loss = \
             nn.ModuleList(
@@ -94,13 +94,19 @@ class ClassMultiLossFactory(nn.Module):
             )
         self.heatmaps_loss_factor = config.MODEL.HRNET.LOSS.HEATMAPS_LOSS_FACTOR
         if config.MODEL.LOSS.USE_FOCAL:
-            self.classification_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA, logits=True)
+            self.edge_loss= FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA, logits=True)
         else:
             raise NotImplementedError
+        if config.MODEL.LOSS.NODE_USE_FOCAL:
+            self.node_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA,
+                                       logits=True)
+        else:
+            raise NotImplementedError
+        self.class_loss = CrossEntropyLossWithLogits()
         # removed ae loss
 
 
-    def forward(self, outputs_det, outputs_nodes, outputs_edges, heatmaps, node_labels, edge_labels, map_masks, edge_label_mask, node_label_mask):
+    def forward(self, outputs_det, outputs_nodes, outputs_edges, outputs_classes, heatmaps, node_labels, edge_labels, class_labels, map_masks, edge_label_mask, node_label_mask):
 
         heatmap_loss = 0.0
         for idx in range(len(outputs_det)):
@@ -115,21 +121,32 @@ class ClassMultiLossFactory(nn.Module):
 
         node_loss = 0.0
         for i in range(len(outputs_nodes)):
-            node_loss += self.classification_loss(outputs_nodes[i], node_labels, "mean", node_label_mask)
+            node_loss += self.node_loss(outputs_nodes[i], node_labels, "mean", node_label_mask)
         node_loss = node_loss / len(outputs_nodes)
 
         edge_loss = 0.0
         for i in range(len(outputs_edges)):
             if outputs_edges[i] is None:
                 continue
-            edge_loss += self.classification_loss(outputs_edges[i], edge_labels[i], "mean", edge_label_mask[i])
+            edge_loss += self.edge_loss(outputs_edges[i], edge_labels[i], "mean", edge_label_mask[i])
         edge_loss = edge_loss / len(outputs_edges)
+        if torch.isnan(edge_loss):
+            edge_loss = 0.0
+
+        class_loss = 0.0
+        if outputs_classes is not None:
+            for i in range(len(outputs_classes)):
+                class_loss += self.class_loss(outputs_classes[i], class_labels, "mean", node_labels)
+            class_loss = class_loss / len(outputs_classes)
 
         logging = {"heatmap": heatmap_loss.cpu().item(),
                    "edge": edge_loss.cpu().item() if isinstance(edge_loss, torch.Tensor) else edge_loss,
-                   "node": node_loss.cpu().item()}
+                   "node": node_loss.cpu().item(),
+                   "class_loss": class_loss.cpu().item() if isinstance(class_loss, torch.Tensor) else class_loss}
+        if len(self.loss_weights) == 3:
+            class_loss *= self.loss_weights[2]
 
-        return self.loss_weights[0] * node_loss + edge_loss * self.loss_weights[1] + heatmap_loss, logging
+        return self.loss_weights[0] * node_loss + edge_loss * self.loss_weights[1] + heatmap_loss + class_loss, logging
 
 
 class MPNLossFactory(nn.Module):
