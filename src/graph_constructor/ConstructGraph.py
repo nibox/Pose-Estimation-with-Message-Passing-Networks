@@ -225,7 +225,8 @@ class NaiveGraphConstructor:
         elif graph_type == "feature_knn":
             edge_index = self.feature_knn_mpn_graph(joint_det, x)
         elif graph_type == "score_based":
-            edge_index = self.score_based_graph(joint_det, joint_scores)
+            k = 75
+            edge_index = self.score_based_graph(joint_det, joint_scores, k)
         elif graph_type == "score_based_per_type":
             edge_index = self.score_based_k_per_type(joint_det, joint_scores)
         else:
@@ -255,11 +256,8 @@ class NaiveGraphConstructor:
         # """
 
         if self.normalize_node_distance:
-            norm_factor_x = self.scoremaps.shape[3]
-            norm_factor_y = self.scoremaps.shape[2]
             norm_factor = max(self.scoremaps.shape[3], self.scoremaps.shape[2])
         else:
-            norm_factor_y, norm_factor_x = 1, 1
             norm_factor = 1
 
         edge_attr_y = (joint_y[edge_index[1]] - joint_y[edge_index[0]]).float() / norm_factor
@@ -316,7 +314,7 @@ class NaiveGraphConstructor:
         edge_index, _ = gutils.remove_self_loops(edge_index)
         return edge_index
 
-    def score_based_graph(self, joint_det, joint_scores):
+    def score_based_graph(self, joint_det, joint_scores, k):
         """
         Idea: create a fully connected graph using high scoring joints called root joints
         (assumption is that for each person at least one joint has a high score)
@@ -326,7 +324,7 @@ class NaiveGraphConstructor:
         :return:
         """
         num_joints = len(joint_det)
-        _, root_joint_idx = joint_scores.topk(k=75)
+        _, root_joint_idx = joint_scores.topk(k=k)
         adj_mat = torch.zeros([num_joints, num_joints], dtype=torch.long)
         adj_mat[root_joint_idx] = 1
         edge_index, _ = gutils.dense_to_sparse(adj_mat)
@@ -658,10 +656,11 @@ class NaiveGraphConstructor:
         factor_per_joint = factors[person_idx_gt, joint_idx_gt]
         similarity = torch.exp(-distance / factor_per_joint[:, None])
 
+        different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
         method = 3
         # """
         if method == 1:
-            different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
+            #different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
             similarity_constrained = similarity.clone()
             similarity_constrained[similarity_constrained < self.matching_radius] = 0.0  # 0.1 worked well for threshold + knn graph
             similarity_constrained[similarity_constrained == 0.0] -= 1.0  # 0.1 worked well for threshold + knn graph
@@ -677,7 +676,7 @@ class NaiveGraphConstructor:
             person_idx_gt_1 = person_idx_gt[row_con]
             joint_idx_gt_1 = joint_idx_gt[row_con]
         elif method==2:
-            different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
+            # different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
             similarity_same = similarity.clone()
             similarity_diff = similarity.clone()
             similarity_same[different_type] = 0.0
@@ -707,7 +706,7 @@ class NaiveGraphConstructor:
             sol = linear_sum_assignment(cost_mat, maximize=True)
             row_con, col_con = sol
             # remove mappings with cost 0.0
-            valid_match = cost_mat[row_con, col_con] != -1.0
+            valid_match = cost_mat[row_con, col_con] != 0.0
             row_con = row_con[valid_match]
             col_con = col_con[valid_match]
             person_idx_gt_1 = person_idx_gt[row_con]
@@ -720,25 +719,56 @@ class NaiveGraphConstructor:
 
         ambiguous_dets = []
         if self.include_neighbouring_keypoints:
-            cost_mat = similarity.cpu().numpy()
-            # use inclusion radius to filter more aggressively
-            cost_mat[cost_mat < self.inclusion_radius] = 0.0
-            # remove already chosen keypoints from next selection
-            cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), col_con] = 0.0
-            # "remove" ambiguous cases
-            # identify them
-            ambiguous_dets = (cost_mat != 0.0).sum(axis=0) > 1.0
-            # remove them
-            cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), ambiguous_dets] = 0.0
-            row_2, col_2 = np.nonzero(cost_mat)
-            # it might happen that there are more gt joints than detected joints and if matching does not work out
-            bad_rows = np.array(list(set((set(list(row_2)).difference(set(list(row_con)))))))
-            for r in bad_rows:
-                cost_mat[r] = 0.0
-            row_2, col_2 = np.nonzero(cost_mat)
-            if not (set(list(row_2)).issubset(set(list(row_con)))):
-                print("sdfad")
-            assert (set(list(row_2)).issubset(set(list(row_con))))
+            if method == 2:
+                different_type = different_type.cpu().numpy()  # todo make the move earlier
+                cost_mat = similarity.cpu().numpy()
+                cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), col_con] = 0.0
+
+                cost_first = cost_mat.copy()
+                cost_first[different_type] = 0.0
+                cost_first[cost_first < self.inclusion_radius] = 0.0
+                ambiguous_dets = (cost_first != 0.0).sum(axis=0) > 1.0
+                cost_first[np.arange(0, num_joints_gt).reshape(-1, 1), ambiguous_dets] = 0.0
+                row_2_1, col_2_1 = np.nonzero(cost_first)
+                cost_second = cost_mat.copy()
+                cost_second[np.logical_not(different_type)] = 0.0
+                cost_second[cost_second < 0.75] = 0.0
+                ambiguous_dets = (cost_second != 0.0).sum(axis=0) > 1.0
+                cost_second[np.arange(0, num_joints_gt).reshape(-1, 1), ambiguous_dets] = 0.0
+                row_2_2, col_2_2 = np.nonzero(cost_second)
+                # it might happen that there are more gt joints than detected joints and if matching does not work out
+                bad_rows_1 = np.array(list(set((set(list(row_2_1)).difference(set(list(row_con)))))))
+                bad_rows_2 = np.array(list(set((set(list(row_2_2)).difference(set(list(row_con)))))))
+                for r in bad_rows_1:
+                    cost_first[r] = 0.0
+                for r in bad_rows_2:
+                    cost_second[r] = 0.0
+                row_2_1, col_2_1 = np.nonzero(cost_first)
+                row_2_2, col_2_2 = np.nonzero(cost_second)
+                row_2, col_2 = np.concatenate([row_2_1, row_2_2], axis=0), np.concatenate([col_2_1, col_2_2], axis=0)
+                if not (set(list(row_2)).issubset(set(list(row_con)))):
+                    print("sdfad")
+                assert (set(list(row_2)).issubset(set(list(row_con))))
+            else:
+                cost_mat = similarity.cpu().numpy()
+                # use inclusion radius to filter more aggressively
+                cost_mat[cost_mat < self.inclusion_radius] = 0.0
+                # remove already chosen keypoints from next selection
+                cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), col_con] = 0.0
+                # "remove" ambiguous cases
+                # identify them
+                ambiguous_dets = (cost_mat != 0.0).sum(axis=0) > 1.0
+                # remove them
+                cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), ambiguous_dets] = 0.0
+                row_2, col_2 = np.nonzero(cost_mat)
+                # it might happen that there are more gt joints than detected joints and if matching does not work out
+                bad_rows = np.array(list(set((set(list(row_2)).difference(set(list(row_con)))))))
+                for r in bad_rows:
+                    cost_mat[r] = 0.0
+                row_2, col_2 = np.nonzero(cost_mat)
+                if not (set(list(row_2)).issubset(set(list(row_con)))):
+                    print("sdfad")
+                assert (set(list(row_2)).issubset(set(list(row_con))))
 
             # some gt joints have no match and have to be removed for the next step
             # create translation table for new indices in order to translate row_2

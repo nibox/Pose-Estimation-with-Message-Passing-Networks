@@ -21,10 +21,16 @@ def main():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     ######################################
-    config_name = "model_50_2"
+    config_dir = "class_agnostic_end2end"
+    # config_dir = "train"
+    config_name = "model_57_1_0"
     config = get_config()
-    config = update_config(config, f"../experiments/train/{config_name}.yaml")
+    config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
     # img_ids_to_use = [84015, 84381, 117772, 237976, 281133, 286645, 505421]
+    img_ids_to_use = [2299, 68409, 205324, 361586, 171190, 84674, 238410, 523957,
+                      49759, 18491, 68409, 280710, 303713, 100723,
+                      13774, 496409, 187362, 177861, 258388, 496854, 252716,
+                      303713, 49060, 312421, 468332, 559348, 484415, 581206]
 
 
     ######################################
@@ -49,6 +55,14 @@ def main():
         output_size = 256.0
         eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
                                     heatmap_generator=heatmap_generator, transforms=transforms)
+    elif config.TEST.SPLIT == "coco_17_full":
+        _, valid_ids = pickle.load(open("tmp/coco_17_full_split.p", "rb"))  # mini_train_valid_split_4 old one
+
+        heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
+        transforms, transforms_inv = transforms_hr_eval(config)
+        output_size = 256.0
+        eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=False, seed=0, mode="val", img_ids=valid_ids, year=17,
+                                    heatmap_generator=heatmap_generator, transforms=transforms, filter_empty=False)
     else:
         raise NotImplementedError
 
@@ -70,17 +84,18 @@ def main():
 
     image_to_draw = []
     with torch.no_grad():
-        for i in tqdm(range(100)):
+        for i in tqdm(range(2302)):
             img_id = eval_set.img_ids[i]
-            # if img_id not in img_ids_to_use:
-            #     continue
+            if img_id not in img_ids_to_use:
+                continue
             img, _, masks, keypoints, factors = eval_set[i]
             img_transformed = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
             num_persons_gt = np.count_nonzero(keypoints[0, :, :, 2].sum(axis=1).cpu().numpy())
-            _, preds_edges, preds_nodes, joint_det, joint_scores, edge_index, edge_labels, node_labels, _, _ , _ = model(img_transformed, keypoints, masks, factors, with_logits=False)
+            _, preds_edges, preds_nodes, preds_classes, joint_det, joint_scores, edge_index, edge_labels, node_labels, _, _, _ , _ = model(img_transformed, keypoints, masks, factors, with_logits=False)
 
             preds_edges = preds_edges[-1] if preds_edges[-1] is not None else None
+            preds_classes = preds_classes[-1] if preds_classes is not None else None
             preds_nodes = preds_nodes[-1]
             result_edges = torch.where(preds_edges < 0.5, torch.zeros_like(preds_edges), torch.ones_like(preds_edges))
             result_nodes = torch.where(preds_nodes < 0.5, torch.zeros_like(preds_nodes), torch.ones_like(preds_nodes))
@@ -91,7 +106,7 @@ def main():
             sub_preds_edges = result_edges * mask.float()
 
             persons_pred, mutants, person_labels = pred_to_person(joint_det, preds_nodes, edge_index, sub_preds_edges,
-                                                                  None, config.MODEL.GC.CC_METHOD)
+                                                                  preds_classes, config.MODEL.GC.CC_METHOD)
             # persons_pred_label, _, _ = pred_to_person(joint_det, joint_scores, edge_index, edge_labels, config.MODEL.GC.CC_METHOD)
             num_persons_det = len(persons_pred)
 

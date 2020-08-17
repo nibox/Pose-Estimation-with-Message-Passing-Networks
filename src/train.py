@@ -172,8 +172,11 @@ def main():
         assert config.TRAIN.KP_FREEZE_MODE != "complete"
         model.freeze_backbone(mode=config.TRAIN.KP_FREEZE_MODE)
         model_params = list(model.mpn.parameters()) + list(model.feature_gather.parameters())
-        optimizer = torch.optim.Adam([{"params": model_params, "lr": config.TRAIN.LR, "weight_decay": config.TRAIN.W_DECAY},
-                                      {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR, "weight_decay": config.TRAIN.W_DECAY}])
+        if config.TRAIN.SPLIT_OPTIMIZER:
+            optimizer = torch.optim.Adam([{"params": model_params, "lr": config.TRAIN.LR, "weight_decay": config.TRAIN.W_DECAY},
+                                          {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR, "weight_decay": config.TRAIN.W_DECAY}])
+        else:
+            raise NotImplementedError
 
         if config.MODEL.LOSS.NAME == "edge_loss":
             loss_func = MultiLossFactory(config)

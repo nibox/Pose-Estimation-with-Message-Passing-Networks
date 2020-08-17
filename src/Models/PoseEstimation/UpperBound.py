@@ -38,11 +38,16 @@ def get_upper_bound_model(config, device):
     def rename_key(key):
         # assume structure is model.module.REAL_NAME
         return ".".join(key.split(".")[2:])
+    def rename_key_hr(key):
+        return key[2:]
 
     model = UpperBoundModel(config)
 
     if config.UB.KP == "hrnet":
         state_dict = torch.load(config.MODEL.HRNET.PRETRAINED, map_location=device)
+        if config.MODEL.HRNET.PRETRAINED != '../PretrainedModels/pose_higher_hrnet_w32_512.pth':
+            state_dict = {rename_key_hr(k): v for k, v in state_dict.items()}
+
     elif config.UB.KP == "hourglass":
         state_dict = torch.load(config.MODEL.HG.PRETRAINED, map_location=device)
         state_dict = {rename_key(k): v for k, v in state_dict["state_dict"].items()}

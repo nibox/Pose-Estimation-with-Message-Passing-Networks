@@ -5,6 +5,7 @@ from .ClassificationMPN import ClassificationMPN
 from .ClassificationMPNSimple import ClassificationMPNSimple
 from .ClassificationNaive import ClassificationNaive
 from .NodeClassificationMPNSimple import NodeClassificationMPNSimple
+from .NodeClassificationMPNSimpleWithRef import NodeClassificationMPNSimpleWithRef
 from .JointTypeClassification import JointTypeClassification
 
 
@@ -24,6 +25,8 @@ def get_mpn_model(config, **kwargs):
         return ClassificationNaive(config)
     elif config.NAME == "NodeClassificationMPN":
         return NodeClassificationMPNSimple(config)
+    elif config.NAME == "NodeClassificationMPNWithRef":
+        return NodeClassificationMPNSimpleWithRef(config)
     elif config.NAME == "JointTypeClassification":
         return JointTypeClassification(config)
     else:

@@ -5,7 +5,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 from torch_geometric.utils import dense_to_sparse, precision, recall, accuracy, f1_score, subgraph
-
+from scipy.optimize import linear_sum_assignment
 from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
 from Utils.dataset_utils import Graph
 
@@ -17,6 +17,19 @@ def non_maximum_suppression(scoremap, threshold=0.05):
     maxima = torch.eq(pooled, scoremap).float()
     return maxima
 
+def topk_accuracy(output, target, topk=1, mask=None):
+    """Computes the precision@k for the specified values of k"""
+    batch_size = target.size(0)
+
+    if mask is not None:
+        output = output[mask == 1.0]
+        target = target[mask == 1.0]
+    _, pred = output.topk(topk, 1, True, True)
+    pred = pred.t()
+    correct = pred.eq(target.view(1, -1).expand_as(pred))
+    correct = correct.float().sum(0).mean()
+
+    return correct.item()
 
 def to_numpy(array: [torch.Tensor, np.array]):
     if isinstance(array, torch.Tensor):
@@ -134,7 +147,10 @@ def draw_detection_scoremap(scoremaps, joint_det, joint_gt, inp_type, fname=None
     """
 
     scoremap = scoremaps.cpu().numpy().squeeze()
-    scoremap = scoremap[None, inp_type].clip(0, 1.0) * 255
+    if inp_type is not None:
+        scoremap = scoremap[None, inp_type].clip(0, 1.0) * 255
+    else:
+        scoremap = scoremap.max(axis=0)[None].clip(0, 1.0) * 255
     scoremap = np.repeat(scoremap, repeats=3, axis=0).astype(np.uint8).transpose(1, 2, 0)
     scoremap = cv2.resize(scoremap, (512, 512))
 
@@ -151,7 +167,7 @@ def draw_detection_scoremap(scoremaps, joint_det, joint_gt, inp_type, fname=None
         scale = 512.0 / output_size
         x, y = int(joint_det[i, 0] * scale), int(joint_det[i, 1] * scale)
         j_type = joint_det[i, 2]
-        if j_type == inp_type:
+        if inp_type is None or j_type == inp_type:
             color = (colors_joints[j_type], 255, 255)
             cv2.circle(img, (x, y), 2, color, -1)
     for person in range(len(joint_gt)):
@@ -161,7 +177,7 @@ def draw_detection_scoremap(scoremaps, joint_det, joint_gt, inp_type, fname=None
                 scale = 512.0 / output_size
                 x, y = int(joint_gt[person, i, 0] * scale), int(joint_gt[person, i, 1] * scale)
                 j_type = i
-                if j_type == inp_type:
+                if inp_type is None or j_type == inp_type:
                     cv2.circle(img, (x, y), 2, (120, 255, 255), -1)
     img = cv2.cvtColor(img, cv2.COLOR_HSV2RGB)
 
@@ -416,8 +432,11 @@ def draw_clusters(img: [torch.tensor, np.array], joints, joint_classes, joint_co
 
 def pred_to_person(joint_det, joint_scores, edge_index, pred, class_pred, cc_method):
     test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
-    sol = cluster_graph(test_graph, cc_method, complete=False)
-    sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
+    if cc_method != "threshold":
+        sol = cluster_graph(test_graph, cc_method, complete=False)
+        sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
+    else:
+        sparse_sol = edge_index[:, pred > 0.5]
     persons_pred, mutants, person_labels = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol,
                                                                     class_pred)  # might crash
     return persons_pred, mutants, person_labels
@@ -479,12 +498,11 @@ def graph_cluster_to_persons(joints, edge_scores, joint_connections, class_pred)
             persons.append(keypoints)
         elif len(person_joints) == 1 and False:
 
-
             keypoints = np.zeros([17, 3])
             joint_type = person_joints[:, 2]
             person_score = person_scores[0]
-            if person_score < 0.7:
-                continue
+            # if person_score < 0.7:
+            #     continue
 
             keypoints[joint_type, 2] = person_score
             keypoints[:, :2] = person_joints[0, :2]
@@ -494,7 +512,7 @@ def graph_cluster_to_persons(joints, edge_scores, joint_connections, class_pred)
     persons = np.array(persons)
     return persons, mutant_detected, person_labels
 
-
+"""
 def num_non_detected_points(joint_det, keypoints, threshold, use_gt):
 
     person_idx_gt, joint_idx_gt = keypoints[0, :, :, 2].nonzero(as_tuple=True)
@@ -514,6 +532,33 @@ def num_non_detected_points(joint_det, keypoints, threshold, use_gt):
     cost = np.sum(distance[sol[0], sol[1]])
     num_miss_detections = cost // 100000
     return num_miss_detections, len(person_idx_gt)
+"""
+
+def num_non_detected_points(joint_det, keypoints, factors, min_num_joints=1):
+    num_joints_det = len(joint_det)
+    person_idx_gt, joint_idx_gt = keypoints[:, :, 2].nonzero(as_tuple=True)
+    num_joints_gt = len(person_idx_gt)
+    num_persons = len(set(list(person_idx_gt.cpu().numpy())))
+
+    distance = (keypoints[person_idx_gt, joint_idx_gt, :2].unsqueeze(1).round().float() - joint_det[:, :2].float()).pow(2).sum(dim=2)
+    factor_per_joint = factors[person_idx_gt, joint_idx_gt]
+    similarity = torch.exp(-distance / factor_per_joint[:, None])
+
+
+    different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
+    similarity[different_type] = 0.0
+    similarity[similarity < 0.1] = 0.0  # 0.1 worked well for threshold + knn graph
+
+    cost_mat = similarity.cpu().numpy()
+    sol = linear_sum_assignment(cost_mat, maximize=True)
+    row, col = sol
+    # remove mappings with cost 0.0
+    valid_match = cost_mat[row, col] != 0.0
+    row = row[valid_match]
+    num_det_persons = len(set(list(person_idx_gt[row].cpu().numpy())))
+    num_missed_detections = (valid_match == False).sum()
+
+    return num_missed_detections, num_joints_gt, num_det_persons, num_persons
 
 
 def adjust(ans, det):

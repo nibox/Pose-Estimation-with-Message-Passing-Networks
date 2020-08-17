@@ -67,7 +67,7 @@ def main():
             print(f"Num active edges: {(pred==1).sum()}")
 
             joint_det = joint_det.cpu().numpy().squeeze()
-            joint_classes = class_preds.cpu().numpy()
+            joint_classes = class_preds.cpu().numpy() if class_preds is not None else None
             preds_nodes = preds_nodes.cpu().numpy()
             clean_joint_det = joint_det[preds_nodes == 1]
             keypoints = keypoints.cpu().numpy().squeeze()
@@ -76,7 +76,7 @@ def main():
             img = np.array(transforms_inv(img.cpu().squeeze()))
 
             draw_detection(img.copy(), joint_det, np.copy(keypoints),
-                           fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_det.png",
+                           fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_squashed_maps.png",
                            output_size=256)
             """
             draw_detection_scoremap(heatmaps, joint_det[preds_nodes==1.0], keypoints, 0,
@@ -98,6 +98,9 @@ def main():
                                     fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_hip.png",
                                     output_size=256)
             # """
+            draw_detection_scoremap(heatmaps, joint_det[preds_nodes==1.0], keypoints, None,
+                                    fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_nose.png",
+                                    output_size=256)
             # """
             draw_detection(img.copy(), clean_joint_det, np.copy(keypoints),
                            fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_clean.png",
