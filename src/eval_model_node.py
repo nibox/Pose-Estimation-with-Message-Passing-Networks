@@ -91,7 +91,11 @@ def main():
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
-            scoremaps, preds_edges, preds_nodes, preds_classes, joint_det, joint_scores, edge_index, edge_labels, node_labels, class_labels,  _, node_mask, _ = model(img, keypoints, masks, factors, with_logits=True)
+            # scoremaps, preds_edges, preds_nodes, preds_classes, joint_det, joint_scores, edge_index, edge_labels, node_labels, class_labels,  _, node_mask, _ = model(img, keypoints, masks, factors, with_logits=True)
+            scoremaps, output = model(img, keypoints, masks, factors, with_logits=True)
+            preds_nodes, preds_edges, preds_classes = output["preds"]["node"], output["preds"]["edge"], output["preds"]["class"]
+            node_labels, edge_labels, class_labels = output["labels"]["node"], output["labels"]["edge"], output["labels"]["class"]
+            joint_det, edge_index = output["graph"]["nodes"], output["graph"]["edge_index"]
 
             preds_edges = preds_edges[-1].sigmoid().squeeze() if preds_edges[-1] is not None else None
             preds_classes = preds_classes[-1].softmax(dim=1) if preds_classes is not None else None

@@ -85,7 +85,13 @@ class PoseEstimationBaseline(nn.Module):
             if class_pred is not None:
                 class_pred[-1] = torch.softmax(class_pred[-1], dim=1)
 
-        return scoremaps, edge_pred, node_pred, class_pred, joint_det, joint_scores, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node, bb_output[0]
+        output = {}
+        output["labels"] = {"edge": edge_labels, "node": node_labels, "class": class_labels}
+        output["masks"] = {"edge": label_mask, "node": label_mask_node}
+        output["preds"] = {"edge": edge_pred, "node": node_pred, "class": class_pred, "heatmap": bb_output[0]}
+        output["graph"] = {"nodes": joint_det, "detector_scores": joint_scores, "edge_index": edge_index}
+
+        return scoremaps, output
 
     def freeze_backbone(self, mode):
         if mode == "complete":

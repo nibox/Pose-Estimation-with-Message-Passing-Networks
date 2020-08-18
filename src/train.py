@@ -63,86 +63,57 @@ def create_train_validation_split(config):
     else:
         raise NotImplementedError
 
+def mask_node_connections(preds_nodes, edge_index, th, node_labels=None):
+    true_positive_idx = preds_nodes > th
+    if node_labels is not None:
+        true_positive_idx[node_labels == 1.0] = True
+    mask = subgraph_mask(true_positive_idx, edge_index)
+    return mask
+
+
 def make_train_func(model, optimizer, loss_func, **kwargs):
     def func(batch):
-        if kwargs["end_to_end"]:
-            optimizer.zero_grad()
-            # split batch
-            imgs, heatmaps, masks, keypoints, factors = batch
-            imgs = imgs.to(kwargs["device"])
-            masks = to_device(kwargs["device"], masks)
-            keypoints = keypoints.to(kwargs["device"])
-            factors = factors.to(kwargs["device"])
-            heatmaps = to_device(kwargs["device"], heatmaps)
+        optimizer.zero_grad()
+        # split batch
+        imgs, heatmaps, masks, keypoints, factors = batch
+        imgs = imgs.to(kwargs["device"])
+        masks = to_device(kwargs["device"], masks)
+        keypoints = keypoints.to(kwargs["device"])
+        factors = factors.to(kwargs["device"])
+        heatmaps = to_device(kwargs["device"], heatmaps)
 
-            _, preds, preds_nodes, preds_classes, joint_det, _, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node, bb_output = model(imgs, keypoints, masks[-1], factors)
+        # _, preds, preds_nodes, preds_classes, joint_det, _, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node, bb_output = model(imgs, keypoints, masks[-1], factors)
+        _, output = model(imgs, keypoints, masks[-1], factors)
+        output["masks"]["heatmap"] = masks
+        output["labels"]["heatmap"] = heatmaps
 
-            label_mask = label_mask if kwargs["use_label_mask"] else None
+        if isinstance(loss_func, (MultiLossFactory, MPNLossFactory)):
+            loss, _ = loss_func(output["preds"], output["labels"], output["masks"])
+        elif isinstance(loss_func, (ClassMultiLossFactory, ClassMPNLossFactory)):
+            edge_masks = []
+            edge_labels = []
+            # first the graph reduction
+            for i in range(len(output["preds"]["node"])):
+                mask = mask_node_connections(output["preds"]["node"][i].sigmoid(), output["graph"]["edge_index"],
+                                             kwargs["config"].MODEL.MPN.NODE_THRESHOLD, output["labels"]["node"])
+                edge_labels.append(output["labels"]["edge"])
+                edge_masks.append(output["masks"]["edge"] * mask.float())
+            output["labels"]["edge"] = edge_labels
+            output["masks"]["edge"] = edge_masks
 
-            if isinstance(loss_func, MultiLossFactory):
-                loss, _ = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
-            elif isinstance(loss_func, ClassMultiLossFactory):
-                loss_masks = []
-                loss_edge_labels = []
-                # first the graph reduction
-                mask = None
-                for i in range(len(preds_nodes)):
-                    true_positive_idx = preds_nodes[i].sigmoid() > kwargs["config"].MODEL.MPN.NODE_THRESHOLD
-                    true_positive_idx[node_labels == 1.0] = True
-                    mask = subgraph_mask(true_positive_idx, edge_index)
-                    loss_edge_labels.append(edge_labels)
-                    loss_masks.append(label_mask * mask.float())
-
-                loss, _ = loss_func(bb_output, preds_nodes, preds, preds_classes, heatmaps, node_labels, loss_edge_labels, class_labels, masks,
-                                 loss_masks, label_mask_node)
-                label_mask = label_mask * mask.float()
-            else:
-                raise NotImplementedError
-
-            loss.backward()
-            optimizer.step()
+            loss, _ = loss_func(output["preds"], output["labels"], output["masks"])
         else:
-            optimizer.zero_grad()
-            # split batch
-            imgs, _, masks, keypoints, factors = batch
-            imgs = imgs.to(kwargs["device"])
-            masks = masks[-1].to(kwargs["device"])
-            keypoints = keypoints.to(kwargs["device"])
-            factors = factors.to(kwargs["device"])
-            _, preds, preds_nodes, preds_classes, joint_det, _, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node, bb_output = model(imgs, keypoints, masks, factors)
+            raise NotImplementedError
 
-            label_mask = label_mask.detach() if kwargs["use_label_mask"] else None
+        loss.backward()
+        optimizer.step()
 
-            if isinstance(loss_func, MPNLossFactory):
-                loss, _ = loss_func(preds, edge_labels, label_mask=label_mask)
-            elif isinstance(loss_func, ClassMPNLossFactory):
-                # adapt labels and mask to reduced graph
-                # """
-                loss_masks = []
-                loss_edge_labels = []
-                for i in range(len(preds_nodes)):
-                    true_positive_idx = preds_nodes[i].sigmoid() > kwargs["config"].MODEL.MPN.NODE_THRESHOLD
-                    true_positive_idx[node_labels == 1.0] = True
-                    mask = subgraph_mask(true_positive_idx, edge_index)
-                    loss_edge_labels.append(edge_labels)
-                    loss_masks.append(label_mask * mask.float())
-
-                loss, _ = loss_func(preds, preds_nodes, preds_classes, loss_edge_labels, node_labels, class_labels, loss_masks, label_mask_node)
-                label_mask = label_mask * mask.float()
-            else:
-                raise NotImplementedError
-            loss.backward()
-            optimizer.step()
         loss = loss.item()
-        preds_edges = preds[-1].detach()
-        preds_nodes = None if preds_nodes is None else preds_nodes[-1].detach()
-        preds_classes = None if preds_classes is None else preds_classes[-1].detach()
-        edge_labels = edge_labels.detach()
-        node_labels = None if preds_nodes is None else node_labels.detach()
-        edge_label_mask = label_mask.detach()
-        node_label_mask = label_mask_node.detach()
+        preds = output["preds"]
+        labels = output["labels"]
+        masks = output["masks"]
 
-        return loss, preds_nodes, preds_edges, preds_classes, node_labels, edge_labels, class_labels, edge_label_mask, node_label_mask
+        return loss, preds, labels, masks
 
     return func
 
@@ -222,7 +193,10 @@ def main():
         for i, batch in enumerate(train_loader):
             iter = i + (epoch_len * epoch)
 
-            loss, preds_nodes, preds_edges, preds_classes, node_labels, edge_labels, class_labels, edge_label_mask, node_label_mask = update_model(batch)
+            loss, preds, labels, masks = update_model(batch)
+            preds_nodes, preds_edges, preds_classes = preds["node"][-1], preds["edge"][-1], preds["class"][-1]
+            node_labels, edge_labels, class_labels = labels["node"], labels["edge"][-1], labels["class"]
+            node_mask, edge_mask = labels["node"], labels["edge"][-1]
 
             if preds_nodes is not None:
                 result_nodes = preds_nodes.sigmoid().squeeze()
@@ -233,8 +207,8 @@ def main():
             result_edges = preds_edges.sigmoid().squeeze()
             result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
 
-            node_metrics = calc_metrics(result_nodes, node_labels, node_label_mask)
-            edge_metrics = calc_metrics(result_edges, edge_labels, edge_label_mask)
+            node_metrics = calc_metrics(result_nodes, node_labels, node_mask)
+            edge_metrics = calc_metrics(result_edges, edge_labels, edge_mask)
             class_metrics = calc_metrics(result_classes, class_labels, node_labels)
 
             logger.log_vars("Metric/train", iter, **edge_metrics)
@@ -277,63 +251,41 @@ def main():
                 factors = factors.to(device)
                 heatmaps = to_device(device, heatmaps)
 
-                _, preds, preds_nodes, preds_classes, joint_det, _, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node, bb_output = model(imgs, keypoints, masks[-1], factors)
+                _, output = model(imgs, keypoints, masks[-1], factors)
+                output["masks"]["heatmap"] = masks
+                output["labels"]["heatmap"] = heatmaps
 
-                label_mask = label_mask if config.TRAIN.USE_LABEL_MASK else None
-                if config.TRAIN.END_TO_END:
-                    if isinstance(loss_func, MultiLossFactory):
-                        loss, logging = loss_func(bb_output, preds, heatmaps, edge_labels, masks, label_mask)
-                        loss_mask = label_mask
-                    elif isinstance(loss_func, ClassMultiLossFactory):
-                        loss_masks = []
-                        loss_edge_labels = []
-                        for i in range(len(preds_nodes)):
-                            true_positive_idx = preds_nodes[i].sigmoid() > 0.5
-                            mask = subgraph_mask(true_positive_idx, edge_index)
+                preds, labels, masks = output["preds"], output["labels"], output["masks"]
+                if isinstance(loss_func, (MultiLossFactory, MPNLossFactory)):
+                    loss, logging = loss_func(preds, labels, masks)
+                    loss_mask = masks["edge"]
+                elif isinstance(loss_func, (ClassMultiLossFactory, ClassMPNLossFactory)):
+                    loss_mask = masks["edge"].detach()
+                    edge_masks = []
+                    edge_labels = []
+                    # first the graph reduction
+                    for i in range(len(preds["node"])):
+                        mask = mask_node_connections(preds["node"][i].sigmoid(), output["graph"]["edge_index"], 0.5,
+                                                     None)
+                        edge_labels.append(labels["edge"])
+                        edge_masks.append(masks["edge"] * mask.float())
+                    labels["edge"] = edge_labels
+                    masks["edge"] = edge_masks
 
-                            loss_edge_labels.append(edge_labels)
-                            loss_masks.append(label_mask * mask.float())
-
-                        loss, logging = loss_func(bb_output, preds_nodes, preds, preds_classes, heatmaps, node_labels, loss_edge_labels, class_labels, masks, loss_masks, label_mask_node)
-                        #
-                        loss_mask = loss_masks[-1].detach()
-                        default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float,
-                                                   device=edge_index.device) - 1.0
-                        if preds[-1] is not None:
-                            default_pred[mask] = preds[-1][mask].detach()
-                            preds[-1] = default_pred
-                        else:
-                            preds = [default_pred]
-                else:
-                    if isinstance(loss_func, MPNLossFactory):
-
-                        loss, logging = loss_func(preds, edge_labels, label_mask=label_mask)
-                        loss_mask = label_mask
-                    elif isinstance(loss_func, ClassMPNLossFactory):
-                        # adapt labels and mask to reduced graph
-                        # """
-                        loss_masks = []
-                        loss_edge_labels = []
-                        for i in range(len(preds_nodes)):
-                            true_positive_idx = preds_nodes[i].sigmoid() > 0.5
-                            mask = subgraph_mask(true_positive_idx, edge_index)
-                            loss_edge_labels.append(edge_labels)
-                            loss_masks.append(label_mask * mask.float())
-
-                        loss, logging = loss_func(preds, preds_nodes, preds_classes, loss_edge_labels, node_labels, class_labels, loss_masks, label_mask_node)
-                        #
-                        default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float,
-                                                   device=edge_index.device) - 1.0
-                        loss_mask = loss_masks[-1].detach()
-                        if preds[-1] is not None:
-                            default_pred[mask] = preds[-1][mask].detach()
-                            preds[-1] = default_pred
-                        else:
-                            preds = [default_pred]
+                    loss, logging = loss_func(output["preds"], output["labels"], output["masks"])
+                    #
+                    default_pred = torch.zeros(output["graph"]["edge_index"].shape[1], dtype=torch.float,
+                                               device=output["graph"]["edge_index"].device) - 1.0
+                    if preds["edge"][-1] is not None:
+                        default_pred[mask] = preds["edge"][-1][mask].detach()
+                        preds["edge"][-1] = default_pred
                     else:
-                        raise NotImplementedError
+                        preds["edge"] = [default_pred]
+                preds_nodes, preds_edges, preds_classes = preds["node"], preds["edge"], preds["class"]
+                node_labels, edge_labels, class_labels = labels["node"], labels["edge"][-1], labels["class"]
+                node_mask, edge_mask = masks["node"], masks["edge"][-1]
 
-                result_edges = preds[-1].sigmoid().squeeze()
+                result_edges = preds_edges[-1].sigmoid().squeeze()
                 result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
 
                 if preds_nodes is not None:
@@ -344,10 +296,10 @@ def main():
                     node_labels = None
                 result_classes = preds_classes[-1].argmax(dim=1).squeeze() if preds_classes is not None else None
 
-                node_metrics = calc_metrics(result_nodes, node_labels, label_mask_node)
+                node_metrics = calc_metrics(result_nodes, node_labels, node_mask)
                 class_metrics = calc_metrics(result_classes, class_labels, node_labels)
-                edge_metrics_complete = calc_metrics(result_edges, edge_labels, label_mask)
-                edge_metrics_masked = calc_metrics(result_edges, edge_labels, loss_mask)
+                edge_metrics_complete = calc_metrics(result_edges, edge_labels, loss_mask)
+                edge_metrics_masked = calc_metrics(result_edges, edge_labels, edge_mask)
 
                 valid_loss.append(loss.item())
                 if "heatmap" in logging:

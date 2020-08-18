@@ -51,22 +51,25 @@ class MultiLossFactory(nn.Module):
         # removed ae loss
 
 
-    def forward(self, outputs_det, outputs_class, heatmaps, edge_labels, masks, label_mask):
+    def forward(self, outputs, labels, masks):
+
+        preds_heatmaps, heatmap_labels, heatmap_masks = outputs["heatmap"], labels["heatmap"], masks["heatmap"]
+        preds_edges, edge_labels, edge_masks = outputs["edge"], labels["edge"], masks["edge"]
 
         heatmap_loss = 0.0
-        for idx in range(len(outputs_det)):
+        for idx in range(len(preds_heatmaps)):
             if self.heatmaps_loss[idx]:
-                heatmaps_pred = outputs_det[idx][:, :self.num_joints]
+                heatmaps_pred = preds_heatmaps[idx][:, :self.num_joints]
 
                 heatmaps_loss = self.heatmaps_loss[idx](
-                    heatmaps_pred, heatmaps[idx], masks[idx]
+                    heatmaps_pred, heatmap_labels[idx], masks[idx]
                 )
                 heatmaps_loss = heatmaps_loss * self.heatmaps_loss_factor[idx]
                 heatmap_loss += heatmaps_loss.mean()  # average over batch
 
         edge_class_loss = 0.0
-        for i in range(len(outputs_class)):
-            edge_class_loss += self.classification_loss(outputs_class[i], edge_labels, "mean", label_mask)
+        for i in range(len(preds_edges)):
+            edge_class_loss += self.classification_loss(preds_edges[i], edge_labels, "mean", edge_masks)
 
         logging = {"heatmap": heatmap_loss.cpu().item(),
                    "edge": edge_class_loss.cpu().item()}
@@ -106,38 +109,43 @@ class ClassMultiLossFactory(nn.Module):
         # removed ae loss
 
 
-    def forward(self, outputs_det, outputs_nodes, outputs_edges, outputs_classes, heatmaps, node_labels, edge_labels, class_labels, map_masks, edge_label_mask, node_label_mask):
+    def forward(self, outputs, labels, masks):
+
+        preds_heatmaps, heatmap_labels, heatmap_masks = outputs["heatmap"], labels["heatmap"], masks["heatmap"]
+        preds_edges, edge_labels, edge_masks = outputs["edge"], labels["edge"], masks["edge"]
+        preds_nodes, node_labels, node_masks = outputs["node"], labels["node"], masks["node"]
+        preds_classes, class_labels, class_masks = outputs["class"], labels["class"], labels["node"]  # classes use
 
         heatmap_loss = 0.0
-        for idx in range(len(outputs_det)):
+        for idx in range(len(preds_heatmaps)):
             if self.heatmaps_loss[idx]:
-                heatmaps_pred = outputs_det[idx][:, :self.num_joints]
+                heatmaps_pred = preds_heatmaps[idx][:, :self.num_joints]
 
                 heatmaps_loss = self.heatmaps_loss[idx](
-                    heatmaps_pred, heatmaps[idx], map_masks[idx]
+                    heatmaps_pred, heatmap_labels[idx], heatmap_masks[idx]
                 )
                 heatmaps_loss = heatmaps_loss * self.heatmaps_loss_factor[idx]
                 heatmap_loss += heatmaps_loss.mean()  # average over batch
 
         node_loss = 0.0
-        for i in range(len(outputs_nodes)):
-            node_loss += self.node_loss(outputs_nodes[i], node_labels, "mean", node_label_mask)
-        node_loss = node_loss / len(outputs_nodes)
+        for i in range(len(preds_nodes)):
+            node_loss += self.node_loss(preds_nodes[i], node_labels, "mean", node_masks)
+        node_loss = node_loss / len(preds_nodes)
 
         edge_loss = 0.0
-        for i in range(len(outputs_edges)):
-            if outputs_edges[i] is None:
+        for i in range(len(preds_edges)):
+            if preds_edges[i] is None:
                 continue
-            edge_loss += self.edge_loss(outputs_edges[i], edge_labels[i], "mean", edge_label_mask[i])
-        edge_loss = edge_loss / len(outputs_edges)
+            edge_loss += self.edge_loss(preds_edges[i], edge_labels[i], "mean", edge_masks[i])
+        edge_loss = edge_loss / len(preds_edges)
         if torch.isnan(edge_loss):
             edge_loss = 0.0
 
         class_loss = 0.0
-        if outputs_classes is not None:
-            for i in range(len(outputs_classes)):
-                class_loss += self.class_loss(outputs_classes[i], class_labels, "mean", node_labels)
-            class_loss = class_loss / len(outputs_classes)
+        if preds_classes is not None:
+            for i in range(len(preds_classes)):
+                class_loss += self.class_loss(preds_classes[i], class_labels, "mean", node_labels)
+            class_loss = class_loss / len(preds_classes)
 
         logging = {"heatmap": heatmap_loss.cpu().item(),
                    "edge": edge_loss.cpu().item() if isinstance(edge_loss, torch.Tensor) else edge_loss,
@@ -160,14 +168,16 @@ class MPNLossFactory(nn.Module):
         else:
             raise NotImplementedError
 
-    def forward(self, outputs_class, edge_labels, label_mask):
+    def forward(self, outputs, labels, masks):
 
-
+        preds_edges = outputs["edge"]
+        edge_labels = labels["edge"]
+        masks = masks["edge"]
 
         loss = 0.0
-        for i in range(len(outputs_class)):
-            loss += self.classification_loss(outputs_class[i], edge_labels, "mean", label_mask)
-        loss = loss / len(outputs_class)
+        for i in range(len(preds_edges)):
+            loss += self.classification_loss(preds_edges[i], edge_labels, "mean", masks)
+        loss = loss / len(preds_edges)
 
         return loss, {}
 
@@ -193,28 +203,33 @@ class ClassMPNLossFactory(nn.Module):
 
         self.class_loss = CrossEntropyLossWithLogits()
 
-    def forward(self, outputs_edges, outputs_nodes, outputs_class, edge_labels, node_labels, class_labels, label_mask, label_mask_node):
+    def forward(self, outputs, labels, masks):
+
+        preds_edges, edge_labels, edge_masks = outputs["edge"], labels["edge"], masks["edge"]
+        print(edge_labels)
+        preds_nodes, node_labels, node_masks = outputs["node"], labels["node"], masks["node"]
+        preds_classes, class_labels, class_masks = outputs["class"], labels["class"], labels["node"]  # classes use
 
         node_loss = 0.0
-        for i in range(len(outputs_nodes)):
-            node_loss += self.node_loss(outputs_nodes[i], node_labels, "mean", label_mask_node)
-        node_loss = node_loss / len(outputs_nodes)
+        for i in range(len(preds_nodes)):
+            node_loss += self.node_loss(preds_nodes[i], node_labels, "mean", node_masks)
+        node_loss = node_loss / len(preds_nodes)
 
         edge_loss = 0.0
-        for i in range(len(outputs_edges)):
-            if outputs_edges[i] is None:
+        for i in range(len(preds_edges)):
+            if preds_edges[i] is None:
                 continue
-            edge_loss += self.edge_loss(outputs_edges[i], edge_labels[i], "mean", label_mask[i])
-        edge_loss = edge_loss / len(outputs_edges)
+            print(type(edge_labels[i]))
+            edge_loss += self.edge_loss(preds_edges[i], edge_labels[i], "mean", edge_masks[i])
+        edge_loss = edge_loss / len(preds_edges)
         if torch.isnan(edge_loss):
             edge_loss = 0.0
 
         class_loss = 0.0
-        if outputs_class is not None:
-            for i in range(len(outputs_class)):
-                class_loss += self.class_loss(outputs_class[i], class_labels, "mean", node_labels)
-            class_loss = class_loss / len(outputs_class)
-
+        if preds_classes is not None:
+            for i in range(len(preds_classes)):
+                class_loss += self.class_loss(preds_classes[i], class_labels, "mean", node_labels)
+            class_loss = class_loss / len(preds_classes)
 
         logging = {"edge": edge_loss.cpu().item() if isinstance(edge_loss, torch.Tensor) else edge_loss,
                    "node": node_loss.cpu().item(),
