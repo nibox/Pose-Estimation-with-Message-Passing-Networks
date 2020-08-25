@@ -94,7 +94,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             edge_labels = []
             # first the graph reduction
             for i in range(len(output["preds"]["node"])):
-                mask = mask_node_connections(output["preds"]["node"][i].sigmoid(), output["graph"]["edge_index"],
+                mask = mask_node_connections(output["preds"]["node"][i].sigmoid().detach(), output["graph"]["edge_index"],
                                              kwargs["config"].MODEL.MPN.NODE_THRESHOLD, output["labels"]["node"])
                 edge_labels.append(output["labels"]["edge"])
                 edge_masks.append(output["masks"]["edge"] * mask.float())
@@ -196,7 +196,7 @@ def main():
             loss, preds, labels, masks = update_model(batch)
             preds_nodes, preds_edges, preds_classes = preds["node"][-1], preds["edge"][-1], preds["class"][-1]
             node_labels, edge_labels, class_labels = labels["node"], labels["edge"][-1], labels["class"]
-            node_mask, edge_mask = labels["node"], labels["edge"][-1]
+            node_mask, edge_mask = masks["node"], masks["edge"][-1]
 
             if preds_nodes is not None:
                 result_nodes = preds_nodes.sigmoid().squeeze()
@@ -217,20 +217,21 @@ def main():
                 logger.log_vars("Metric/Node/train_class", iter, acc=class_metrics["acc"])
             logger.log_loss(loss, "Loss/train", iter)
 
-            if preds_nodes is not None:
-                print(f"Iter: {iter}, loss:{loss:6f}, "
-                      f"Edge_Prec : {edge_metrics['prec']:5f} "
-                      f"Edge_Rec: {edge_metrics['rec']:5f} "
-                      f"Edge_Acc: {edge_metrics['acc']:5f} "
-                      f"Node_Prec: {node_metrics['prec']:5f} "
-                      f"Node_Rec: {node_metrics['rec']:5f} "
-                      )
-            else:
-                print(f"Iter: {iter}, loss:{loss:6f}, "
-                      f"Edge_Prec : {edge_metrics['prec']:5f} "
-                      f"Edge_Rec: {edge_metrics['rec']:5f} "
-                      f"Edge_Acc: {edge_metrics['acc']:5f} "
-                      )
+
+            s = f"Iter: {iter}, loss:{loss:6f}, "
+            if edge_metrics is not None:
+                s += f"Edge_Prec : {edge_metrics['prec']:5f} " \
+                     f"Edge_Rec: {edge_metrics['rec']:5f} " \
+                     f"Edge_Acc: {edge_metrics['acc']:5f} "
+            if node_metrics is not None:
+                s += f"Node_Prec: {node_metrics['prec']:5f} " \
+                     f"Node_Rec: {node_metrics['rec']:5f} "
+            if class_metrics is not None:
+                s += f"Class Acc: {class_metrics['acc']:5f} "
+            if "reg" in logging.keys():
+                s += f"Reg: {logging['reg']}"
+            print(s)
+
         model.eval()
 
         print("#### BEGIN VALIDATION ####")
