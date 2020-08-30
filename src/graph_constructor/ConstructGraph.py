@@ -3,13 +3,14 @@ import torch_geometric
 import torch_geometric.utils as gutils
 from scipy.optimize import linear_sum_assignment
 import numpy as np
-from Utils.Utils import non_maximum_suppression
+from Utils.Utils import non_maximum_suppression, subgraph_mask
 
 
 class NaiveGraphConstructor:
 
-    def __init__(self, scoremaps, features, joints_gt, factor_list, masks, device, config):
+    def __init__(self, scoremaps, features, joints_gt, factor_list, masks, device, config, testing, heatmaps):
         self.scoremaps = scoremaps.to(device)
+        self.heatmaps = heatmaps[1].to(device).float() if heatmaps is not None else None
         self.features = features.to(device)
         self.joints_gt = joints_gt.to(device) if joints_gt is not None else None
         self.factor_list = factor_list
@@ -31,6 +32,10 @@ class NaiveGraphConstructor:
         self.use_gt_for_end2end = config.GT_FOR_END2END
         self.edge_features_to_use = config.EDGE_FEATURES_TO_USE
 
+        self.node_dropout = config.NODE_DROPOUT if config.NODE_DROPOUT != 0.0 else None
+        self.use_weighted_class_loss = config.WEIGHT_CLASS_LOSS
+        self.testing = testing
+
         self.node_matching_radius = config.NODE_MATCHING_RADIUS
         self.node_inclusion_radius = config.NODE_INCLUSION_RADIUS
 
@@ -40,8 +45,10 @@ class NaiveGraphConstructor:
         joint_score_list = []
         node_label_list = []
         node_class_list = []
+        node_persons_list = []
         label_mask_list = []
         label_mask_node_list = []
+        class_mask_list = []
         batch_index = []
         num_node_list = [0]
         for batch in range(self.batch_size):
@@ -105,9 +112,11 @@ class NaiveGraphConstructor:
             edge_labels = None
             node_labels = None
             node_classes = None
+            node_persons = None
             # label_mask_node = torch.ones(joint_det.shape[0], dtype=torch.float, device=self.device)
             label_mask_node = None
             label_mask = None
+            class_mask = None
             if self.use_gt:
                 if self.edge_label_method == 1:
                     edge_labels = self._construct_edge_labels_1(joint_det, self.joints_gt[batch], edge_index)
@@ -128,13 +137,43 @@ class NaiveGraphConstructor:
                 elif self.edge_label_method == 5:
                     edge_labels, node_labels, label_mask, label_mask_node = self._construct_edge_labels_5(joint_det.detach(), self.joints_gt[batch], self.factor_list[batch], edge_index.detach())
                 elif self.edge_label_method == 6:
-                    edge_labels, node_labels, node_classes, label_mask = self._construct_edge_labels_6(joint_det.detach(), self.joints_gt[batch], self.factor_list[batch], edge_index.detach())
+                    edge_labels, node_labels, node_classes, node_persons, label_mask = self._construct_edge_labels_6(joint_det.detach(), self.joints_gt[batch], self.factor_list[batch], edge_index.detach())
 
                 if edge_labels.max() == 0:
                     label_mask = torch.zeros_like(label_mask, device=self.device, dtype=torch.float)
 
                 if self.edge_label_method != 5:
+                    # masks should only be used for edge_label_method == 6
                     assert label_mask_node.sum() == label_mask_node.shape[0]
+                # node dropout
+                if self.node_dropout is not None and not self.testing:
+                    node_mask = torch.ones_like(node_labels, dtype=torch.float, device=self.device) * self.node_dropout
+                    rnd = torch.bernoulli(node_mask)
+                    node_mask = (rnd * node_labels) == 0.0  # if zero then keep
+                    mask = subgraph_mask(node_mask, edge_index)
+                    edge_index, _ = gutils.subgraph(node_mask, edge_index, relabel_nodes=True)
+                    joint_det = joint_det[node_mask]
+                    x = x[node_mask]
+                    node_labels = node_labels[node_mask] if node_labels is not None else None
+                    label_mask_node = label_mask_node[node_mask]
+                    node_classes = node_classes[node_mask] if node_classes is not None else None
+                    node_persons = node_persons[node_mask] if node_persons is not None else None
+                    joint_scores = joint_scores[node_mask]
+
+                    edge_attr = edge_attr[mask]
+                    edge_labels = edge_labels[mask]
+                    label_mask = label_mask[mask]
+
+                # create class labels
+                if node_labels is not None and node_classes is not None:
+                    class_mask = node_labels.clone()
+                    if self.use_weighted_class_loss:
+                        weights = self.heatmaps[batch, node_classes, joint_det[:, 1], joint_det[:, 2]]
+
+                        weights = torch.where(weights < 0.1, torch.ones_like(weights, device=weights.device) * 0.1,
+                                              weights)
+                        class_mask = weights * class_mask
+
             # old label code
             # node_labels_2 = torch.zeros(joint_det.shape[0], device=joint_det.device, dtype=torch.float32)
             # node_labels_2[edge_index[0][edge_labels == 1]] = 1.0
@@ -171,8 +210,10 @@ class NaiveGraphConstructor:
             joint_score_list.append(joint_scores)
             node_label_list.append(node_labels)
             node_class_list.append(node_classes)
+            node_persons_list.append(node_persons)
             label_mask_list.append(label_mask)
             label_mask_node_list.append(label_mask_node)
+            class_mask_list.append(class_mask)
         # update edge_indices for batching
         for i in range(1, len(x_list)):
             edge_index_list[i] += num_node_list[i]
@@ -189,12 +230,36 @@ class NaiveGraphConstructor:
             node_label_list = torch.cat(node_label_list, 0)
             label_mask_list = torch.cat(label_mask_list, 0)
             label_mask_node_list = torch.cat(label_mask_node_list, 0)
+            class_mask_list = torch.cat(class_mask_list, 0) if self.edge_label_method == 6 else None
             node_class_list = torch.cat(node_class_list, 0) if self.edge_label_method == 6 else None
-        else:
-            edge_labels_list, node_label_list, label_mask_list, label_mask_node_list = None, None, None, None
-            node_class_list = None
+            # recompute the person idx
+            if self.edge_label_method == 6:
+                total_persons = node_persons_list[0].max() + 1
+                keypoint_positions = [self.joints_gt[0, :total_persons]]
+                for i in range(1, len(node_persons_list)):
+                    num_persons = node_persons_list[i].max() + 1
+                    keypoint_positions.append(self.joints_gt[i, :num_persons])
+                    node_persons_list[i][node_persons_list[i] != -1] += total_persons
+                    total_persons += num_persons
+                node_persons_list = torch.cat(node_persons_list, 0)
+                keypoint_positions = torch.cat(keypoint_positions, dim=0)
 
-        return x_list, edge_attr_list, edge_index_list, edge_labels_list, node_label_list, node_class_list, joint_det_list, label_mask_list, label_mask_node_list, joint_score_list, batch_index
+                """
+                keypoint_positions_2 = self.joints_gt.clone().reshape(-1, 17, 3)
+                zero_rows = keypoint_positions_2[:, :, 2].sum(dim=1) == 0.0
+                keypoint_positions_2 = keypoint_positions_2[torch.logical_not(zero_rows)]
+                # """
+
+            else:
+                node_persons_list = None
+                keypoint_positions = None
+
+        else:
+            edge_labels_list, node_label_list, label_mask_list, label_mask_node_list, class_mask_list = None, None, None, None, None
+            node_class_list = None
+            keypoint_positions = None
+
+        return x_list, edge_attr_list, edge_index_list, edge_labels_list, node_label_list, node_class_list, keypoint_positions, joint_det_list, label_mask_list, label_mask_node_list, class_mask_list, joint_score_list, batch_index, node_persons_list
 
     def _construct_mpn_graph(self, joint_det, features, graph_type, joint_scores, edge_features_to_use):
         """
@@ -791,7 +856,10 @@ class NaiveGraphConstructor:
 
         node_classes = torch.zeros(num_joints_det, dtype=torch.long, device=self.device)
         node_classes[col_1] = joint_idx_gt_1[row_1]
-        return edge_labels, node_labels, node_classes, label_mask
+
+        node_persons = torch.zeros(num_joints_det, dtype=torch.long, device=self.device) - 1
+        node_persons[col_1] = person_idx_gt_1[row_1].long()
+        return edge_labels, node_labels, node_classes, node_persons, label_mask
 
     @staticmethod
     def match_cc(a_to_clusters, nodes_b, edges_b, edges_a_to_b):

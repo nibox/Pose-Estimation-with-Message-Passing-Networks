@@ -136,12 +136,22 @@ class CocoKeypoints(Dataset):
             for scale_idx in range(self.num_scales):
                 heatmap = self.heatmap_generator[scale_idx](keypoint_list[scale_idx], scales)
                 keypoint_list[scale_idx] = _filter_visible(keypoint_list[scale_idx], mask[scale_idx].shape)
+                # keypoint_list[scale_idx] = remove_empty_rows(keypoint_list[scale_idx])
 
                 heatmaps.append(heatmap.astype(np.float32))
                 mask_list[scale_idx] = mask_list[scale_idx].astype(np.float32)
-                keypoint_list[scale_idx] = pack_for_batch(keypoint_list[scale_idx].astype(np.float32), 30)
+                # keypoint_list[scale_idx] = pack_for_batch(keypoint_list[scale_idx].astype(np.float32), 30)
 
-        factors = pack_for_batch(factors, 30)
+        kpts = keypoint_list[-1]
+        if len(kpts) != 0:
+            empty_row = kpts[:, :, 2].sum(axis=1) == 0.0
+            rows_to_keep = np.logical_not(empty_row)
+            keypoint_list[-1] = pack_for_batch(kpts[rows_to_keep].astype(np.float32), 30)
+            factors = pack_for_batch(factors[rows_to_keep],
+                                     30)  # assuming the visible keypoints are the same for all scales
+        else:
+            keypoint_list[-1] = pack_for_batch(kpts, 30)
+            factors = pack_for_batch(factors, 30)  # assuming the visible keypoints are the same for all scales
 
         return img, heatmaps, mask, keypoint_list[-1], factors
 
