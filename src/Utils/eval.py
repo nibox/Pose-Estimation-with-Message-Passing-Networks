@@ -3,10 +3,13 @@ import numpy as np
 
 class EvalWriter(object):
 
-    def __init__(self, config):
+    def __init__(self, config, fname=None):
         th = int(config.MODEL.MPN.NODE_THRESHOLD * 100)
         self.dir = config.LOG_DIR
-        self.f = open(config.LOG_DIR + f"/eval_{th:g}.txt", "w")
+        if fname is None:
+            self.f = open(config.LOG_DIR + f"/eval_{th:g}.txt", "w")
+        else:
+            self.f = open(config.LOG_DIR + "/" + f"{fname}", "w")
     def eval_coco(self, coco, anns, ids, description, dt_file_name="dt.json"):
         print(description)
         stats = coco_eval(coco, anns, ids, tmp_dir=self.dir, dt_file_name=dt_file_name)

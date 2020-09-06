@@ -94,6 +94,7 @@ class RandomHorizontalFlip(object):
                 mask[i] = mask[i][:, ::-1] - np.zeros_like(mask[i])
                 joints[i] = joints[i][:, self.flip_index]
                 joints[i][:, :, 0] = _output_size - joints[i][:, :, 0] - 1
+                factors[i] = factors[i][self.flip_index]
 
         return image, mask, joints, factors
 

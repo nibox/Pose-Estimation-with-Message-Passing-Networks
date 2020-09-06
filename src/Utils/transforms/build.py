@@ -101,6 +101,30 @@ def transforms_hr_eval(config):
 
     return transforms, transforms_inv
 
+def transforms_to_tensor(config):
+
+    transforms = T.Compose(
+        [
+            T.ToTensor(),
+        ]
+    )
+
+    transforms_inv = torchvision.transforms.Compose([torchvision.transforms.ToPILImage()])
+    return transforms, transforms_inv
+
+def transforms_minimal(config):
+
+    transforms = T.Compose(
+        [
+            T.ToTensor(),
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ]
+    )
+
+    transforms_inv = torchvision.transforms.Compose([T.NormalizeInverse(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+                                                     torchvision.transforms.ToPILImage()])
+
+    return transforms, transforms_inv
 
 def transforms_ochuman(config):
 

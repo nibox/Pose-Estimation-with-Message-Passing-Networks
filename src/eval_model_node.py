@@ -21,11 +21,13 @@ def main():
     ######################################
 
     config_dir = "class_agnostic_end2end"
+    # config_dir = "node_classification_from_scratch"
+    # config_dir = "regression_mini"
     # config_dir = "train"
-    config_name = "model_57_1_00"
+    config_name = "model_57_1_0"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
-    eval_writer = EvalWriter(config)
+    eval_writer = EvalWriter(config, fname="eval_10_mini_fully_connection")
 
     if config.TEST.SPLIT == "mini":
         train_ids, valid_ids = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))
@@ -58,6 +60,7 @@ def main():
     model.load_state_dict(state_dict["model_state_dict"])
     model.to(device)
     model.eval()
+    model.test(True)
 
     # baseline : predicting full connections
     # baseline: upper bound

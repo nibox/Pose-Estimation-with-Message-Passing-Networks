@@ -46,28 +46,32 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
         keypoints = keypoints.to(kwargs["device"])
         factors = factors.to(kwargs["device"])
 
-        scoremaps, preds_edges, preds_nodes, preds_classes, joint_det, _, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node = model(imgs, keypoints, masks, factors)
+        # scoremaps, preds_edges, preds_nodes, preds_classes, joint_det, _, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node = model(imgs, keypoints, masks, factors)
 
-        label_mask = label_mask if kwargs["use_label_mask"] else None
+        _, output = model(imgs, keypoints, masks[-1], factors)
 
-        if isinstance(loss_func, MultiLossFactory):
-            loss, _ = loss_func(preds_edges, edge_labels, label_mask=label_mask)
+
+        if isinstance(loss_func, (MultiLossFactory, MPNLossFactory)):
+            loss, _ = loss_func(output["preds"], output["labels"], output["masks"])
         elif isinstance(loss_func, ClassMPNLossFactory):
             # adapt labels and mask to reduced graph
             loss_masks = []
             loss_edge_labels = []
-            for i in range(len(preds_nodes)):
-                true_positive_idx = preds_nodes[i].sigmoid() > kwargs["config"].MODEL.MPN.NODE_THRESHOLD
-                true_positive_idx[node_labels == 1.0] = True
-                mask = subgraph_mask(true_positive_idx, edge_index)
-                loss_edge_labels.append(edge_labels)
-                loss_masks.append(label_mask * mask.float())
+            for i in range(len(output["preds"]["node"])):
+                true_positive_idx = output["preds"]["node"][i].sigmoid() > 1.0
+                true_positive_idx[output["labels"]["node"]== 1.0] = True
+                mask = subgraph_mask(true_positive_idx, output["graph"]["edge_index"])
+                loss_edge_labels.append(output["labels"]["edge"])
+                loss_masks.append(output["masks"]["edge"] * mask.float())
 
-            loss, _ = loss_func(preds_edges, preds_nodes, preds_classes, loss_edge_labels, node_labels, class_labels, loss_masks, label_mask_node)
+            output["labels"]["edge"] = loss_edge_labels
+            output["masks"]["edge"] = loss_masks
+            loss, logging = loss_func(output["preds"], output["labels"], output["masks"])
 
             #
-            default_pred = torch.zeros(edge_index.shape[1], dtype=torch.float, device=edge_index.device) - 1.0
-            default_pred[mask] = preds_edges[-1][mask].detach()
+            default_pred = torch.zeros(output["graph"]["edge_index"].shape[1],
+                                       dtype=torch.float, device=output["graph"]["edge_index"].device) - 1.0
+            default_pred[mask] = output["preds"]["edge"][-1][mask].detach()
 
         else:
             raise NotImplementedError
@@ -75,20 +79,15 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
         loss.backward()
         optimizer.step()
 
-        loss = loss.item()
         if isinstance(loss_func, ClassMPNLossFactory):
-            preds_edges = default_pred
-        else:
-            preds_edges = preds_edges[-1].detach()
-        preds_nodes = None if preds_nodes is None else preds_nodes[-1].detach()
-        preds_classes = None if preds_classes is None else preds_classes[-1].detach()
-        edge_labels = edge_labels.detach()
-        node_labels = None if preds_nodes is None else node_labels.detach()
-        class_labels = None if preds_classes is None else class_labels.detach()
-        edge_label_mask = label_mask.detach()
-        node_label_mask = label_mask_node.detach()
+            output["preds"]["edge"] = [default_pred]
 
-        return loss, preds_nodes, preds_edges, preds_classes, node_labels, edge_labels, class_labels, edge_label_mask, node_label_mask
+        loss = loss.item()
+        preds = output["preds"]
+        labels = output["labels"]
+        masks = output["masks"]
+
+        return loss, preds, labels, masks, logging
 
     return func
 
@@ -102,9 +101,10 @@ def main():
     torch.backends.cudnn.benchmark = False
 
     ##########################################################
-    config_name = "model_56"
+    config_dir = "class_agnostic_end2end"
+    config_name = "model_57_1_0_4"
     config = get_config()
-    config = update_config(config, f"../experiments/train/{config_name}.yaml")
+    config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
 
 
     ##########################################################
@@ -137,7 +137,11 @@ def main():
             model.stop_backbone_bn()
     for iter in range(10000):
 
-        loss, preds_nodes, preds_edges, preds_classes, node_labels, edge_labels, class_labels, edge_label_mask, node_label_mask = update_model(batch)
+        loss, preds, labels, masks, logging = update_model(batch)
+
+        preds_nodes, preds_edges, preds_classes = preds["node"][-1], preds["edge"][-1], preds["class"][-1]
+        node_labels, edge_labels, class_labels = labels["node"], labels["edge"][-1], labels["class"]
+        node_mask, edge_mask, class_mask = masks["node"], masks["edge"][-1], masks["class"]
 
         if preds_nodes is not None:
             result_nodes = preds_nodes.sigmoid().squeeze()
@@ -150,28 +154,24 @@ def main():
         result_edges = preds_edges.sigmoid().squeeze()
         result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
 
-        node_metrics = calc_metrics(result_nodes, node_labels, node_label_mask)
-        class_metrics = calc_metrics(result_classes, class_labels, node_labels, 17)
-        edge_metrics = calc_metrics(result_edges, edge_labels, edge_label_mask)
+        node_metrics = calc_metrics(result_nodes, node_labels, node_mask)
+        class_metrics = calc_metrics(result_classes, class_labels, class_mask, 17)
+        edge_metrics = calc_metrics(result_edges, edge_labels, edge_mask)
 
+        s = f"Iter: {iter}, loss:{loss:6f}, "
+        if edge_metrics is not None:
+            s += f"Edge_Prec : {edge_metrics['prec']:5f} " \
+                 f"Edge_Rec: {edge_metrics['rec']:5f} " \
+                 f"Edge_Acc: {edge_metrics['acc']:5f} "
+        if node_metrics is not None:
+                s += f"Node_Prec: {node_metrics['prec']:5f} " \
+                     f"Node_Rec: {node_metrics['rec']:5f} "
+        if preds_classes is not None:
+            s += f"Class Acc: {class_metrics['acc']:5f} "
+        if "reg" in logging.keys():
+            s += f"Reg: {logging['reg']}"
+        print(s)
 
-        if preds_nodes is not None:
-
-            s = f"Iter: {iter}, loss:{loss:6f}, " \
-                  f"Edge_Prec : {edge_metrics['prec']:5f} " \
-                  f"Edge_Rec: {edge_metrics['rec']:5f} " \
-                  f"Edge_Acc: {edge_metrics['acc']:5f} " \
-                  f"Node_Prec: {node_metrics['prec']:5f} " \
-                  f"Node_Rec: {node_metrics['rec']:5f} "
-            if preds_classes is not None:
-                s += f"Class Acc: {class_metrics['acc']:5f}"
-            print(s)
-        else:
-            print(f"Iter: {iter}, loss:{loss:6f}, "
-                  f"Edge_Prec : {edge_metrics['prec']:5f} "
-                  f"Edge_Rec: {edge_metrics['rec']:5f} "
-                  f"Edge_Acc: {edge_metrics['acc']:5f} "
-                  )
 
 if __name__ == "__main__":
     main()

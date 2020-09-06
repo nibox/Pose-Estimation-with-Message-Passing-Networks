@@ -83,7 +83,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
         heatmaps = to_device(kwargs["device"], heatmaps)
 
         # _, preds, preds_nodes, preds_classes, joint_det, _, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node, bb_output = model(imgs, keypoints, masks[-1], factors)
-        _, output = model(imgs, keypoints, masks[-1], factors)
+        _, output = model(imgs, keypoints, masks[-1], factors, heatmaps)
         output["masks"]["heatmap"] = masks
         output["labels"]["heatmap"] = heatmaps
 
@@ -101,7 +101,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             output["labels"]["edge"] = edge_labels
             output["masks"]["edge"] = edge_masks
 
-            loss, _ = loss_func(output["preds"], output["labels"], output["masks"])
+            loss, logging = loss_func(output["preds"], output["labels"], output["masks"])
         else:
             raise NotImplementedError
 
@@ -113,7 +113,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
         labels = output["labels"]
         masks = output["masks"]
 
-        return loss, preds, labels, masks
+        return loss, preds, labels, masks, logging
 
     return func
 
@@ -138,14 +138,24 @@ def main():
     if not config.MODEL.GC.USE_GT:
         assert config.TRAIN.USE_LABEL_MASK  # this ensures that images with no "persons"/clusters do not contribute to the loss
     print("Load model")
-    model = get_pose_model(config, device)
+    if config.MODEL.WITH_LOCATION_REFINE:
+        model = get_pose_with_ref_model(config, device)
+    else:
+        model = get_pose_model(config, device)
     if config.TRAIN.END_TO_END:
         assert config.TRAIN.KP_FREEZE_MODE != "complete"
         model.freeze_backbone(mode=config.TRAIN.KP_FREEZE_MODE)
         model_params = list(model.mpn.parameters()) + list(model.feature_gather.parameters())
-        if config.TRAIN.SPLIT_OPTIMIZER:
+        if config.TRAIN.SPLIT_OPTIMIZER and not config.MODEL.WITH_LOCATION_REFINE:
             optimizer = torch.optim.Adam([{"params": model_params, "lr": config.TRAIN.LR, "weight_decay": config.TRAIN.W_DECAY},
                                           {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR, "weight_decay": config.TRAIN.W_DECAY}])
+        elif config.TRAIN.SPLIT_OPTIMIZER and config.MODEL.WITH_LOCATION_REFINE:
+            reg_param = model.refinement_network.parameters()
+            optimizer = torch.optim.Adam(
+                [{"params": model_params, "lr": config.TRAIN.LR, "weight_decay": config.TRAIN.W_DECAY},
+                 {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR,
+                  "weight_decay": config.TRAIN.W_DECAY},
+                 {"params": reg_param, "lr": config.TRAIN.REG_LR, "weight_decay": config.TRAIN.W_DECAY}])
         else:
             raise NotImplementedError
 
@@ -193,28 +203,31 @@ def main():
         for i, batch in enumerate(train_loader):
             iter = i + (epoch_len * epoch)
 
-            loss, preds, labels, masks = update_model(batch)
-            preds_nodes, preds_edges, preds_classes = preds["node"][-1], preds["edge"][-1], preds["class"][-1]
+            loss, preds, labels, masks, logging = update_model(batch)
+            preds_nodes, preds_edges, preds_classes = preds["node"][-1], preds["edge"][-1], preds["class"]
             node_labels, edge_labels, class_labels = labels["node"], labels["edge"][-1], labels["class"]
-            node_mask, edge_mask = masks["node"], masks["edge"][-1]
+            node_mask, edge_mask, class_mask = masks["node"], masks["edge"][-1], masks["class"]
 
             if preds_nodes is not None:
                 result_nodes = preds_nodes.sigmoid().squeeze()
                 result_nodes = torch.where(result_nodes < 0.5, torch.zeros_like(result_nodes), torch.ones_like(result_nodes))
             else:
                 result_nodes = None
-            result_classes = preds_classes.argmax(dim=1).squeeze() if preds_classes is not None else None
+            result_classes = preds_classes[-1].argmax(dim=1).squeeze() if preds_classes is not None else None
             result_edges = preds_edges.sigmoid().squeeze()
             result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
 
             node_metrics = calc_metrics(result_nodes, node_labels, node_mask)
             edge_metrics = calc_metrics(result_edges, edge_labels, edge_mask)
-            class_metrics = calc_metrics(result_classes, class_labels, node_labels)
+            class_metrics = calc_metrics(result_classes, class_labels, node_labels, 17)
 
-            logger.log_vars("Metric/train", iter, **edge_metrics)
+            logger.log_vars("Metric/train", iter, **(edge_metrics or {}))
             logger.log_vars("Metric/Node/train", iter, **(node_metrics or {}))
+
             if class_metrics is not None:
                 logger.log_vars("Metric/Node/train_class", iter, acc=class_metrics["acc"])
+            if "reg" in logging.keys():
+                logger.log_loss(logging["reg"], "Loss/train_reg", iter)
             logger.log_loss(loss, "Loss/train", iter)
 
 
@@ -240,19 +253,22 @@ def main():
                       "edge": {"acc": [], "prec": [], "rec": [], "f1": []},
                       "edge_masked": {"prec": [], "rec": []}}
         valid_loss = []
+        valid_reg = []
         class_valid_acc = []
         valid_heatmap = []
         with torch.no_grad():
             for batch in valid_loader:
                 # split batch
                 imgs, heatmaps, masks, keypoints, factors = batch
+                if keypoints.sum() == 0.0:
+                    continue
                 imgs = imgs.to(device)
                 masks = to_device(device, masks)
                 keypoints = keypoints.to(device)
                 factors = factors.to(device)
                 heatmaps = to_device(device, heatmaps)
 
-                _, output = model(imgs, keypoints, masks[-1], factors)
+                _, output = model(imgs, keypoints, masks[-1], factors, heatmaps)
                 output["masks"]["heatmap"] = masks
                 output["labels"]["heatmap"] = heatmaps
 
@@ -273,7 +289,7 @@ def main():
                     labels["edge"] = edge_labels
                     masks["edge"] = edge_masks
 
-                    loss, logging = loss_func(output["preds"], output["labels"], output["masks"])
+                    loss, logging = loss_func(preds, labels, masks)
                     #
                     default_pred = torch.zeros(output["graph"]["edge_index"].shape[1], dtype=torch.float,
                                                device=output["graph"]["edge_index"].device) - 1.0
@@ -284,7 +300,7 @@ def main():
                         preds["edge"] = [default_pred]
                 preds_nodes, preds_edges, preds_classes = preds["node"], preds["edge"], preds["class"]
                 node_labels, edge_labels, class_labels = labels["node"], labels["edge"][-1], labels["class"]
-                node_mask, edge_mask = masks["node"], masks["edge"][-1]
+                node_mask, edge_mask, class_mask = masks["node"], masks["edge"][-1], masks["class"]
 
                 result_edges = preds_edges[-1].sigmoid().squeeze()
                 result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
@@ -298,13 +314,15 @@ def main():
                 result_classes = preds_classes[-1].argmax(dim=1).squeeze() if preds_classes is not None else None
 
                 node_metrics = calc_metrics(result_nodes, node_labels, node_mask)
-                class_metrics = calc_metrics(result_classes, class_labels, node_labels)
+                class_metrics = calc_metrics(result_classes, class_labels, node_labels, 17)
                 edge_metrics_complete = calc_metrics(result_edges, edge_labels, loss_mask)
                 edge_metrics_masked = calc_metrics(result_edges, edge_labels, edge_mask)
 
                 valid_loss.append(loss.item())
                 if "heatmap" in logging:
                     valid_heatmap.append(logging["heatmap"])
+                if "reg" in logging:
+                    valid_reg.append(logging["reg"])
                 if edge_metrics_complete is not None:
                     for key in edge_metrics_complete.keys():
                         valid_dict["edge"][key].append(edge_metrics_complete[key])
@@ -326,6 +344,7 @@ def main():
 
         logger.log_loss(np.mean(valid_loss), "Loss/valid", epoch)
         logger.log_loss(np.mean(valid_heatmap), "Loss/valid_heat", epoch)
+        logger.log_loss(np.mean(valid_reg), "Loss/valid_reg", epoch)
         logger.log_vars("Metric/valid", epoch, **valid_dict['edge'])
         logger.log_vars("Metric/valid_masked", epoch, **valid_dict['edge_masked'])
         logger.log_vars("Metric/Node/valid", epoch, **valid_dict['node'])

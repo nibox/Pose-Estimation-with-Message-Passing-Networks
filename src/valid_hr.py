@@ -1,80 +1,36 @@
-import pickle
 import torch
-import torchvision
 import numpy as np
-from torch_geometric.utils import precision, recall, subgraph
 from tqdm import tqdm
 
-from config import get_config, update_config
-from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
-from Utils import pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics, subgraph_mask
+from config import update_config, get_hrnet_config
+from data import CocoKeypoints_hr, HeatmapGenerator
+from Utils import to_tensor
 from Models.PoseEstimation import get_hr_model
 from Utils.transformations import reverse_affine_map
-from Utils.transforms import transforms_hg_eval, transforms_hr_eval
+from Utils.transforms import transforms_hr_eval, transforms_minimal, transforms_to_tensor
 from Utils.hr_utils import HeatmapParser
 
 
 class EvalWriter(object):
 
-    def __init__(self, config):
-        th = int(config.MODEL.MPN.NODE_THRESHOLD * 100)
-        # self.f = open(config.LOG_DIR + f"/eval_{th:g}.txt", "w")
+    def __init__(self, config, fname=None):
+        if fname is None:
+            raise NotImplementedError
+        else:
+            self.f = open(config.LOG_DIR + "/" + fname, "w")
     def eval_coco(self, coco, anns, ids, description):
         print(description)
         stats = coco_eval(coco, anns, ids)
-        # self.f.write(description + "\n")
-        # self.f.write(f"AP       : {stats[0]: 3f} \n")
-        # self.f.write(f"AP    0.5: {stats[1]: 3f} \n")
-        # self.f.write(f"AP   0.75: {stats[2]: 3f} \n")
-        # self.f.write(f"AP medium: {stats[3]: 3f} \n")
-        # self.f.write(f"AP  large: {stats[4]: 3f} \n")
+        self.f.write(description + "\n")
+        self.f.write(f"AP       : {stats[0]: 3f} \n")
+        self.f.write(f"AP    0.5: {stats[1]: 3f} \n")
+        self.f.write(f"AP   0.75: {stats[2]: 3f} \n")
+        self.f.write(f"AP medium: {stats[3]: 3f} \n")
+        self.f.write(f"AP  large: {stats[4]: 3f} \n")
 
-    def eval_metrics(self, eval_dict, descirption):
-        for k in eval_dict.keys():
-            eval_dict[k] = np.mean(eval_dict[k])
-        print(descirption)
-        print(eval_dict)
-        self.f.write(descirption + "\n")
-        self.f.write(str(eval_dict) + "\n")
-    def eval_part_metrics(self, eval_dict, description):
-        part_labels = ['nose','eye_l','eye_r','ear_l','ear_r',
-                       'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
-                       'hip_l','hip_r','kne_l','kne_r','ank_l','ank_r']
-        for i in range(17):
-            for k in eval_dict[i].keys():
-                eval_dict[i][k] = np.mean(eval_dict[i][k])
-        print(description)
-        self.f.write(description + " \n")
-        for i in range(17):
-            string = f"{part_labels[i]} acc: {eval_dict[i]['acc']:3f} prec: {eval_dict[i]['prec']:3f} rec: {eval_dict[i]['rec']:3f} f1: {eval_dict[i]['f1']:3f}"
-            print(string)
-            self.f.write(string + "\n")
     def close(self):
-        # self.f.close()
+        self.f.close()
         pass
-
-
-def specificity(pred, target, num_classes):
-    r"""Computes the recall
-    :math:`\frac{\mathrm{TP}}{\mathrm{TP}+\mathrm{FN}}` of predictions.
-
-    Args:
-        pred (Tensor): The predictions.
-        target (Tensor): The targets.
-        num_classes (int): The number of classes.
-
-    :rtype: :class:`Tensor`
-    """
-    from torch_geometric.utils import true_negative, false_positive
-    tn = true_negative(pred, target, num_classes).to(torch.float)
-    fp = false_positive(pred, target, num_classes).to(torch.float)
-
-    out = tn / (tn + fp)
-    out[torch.isnan(out)] = 0
-
-    return out
-
-
 
 def gen_ann_format(pred, scores, image_id=0):
     """
@@ -129,10 +85,9 @@ def main():
     torch.backends.cudnn.benchmark = False
     ######################################
 
-    config_name = "model_50_2"
-    config = get_config()
-    config = update_config(config, f"../experiments/train/{config_name}.yaml")
-    eval_writer = EvalWriter(config)
+    config = get_hrnet_config()
+    config = update_config(config, f"../experiments/hrnet/w32_512_adam_lr1e-3.yaml")
+    eval_writer = EvalWriter(config, fname="w32_512_adam_lr1e-3.yaml")
 
     parser = HeatmapParser(config)
     heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
@@ -159,7 +114,7 @@ def main():
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
-            outputs, heatmaps, tags = model(img)
+            heatmaps, tags = model(img)
 
             grouped, scores = parser.parse(heatmaps[0], tags[0], adjust=True, refine=True)
 

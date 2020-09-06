@@ -124,6 +124,7 @@ _C.MODEL.MPN.EDGE_STEPS = 0
 # configuration for the Graph Constructor
 _C.MODEL.GC = CN()
 _C.MODEL.GC.NAME = "NaiveGraphConstructor"
+_C.MODEL.GC.POOL_KERNEL_SIZE = 3
 _C.MODEL.GC.CHEAT = False
 _C.MODEL.GC.USE_GT = False
 _C.MODEL.GC.USE_NEIGHBOURS = False
@@ -136,7 +137,6 @@ _C.MODEL.GC.GRAPH_TYPE = "knn"
 _C.MODEL.GC.CC_METHOD = "GAEC"
 _C.MODEL.GC.NORM_NODE_DISTANCE = False
 _C.MODEL.GC.IMAGE_CENTRIC_SAMPLING = False
-_C.MODEL.GC.GT_FOR_END2END = False
 _C.MODEL.GC.NODE_MATCHING_RADIUS = 0.5
 _C.MODEL.GC.NODE_INCLUSION_RADIUS = 0.7
 _C.MODEL.GC.WEIGHT_CLASS_LOSS = False
@@ -146,7 +146,10 @@ _C.MODEL.GC.NODE_DROPOUT = 0.0
 # DATASET and preprocessing related params
 _C.DATASET = CN()
 _C.DATASET.ROOT = '../../storage/user/kistern/coco'
+_C.DATASET.DATASET = 'coco'
+_C.DATASET.WITH_CENTER = False
 _C.DATASET.MAX_NUM_PEOPLE = 30
+_C.DATASET.NUM_JOINTS = 17
 _C.DATASET.SCALING_TYPE = "short"
 _C.DATASET.SIGMA = 2
 _C.DATASET.HEAT_GENERATOR = "default"
@@ -160,6 +163,7 @@ _C.DATASET.INPUT_SIZE = 512
 _C.DATASET.OUTPUT_SIZE = [128, 256]
 _C.DATASET.FLIP = 0.5
 
+
 # parameters for Upper Bound model (to calculate the upper bound of the constructed labels)
 _C.UB = CN()
 _C.UB.KP = "hrnet"
@@ -172,6 +176,14 @@ _C.TEST = CN()
 _C.TEST.SPLIT = "coco_17_mini"
 _C.TEST.NUM_EVAL = 500
 _C.TEST.ADJUST = True
+
+# TEST stuff for hrnet
+_C.TEST.WITH_HEATMAPS = [True, True]
+_C.TEST.WITH_AE = [True, False]
+_C.TEST.SCALE_FACTOR = [0.5, 1.0, 2.0]
+_C.TEST.FLIP_TEST = True
+_C.TEST.FLIP_AND_REARANGE = True
+_C.TEST.PROJECT2IMAGE = True
 
 
 # train
