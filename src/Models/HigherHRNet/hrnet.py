@@ -594,6 +594,7 @@ def hr_process_output(output, mode):
             mode='bilinear',
             align_corners=False
         )
+    tags = scoremap_1[:, 17:]
 
     if mode == "avg":
         scoremaps = (scoremap_2 + scoremap_1[:, :17]) / 2
@@ -604,4 +605,4 @@ def hr_process_output(output, mode):
     else:
         raise NotImplementedError
 
-    return scoremaps, features
+    return scoremaps, features, tags

@@ -593,7 +593,6 @@ class NaiveGraphConstructor:
 
     def _construct_edge_labels_4(self, joint_det, joints_gt, factors, edge_index):
         assert not self.use_gt
-        assert not self.use_gt_for_end2end
         num_joints_det = len(joint_det)
         person_idx_gt, joint_idx_gt = joints_gt[:, :, 2].nonzero(as_tuple=True)
         num_joints_gt = len(person_idx_gt)

@@ -176,6 +176,7 @@ _C.TEST = CN()
 _C.TEST.SPLIT = "coco_17_mini"
 _C.TEST.NUM_EVAL = 500
 _C.TEST.ADJUST = True
+_C.TEST.WITH_REFINE = False
 
 # TEST stuff for hrnet
 _C.TEST.WITH_HEATMAPS = [True, True]

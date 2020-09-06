@@ -66,7 +66,7 @@ class PoseEstimationBaseline(nn.Module):
         if self.gc_config.MASK_CROWDS:
             assert masks is not None
         bb_output = self.backbone(imgs)
-        scoremaps, features = self.process_output(bb_output, self.scoremap_mode)
+        scoremaps, features, tags = self.process_output(bb_output, self.scoremap_mode)
 
         features = self.feature_gather(features)
         scoremaps = scoremaps.detach()
@@ -93,7 +93,7 @@ class PoseEstimationBaseline(nn.Module):
         output["labels"] = {"edge": edge_labels, "node": node_labels, "class": class_labels}
         output["masks"] = {"edge": label_mask, "node": label_mask_node, "class": class_mask}
         output["preds"] = {"edge": edge_pred, "node": node_pred, "class": class_pred, "heatmap": bb_output[0]}
-        output["graph"] = {"nodes": joint_det, "detector_scores": joint_scores, "edge_index": edge_index}
+        output["graph"] = {"nodes": joint_det, "detector_scores": joint_scores, "edge_index": edge_index, "tags": tags}
 
         return scoremaps, output
 
