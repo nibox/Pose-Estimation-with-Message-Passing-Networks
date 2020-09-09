@@ -163,6 +163,7 @@ class PoseEstimationBaseline(nn.Module):
             )
         scoremaps = final_heatmaps / float(len(scales))
         features = final_features / float(len(scales))
+        tags = torch.cat(tags_list, dim=4)
 
         # features = self.feature_gather(features)  # or average after this
 
@@ -235,7 +236,7 @@ def _get_multi_stage_outputs(
         num_heatmaps = 0
         outputs_flip, features_flip = model(torch.flip(image, [3]))
         features_flip = feature_gather(features_flip)
-        features.append(torch.flip(features_flip, [3]))
+        # features.append(torch.flip(features_flip, [3]))
         for i in range(len(outputs_flip)):
             output = outputs_flip[i]
             if len(outputs_flip) > 1 and i != len(outputs_flip) - 1:

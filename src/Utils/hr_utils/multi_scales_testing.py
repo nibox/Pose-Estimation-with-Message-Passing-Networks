@@ -134,8 +134,7 @@ def aggregate_results_mpn(
 
     heatmaps_avg = (heatmaps[0] + heatmaps[1])/2.0 if cfg.TEST.FLIP_TEST \
         else heatmaps[0]
-    features_avg = (features[0] + features[1])/2.0 if cfg.TEST.FLIP_TEST \
-        else features[0]
+    features_avg = features[0]
 
     if final_heatmaps is None:
         final_heatmaps = heatmaps_avg
