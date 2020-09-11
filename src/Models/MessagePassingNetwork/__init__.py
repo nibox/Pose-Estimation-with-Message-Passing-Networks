@@ -7,6 +7,9 @@ from .ClassificationNaive import ClassificationNaive
 from .NodeClassificationMPNSimple import NodeClassificationMPNSimple
 from .NodeClassificationMPNSimpleWithRef import NodeClassificationMPNSimpleWithRef
 from .JointTypeClassification import JointTypeClassification
+from .NodeClassificationMPNTypeBased import NodeClassificationMPNTypeBased
+from .NodeClassificationMPNAttention import NodeClassificationMPNAttention
+from .NodeClassificationMPNFPConstrained import NodeClassificationMPNFPConstrained
 
 
 
@@ -25,8 +28,14 @@ def get_mpn_model(config, **kwargs):
         return ClassificationNaive(config)
     elif config.NAME == "NodeClassificationMPN":
         return NodeClassificationMPNSimple(config)
+    elif config.NAME == "NodeClassificationMPNTypeBased":
+        return NodeClassificationMPNTypeBased(config)
+    elif config.NAME == "NodeClassificationMPNAttention":
+        return NodeClassificationMPNAttention(config)
     elif config.NAME == "NodeClassificationMPNWithRef":
         return NodeClassificationMPNSimpleWithRef(config)
+    elif config.NAME == "NodeClassificationMPNFPConstrained":
+        return NodeClassificationMPNFPConstrained(config)
     elif config.NAME == "JointTypeClassification":
         return JointTypeClassification(config)
     else:

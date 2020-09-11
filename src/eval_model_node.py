@@ -6,9 +6,9 @@ from tqdm import tqdm
 
 from Utils.eval import EvalWriter, gen_ann_format
 from config import get_config, update_config
-from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
-from Utils import pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics, subgraph_mask, one_hot_encode, topk_accuracy
-from Models.PoseEstimation import get_pose_model
+from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, JointsGenerator
+from Utils import parse_refinement, pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics, subgraph_mask, one_hot_encode, topk_accuracy
+from Models.PoseEstimation import get_pose_model, get_pose_with_ref_model
 from Utils.transformations import reverse_affine_map
 from Utils.transforms import transforms_hg_eval, transforms_hr_eval
 
@@ -20,14 +20,15 @@ def main():
     torch.backends.cudnn.benchmark = False
     ######################################
 
-    config_dir = "class_agnostic_end2end"
+    config_dir = "hybrid_class_agnostic_end2end"
     # config_dir = "node_classification_from_scratch"
     # config_dir = "regression_mini"
     # config_dir = "train"
-    config_name = "model_57_1_0"
+    # config_dir = "node_classification_from_scratch"
+    config_name = "model_56_1_0_8"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
-    eval_writer = EvalWriter(config, fname="eval_10_mini_fully_connection")
+    eval_writer = EvalWriter(config, fname="eval_10_mini.txt")
 
     if config.TEST.SPLIT == "mini":
         train_ids, valid_ids = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))
@@ -49,9 +50,12 @@ def main():
     elif config.TEST.SPLIT == "coco_17_mini":
         _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
         heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
+        joint_generator = [JointsGenerator(30, 17, 128, True),
+                           JointsGenerator(30, 17, 256, True)]
         transforms, _ = transforms_hr_eval(config)
         eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
-                                    transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False)
+                                    transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
+                                    joint_generator=joint_generator)
     else:
         raise NotImplementedError
 
@@ -84,13 +88,14 @@ def main():
     anns_perf_edge = []
     anns_class_infl = []
     anns_cc_cluster = []
+    anns_refined = []
     eval_ids = []
     imgs_fully_det = []
     with torch.no_grad():
         for i in tqdm(range(config.TEST.NUM_EVAL)):
             eval_ids.append(eval_set.img_ids[i])
 
-            img, _, masks, keypoints, factors = eval_set[i]
+            img, _, masks, keypoints, factors, _ = eval_set[i]
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
@@ -106,8 +111,11 @@ def main():
             preds_nodes = preds_nodes[-1].sigmoid().squeeze()
 
             preds_classes_gt = one_hot_encode(class_labels, 17, torch.float) if class_labels is not None else None
+            # preds_classes[node_labels == 1.0] = preds_classes_gt[node_labels == 1.0]
             preds_baseline_class = joint_det[:, 2]
             preds_baseline_class_one_hot = one_hot_encode(preds_baseline_class, 17, torch.float)
+            # preds_baseline_class_one_hot[node_labels!=1.0] = preds_classes[node_labels!=1.0]
+            # preds_classes[node_labels==1.0] = preds_baseline_class_one_hot[node_labels==1.0]
 
             true_positive_idx = preds_nodes > config.MODEL.MPN.NODE_THRESHOLD
             mask = subgraph_mask(true_positive_idx, edge_index)
@@ -142,36 +150,32 @@ def main():
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
-            ann = perd_to_ann(scoremaps[0], tags[0], joint_det, joint_scores, edge_index, preds_edges, img_info,
+            ann = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
                               int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE,
-                              config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD, preds_classes, config.TEST.WITH_REFINE)
+                              config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD, preds_classes, False)
             ann_cc = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
                                  int(eval_set.img_ids[i]), "threshold", config.DATASET.SCALING_TYPE, config.TEST.ADJUST,
                                  config.MODEL.MPN.NODE_THRESHOLD, preds_classes, config.TEST.WITH_REFINE)
+            ann_refined = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+                                      int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE,
+                                      config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD, preds_classes, True)
 
-            ann_perf_edge = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
-                                        int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+            ann_perf_edge = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges,
+                                        img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
                                         config.DATASET.SCALING_TYPE, config.TEST.ADJUST,
-                                        config.MODEL.MPN.NODE_THRESHOLD, preds_classes_gt, config.TEST.WITH_REFINE)
-            ann_perf_node = perd_to_ann(scoremaps[0], tags[0], joint_det, node_labels * preds_nodes, edge_index,
-                                        preds_edges, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+                                        config.MODEL.MPN.NODE_THRESHOLD, preds_classes_gt, config.TEST.WITH_REFINE,
+                                        )
+            ann_perf_node = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes * node_labels, edge_index, preds_edges,
+                                        img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
                                         config.DATASET.SCALING_TYPE, config.TEST.ADJUST,
                                         config.MODEL.MPN.NODE_THRESHOLD, preds_classes, config.TEST.WITH_REFINE)
-            ann_class_infl = perd_to_ann(scoremaps[0], tags[0], joint_det, node_labels * preds_nodes, edge_index,
-                                         edge_labels, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+            ann_class_infl = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes * node_labels, edge_index, edge_labels,
+                                         img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
                                          config.DATASET.SCALING_TYPE, config.TEST.ADJUST,
                                          config.MODEL.MPN.NODE_THRESHOLD, preds_classes, config.TEST.WITH_REFINE)
-            if "refine" in output["preds"]:
-                joint_refined = output["preds"]["refine"]
-                persons_pred_refine = parse_refinement(joint_refined[:, :3], joint_refined[:, 3], joint_refined[:, 4])
-                if len(persons_pred_refine.shape) == 1:
-                    persons_pred_refine = np.zeros([1, 17, 3])
-                persons_pred_refine = reverse_affine_map(persons_pred_refine .copy(), (img_info["width"], img_info["height"]),
-                                                         scaling_type=config.DATASET.SCALING_TYPE)
-                ann_refined = gen_ann_format(persons_pred_refine, eval_set.img_ids[i])
-                anns_refined.append(ann_refined)
 
             anns.append(ann)
+            anns_refined.append(ann_refined)
             anns_perf_edge.append(ann_perf_edge)
             anns_perf_node.append(ann_perf_node)
             anns_class_infl.append(ann_class_infl)
@@ -182,10 +186,11 @@ def main():
 
         print("##################")
         eval_writer.eval_coco(eval_set.coco, anns, np.array(eval_ids), "General Evaluation", "kpt_det.json")
-        eval_writer.eval_coco(eval_set.coco, anns_perf_edge, np.array(eval_ids), "Perfect edge prediction")
+        eval_writer.eval_coco(eval_set.coco, anns_perf_edge, np.array(eval_ids), "Perfect classification")
         eval_writer.eval_coco(eval_set.coco, anns_perf_node, np.array(eval_ids), "Perfect node prediction")
         eval_writer.eval_coco(eval_set.coco, anns_class_infl, np.array(eval_ids), "Perfect node and edge prediction")
         eval_writer.eval_coco(eval_set.coco, anns_cc_cluster, np.array(eval_ids), "Thresholding and connected components")
+        eval_writer.eval_coco(eval_set.coco, anns_refined, np.array(eval_ids), "Refined Poses")
         eval_writer.eval_coco(eval_set.coco, anns_full, imgs_fully_det, f"Evaluation on perfect images {len(anns_full)}")
 
         eval_writer.eval_metrics(eval_node, "Node metrics")
@@ -220,74 +225,6 @@ def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, preds_edge
 
     ann = gen_ann_format(persons_pred_orig, img_id)
     return ann
-
-def refine(scoremaps, tag, keypoints):
-    """
-    Given initial keypoint predictions, we identify missing joints
-    :param det: numpy.ndarray of size (17, 128, 128)
-    :param tag: numpy.ndarray of size (17, 128, 128) if not flip
-    :param keypoints: numpy.ndarray of size (N, 17, 3) if not flip, last dim is (x, y, det score)
-    :return:
-    """
-    if len(tag.shape) == 3:
-        # tag shape: (17, 256, 256, 1)
-        tag = tag[:, :, :, None]
-
-    tags = []
-    for p in range(keypoints.shape[0]):
-        person_tags = []
-        for i in range(keypoints.shape[1]):
-            if keypoints[p, i, 2] > 0:
-                # save tag value of detected keypoint
-                x, y = keypoints[p, i][:2].astype(np.int32)
-                person_tags.append(tag[i, y, x])
-        tags.append(np.array(person_tags))
-
-    # mean tag of current detected people
-    for p in range(keypoints.shape[0]):
-        prev_tag = np.mean(tags[p], axis=0)
-        ans = []
-
-        for i in range(keypoints.shape[1]):
-            # score of joints i at all position
-            tmp = scoremaps[i, :, :]
-            # distance of all tag values with mean tag of current detected people
-            tt = (((tag[i, :, :] - prev_tag[None, None, :]) ** 2).sum(axis=2) ** 0.5)
-            tmp2 = tmp - np.round(tt)
-
-            # find maximum position
-            y, x = np.unravel_index(np.argmax(tmp2), tmp.shape)
-            xx = x
-            yy = y
-            # detection score at maximum position
-            val = tmp[y, x]
-            # offset by 0.5
-            x += 0.5
-            y += 0.5
-
-            # add a quarter offset
-            if tmp[yy, min(xx + 1, tmp.shape[1] - 1)] > tmp[yy, max(xx - 1, 0)]:
-                x += 0.25
-            else:
-                x -= 0.25
-
-            if tmp[min(yy + 1, tmp.shape[0] - 1), xx] > tmp[max(0, yy - 1), xx]:
-                y += 0.25
-            else:
-                y -= 0.25
-
-            ans.append((x, y, val))
-        ans = np.array(ans)
-
-        if ans is not None:
-            for i in range(scoremaps.shape[0]):
-                # add keypoint if it is not detected
-                if ans[i, 2] > 0 and keypoints[p, i, 2] == 0:
-                    # if ans[i, 2] > 0.01 and keypoints[i, 2] == 0:
-                    keypoints[p, i, :2] = ans[i, :2]
-                    keypoints[p, i, 2] = ans[i, 2]
-
-    return keypoints
 
 
 if __name__ == "__main__":

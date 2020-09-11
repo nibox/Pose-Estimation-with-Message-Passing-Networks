@@ -7,7 +7,7 @@ from Utils.transforms import transforms_hr_train
 from Utils.loss import MPNLossFactory, MultiLossFactory, ClassMPNLossFactory
 from Utils.Utils import Logger, subgraph_mask, calc_metrics
 from Models import get_cached_model
-from data import CocoKeypoints_hr, HeatmapGenerator
+from data import CocoKeypoints_hr, HeatmapGenerator, JointsGenerator
 
 
 def load_data(config, batch_size, device):
@@ -16,15 +16,19 @@ def load_data(config, batch_size, device):
     train_ids = np.random.choice(train_ids, batch_size, replace=False)
     transforms, _ = transforms_hr_train(config)
     heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
+    joints_generator = [JointsGenerator(30, 17, 128, True),
+                        JointsGenerator(30, 17, 256, True)
+                        ]
     train = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=train_ids, year=17,
-                             transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=True)
+                             transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=True,
+                             joint_generator=joints_generator)
 
     imgs = []
     masks = []
     keypoints = []
     factors = []
     for i in range(len(train)):
-        img, target_scoremap, mask, keypoint, factor = train[i]
+        img, target_scoremap, mask, keypoint, factor, _ = train[i]
         img = img.to(device)
         mask = torch.from_numpy(mask[-1]).to(device)
         keypoint = torch.from_numpy(keypoint).to(device)
@@ -36,6 +40,7 @@ def load_data(config, batch_size, device):
         factors.append(factor[None])
     return torch.cat(imgs), torch.cat(masks), torch.cat(keypoints), torch.cat(factors)
 
+
 def make_train_func(model, optimizer, loss_func, **kwargs):
     def func(batch):
         optimizer.zero_grad()
@@ -46,10 +51,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
         keypoints = keypoints.to(kwargs["device"])
         factors = factors.to(kwargs["device"])
 
-        # scoremaps, preds_edges, preds_nodes, preds_classes, joint_det, _, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node = model(imgs, keypoints, masks, factors)
-
         _, output = model(imgs, keypoints, masks[-1], factors)
-
 
         if isinstance(loss_func, (MultiLossFactory, MPNLossFactory)):
             loss, _ = loss_func(output["preds"], output["labels"], output["masks"])
@@ -101,8 +103,8 @@ def main():
     torch.backends.cudnn.benchmark = False
 
     ##########################################################
-    config_dir = "class_agnostic_end2end"
-    config_name = "model_57_1_0_4"
+    config_dir = "hybrid_class_agnostic_end2end"
+    config_name = "model_56_1_0_9"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
 
@@ -112,17 +114,15 @@ def main():
         assert config.TRAIN.USE_LABEL_MASK  # this ensures that images with no "persons"/clusters do not contribute to the loss
     print("Load model")
     model = get_cached_model(config, device)
-    if config.TRAIN.END_TO_END:
-        raise NotImplementedError
+
+    model.freeze_backbone(mode="complete")
+    optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR)
+    if config.MODEL.LOSS.NAME == "edge_loss":
+        loss_func = MPNLossFactory(config)
+    elif config.MODEL.LOSS.NAME == "node_edge_loss":
+        loss_func = ClassMPNLossFactory(config)
     else:
-        model.freeze_backbone(mode=config.TRAIN.KP_FREEZE_MODE)
-        optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR)
-        if config.MODEL.LOSS.NAME == "edge_loss":
-            loss_func = MPNLossFactory(config)
-        elif config.MODEL.LOSS.NAME == "node_edge_loss":
-            loss_func = ClassMPNLossFactory(config)
-        else:
-            raise NotImplementedError
+        raise NotImplementedError
     model.to(device)
 
     update_model = make_train_func(model, optimizer, loss_func, use_batch_index=config.TRAIN.USE_BATCH_INDEX,

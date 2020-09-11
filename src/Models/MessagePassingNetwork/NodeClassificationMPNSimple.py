@@ -1,67 +1,29 @@
+import numpy as np
 import torch
 import torch.nn as nn
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from Utils.Utils import subgraph_mask
-from .layers import _make_mlp, MPLayer
+from .layers import _make_mlp, MPLayer, TypeAwareMPNLayer
 
-
-"""
-class MPLayer(MessagePassing):
-
-    # todo with or without inital feature skip connection
-    def __init__(self, node_feature_dim, edge_feature_dim, edge_feature_hidden, aggr, use_node_update_mlp, skip=False):
-        super(MPLayer, self).__init__(aggr=aggr)
-        # todo better architecture
-
-        node_factor = 2 if skip else 1
-        edge_factor = 2 if skip else 1
-
-        self.mlp_edge = nn.Sequential(nn.Linear(node_feature_dim * 2 * node_factor + edge_feature_dim * edge_factor, edge_feature_hidden),
-                                      nn.ReLU(inplace=True),
-                                      nn.Linear(edge_feature_hidden, edge_feature_dim),
-                                      nn.ReLU(inplace=True),
-                                      )
-
-        # self.mlp_edge = PerInvMLP(node_feature_dim, edge_feature_dim)
-        self.mlp_node = nn.Sequential(nn.Linear(node_feature_dim * node_factor + edge_feature_dim, node_feature_dim),
-                                      nn.ReLU(inplace=True),
-                                      )
-        self.update_mlp = nn.Sequential(nn.Linear(node_feature_dim, node_feature_dim), nn.ReLU()) if use_node_update_mlp else None
-
-
-    def forward(self, x, edge_attr, edge_index):
-        num_nodes = x.size(0)
-
-        j, i = edge_index  # message is from j to i
-        x_i, x_j = x[i], x[j]
-        e_ij = edge_attr
-        edge_attr = self.mlp_edge(torch.cat([x_i, x_j, e_ij], dim=1))  # todo ask if edge features are permutation inv
-
-        return self.propagate(edge_index, size=(num_nodes, num_nodes), x=x, edge_attr=edge_attr), edge_attr
-
-    def message(self, x_i, x_j, edge_attr):
-        # edge_attr = self.mlp_edge(torch.cat([x_i, x_j, edge_attr], dim=1))
-        out = self.mlp_node(torch.cat([x_i, edge_attr], dim=1))
-        return out
-
-    def update(self, aggr_out):
-        if self.update_mlp is not None:
-            aggr_out = self.update_mlp(aggr_out)
-        return aggr_out
-
-"""
 
 class NodeClassificationMPNSimple(torch.nn.Module):
 
     def __init__(self, config):
         super().__init__()
         self.use_skip_connections = config.SKIP
-        self.mpn_node_cls = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
-                                  aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP)
+        if config.AGGR_TYPE == "agnostic":
+            self.mpn_node_cls = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
+                                      aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP,
+                                        edge_mlp=config.EDGE_MLP)
+        elif config.AGGR_TYPE == "per_type":
+            self.mpn_node_cls = TypeAwareMPNLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
+                                        aggr=config.AGGR, skip=config.SKIP,
+                                        edge_mlp=config.EDGE_MLP)
+
 
         self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, bn=config.EDGE_EMB.BN,
-                                        end_with_relu=config.NODE_EMB.END_WITH_RELU)
+                                        end_with_relu=config.EDGE_EMB.END_WITH_RELU)
         self.node_embedding = _make_mlp(config.NODE_INPUT_DIM, config.NODE_EMB.OUTPUT_SIZES, bn=config.NODE_EMB.BN,
                                         end_with_relu=config.NODE_EMB.END_WITH_RELU)
 
@@ -72,9 +34,11 @@ class NodeClassificationMPNSimple(torch.nn.Module):
         self.edge_steps = config.STEPS
         self.node_steps = config.NODE_STEPS
         self.aux_loss_steps = config.AUX_LOSS_STEPS
+        self.node_summary = config.NODE_TYPE_SUMMARY
 
     def forward(self, x, edge_attr, edge_index, **kwargs):
 
+        node_types = self.sum_node_types(kwargs["node_types"])
         node_features = self.node_embedding(x)
         edge_features = self.edge_embedding(edge_attr)
 
@@ -93,7 +57,8 @@ class NodeClassificationMPNSimple(torch.nn.Module):
             if self.use_skip_connections:
                 node_features = torch.cat([node_features_initial, node_features], dim=1)
                 edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
-            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index)
+            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index,
+                                                             node_types=node_types)
 
         preds_edge.append(self.edge_classification(edge_features).squeeze())
 
@@ -107,4 +72,17 @@ class NodeClassificationMPNSimple(torch.nn.Module):
         preds_class.append(self.classification(node_features))
 
 
-        return preds_edge, preds_node, preds_class
+        return preds_edge, preds_node, preds_class, node_features, edge_features
+
+    def sum_node_types(self, node_types):
+        # 'nose','eye_l','eye_r','ear_l','ear_r', 'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
+        # 'hip_l','hip_r','kne_l','kne_r','ank_l','ank_r'
+        if self.node_summary == "not":
+            return node_types
+        elif self.node_summary == "left_right":
+            raise NotImplementedError
+        elif self.node_summary == "per_body_part":
+            # head, shoulder, arm left, arm right, left leg, right ,leg
+            mapping = torch.from_numpy(np.array([0, 0, 0, 0, 0, 1, 1, 2, 3, 2, 3, 4, 5, 4, 5, 4, 5])).to(node_types.device)
+            node_types = mapping[node_types]
+            return node_types

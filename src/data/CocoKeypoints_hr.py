@@ -14,7 +14,8 @@ from Utils.transformations import kpt_affine, factor_affine, get_transform, get_
 class CocoKeypoints(Dataset):
 
     def __init__(self, path, mini=False, mode="train", seed=0, filter_empty=True,
-                 img_ids=None, year=14, transforms=None, heatmap_generator=None, mask_crowds=True):
+                 img_ids=None, year=14, transforms=None, heatmap_generator=None, mask_crowds=True,
+                 joint_generator=None):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
@@ -30,6 +31,7 @@ class CocoKeypoints(Dataset):
         self.num_scales = len(heatmap_generator) if heatmap_generator is not None else 0
 
         self.heatmap_generator = heatmap_generator
+        self.joint_generator = joint_generator
 
         self.max_num_people = 30  # from github code
         assert mode in ["train", "val"]
@@ -127,6 +129,7 @@ class CocoKeypoints(Dataset):
 
         mask_list = [mask.copy() for _ in range(self.num_scales)]
         keypoint_list = [keypoints.copy() for _ in range(self.num_scales)]
+        ae_targets = [keypoints.copy() for _ in range(self.num_scales)]
         heatmaps = []
 
         if self.transforms is not None:
@@ -135,10 +138,12 @@ class CocoKeypoints(Dataset):
         if self.heatmap_generator is not None:
             for scale_idx in range(self.num_scales):
                 heatmap = self.heatmap_generator[scale_idx](keypoint_list[scale_idx], scales)
+                ae_target = self.joint_generator[scale_idx](ae_targets[scale_idx])
                 keypoint_list[scale_idx] = _filter_visible(keypoint_list[scale_idx], mask[scale_idx].shape)
                 # keypoint_list[scale_idx] = remove_empty_rows(keypoint_list[scale_idx])
 
                 heatmaps.append(heatmap.astype(np.float32))
+                ae_targets[scale_idx] = ae_target.astype(np.int32)
                 mask_list[scale_idx] = mask_list[scale_idx].astype(np.float32)
                 # keypoint_list[scale_idx] = pack_for_batch(keypoint_list[scale_idx].astype(np.float32), 30)
 
@@ -153,7 +158,7 @@ class CocoKeypoints(Dataset):
             keypoint_list[-1] = pack_for_batch(kpts, 30)
             factors = pack_for_batch(factors, 30)  # assuming the visible keypoints are the same for all scales
 
-        return img, heatmaps, mask, keypoint_list[-1], factors
+        return img, heatmaps, mask, keypoint_list[-1], factors, ae_targets
 
     def __len__(self):
         return len(self.img_ids)
@@ -220,6 +225,33 @@ class HeatmapGenerator():
                     hms[idx, aa:bb, cc:dd] = np.maximum(
                         hms[idx, aa:bb, cc:dd], self.g[a:b, c:d])
         return hms
+
+
+class JointsGenerator():
+    def __init__(self, max_num_people, num_joints, output_res, tag_per_joint):
+        self.max_num_people = max_num_people
+        self.num_joints = num_joints
+        self.output_res = output_res
+        self.tag_per_joint = tag_per_joint
+
+    def __call__(self, joints):
+        visible_nodes = np.zeros((self.max_num_people, self.num_joints, 2))
+        output_res = self.output_res
+        for i in range(len(joints)):
+            tot = 0
+            for idx, pt in enumerate(joints[i]):
+                x, y = int(pt[0]), int(pt[1])
+                if pt[2] > 0 and x >= 0 and y >= 0 \
+                        and x < self.output_res and y < self.output_res:
+                    if self.tag_per_joint:
+                        visible_nodes[i][tot] = \
+                            (idx * output_res**2 + y * output_res + x, 1)
+                    else:
+                        visible_nodes[i][tot] = \
+                            (y * output_res + x, 1)
+                    tot += 1
+        return visible_nodes
+
 
 class ScaleAwareHeatmapGenerator():
     def __init__(self, output_res, num_joints, sigma=-1):

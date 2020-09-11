@@ -79,7 +79,8 @@ class PoseEstimationBaseline(nn.Module):
 
         edge_pred, node_pred, class_pred, _, _ = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
                                                           edge_labels=edge_labels
-                                                          , batch_index=batch_index, node_mask=label_mask_node)
+                                                          , batch_index=batch_index, node_mask=label_mask_node,
+                                                          node_types=joint_det[:, 2].detach())
 
         if not with_logits:
             if edge_pred[-1] is not None:
@@ -176,11 +177,13 @@ class PoseEstimationBaseline(nn.Module):
 
         edge_pred, node_pred, class_pred, _, _ = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
                                                           edge_labels=edge_labels
-                                                          , batch_index=batch_index, node_mask=label_mask_node)
+                                                          , batch_index=batch_index, node_mask=label_mask_node,
+                                                          node_types=joint_det[:, 2])
 
         output = {}
         output["preds"] = {"edge": edge_pred, "node": node_pred, "class": class_pred}
-        output["graph"] = {"nodes": joint_det, "detector_scores": joint_scores, "edge_index": edge_index}
+        output["graph"] = {"nodes": joint_det, "detector_scores": joint_scores, "edge_index": edge_index,
+                           "tags": tags}
 
         return scoremaps, output
 

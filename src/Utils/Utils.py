@@ -300,7 +300,7 @@ def draw_edges_conf(img, joint_det, person_labels, node_labels, edge_index, pred
     # draw node in color of cluster
     # get all connections and draw them in color of confidence
     tp_idx = node_labels > 0.5
-    mask = subgraph_mask(node_labels > 0.5, edge_index, )
+    mask = subgraph_mask(node_labels > 0.5, edge_index)
     edge_index, _ = subgraph(torch.from_numpy(tp_idx), torch.from_numpy(edge_index), None, relabel_nodes=True)
     edge_index = edge_index.numpy()
     joint_det = joint_det[tp_idx]
@@ -518,8 +518,8 @@ def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred
             keypoints = np.zeros([17, 3])
             joint_type = person_joints[:, 2]
             person_score = person_scores[0]
-            # if person_score < 0.7:
-            #     continue
+            if person_score < 0.5:
+                 continue
 
             keypoints[joint_type, 2] = person_score
             keypoints[:, :2] = person_joints[0, :2]
@@ -685,3 +685,72 @@ class Logger(object):
 
     def log_loss(self, loss, name, iter):
         self.writer.add_scalar(f"{name}", loss, iter)
+
+
+def refine(scoremaps, tag, keypoints):
+    """
+    Given initial keypoint predictions, we identify missing joints
+    :param det: numpy.ndarray of size (17, 128, 128)
+    :param tag: numpy.ndarray of size (17, 128, 128) if not flip
+    :param keypoints: numpy.ndarray of size (N, 17, 3) if not flip, last dim is (x, y, det score)
+    :return:
+    """
+    if len(tag.shape) == 3:
+        # tag shape: (17, 256, 256, 1)
+        tag = tag[:, :, :, None]
+
+    tags = []
+    for p in range(keypoints.shape[0]):
+        person_tags = []
+        for i in range(keypoints.shape[1]):
+            if keypoints[p, i, 2] > 0:
+                # save tag value of detected keypoint
+                x, y = keypoints[p, i][:2].astype(np.int32)
+                person_tags.append(tag[i, y, x])
+        tags.append(np.array(person_tags))
+
+    # mean tag of current detected people
+    for p in range(keypoints.shape[0]):
+        prev_tag = np.mean(tags[p], axis=0)
+        ans = []
+
+        for i in range(keypoints.shape[1]):
+            # score of joints i at all position
+            tmp = scoremaps[i, :, :]
+            # distance of all tag values with mean tag of current detected people
+            tt = (((tag[i, :, :] - prev_tag[None, None, :]) ** 2).sum(axis=2) ** 0.5)
+            tmp2 = tmp - np.round(tt)
+
+            # find maximum position
+            y, x = np.unravel_index(np.argmax(tmp2), tmp.shape)
+            xx = x
+            yy = y
+            # detection score at maximum position
+            val = tmp[y, x]
+            # offset by 0.5
+            x += 0.5
+            y += 0.5
+
+            # add a quarter offset
+            if tmp[yy, min(xx + 1, tmp.shape[1] - 1)] > tmp[yy, max(xx - 1, 0)]:
+                x += 0.25
+            else:
+                x -= 0.25
+
+            if tmp[min(yy + 1, tmp.shape[0] - 1), xx] > tmp[max(0, yy - 1), xx]:
+                y += 0.25
+            else:
+                y -= 0.25
+
+            ans.append((x, y, val))
+        ans = np.array(ans)
+
+        if ans is not None:
+            for i in range(scoremaps.shape[0]):
+                # add keypoint if it is not detected
+                if ans[i, 2] > 0 and keypoints[p, i, 2] == 0:
+                    # if ans[i, 2] > 0.01 and keypoints[i, 2] == 0:
+                    keypoints[p, i, :2] = ans[i, :2]
+                    keypoints[p, i, 2] = ans[i, 2]
+
+    return keypoints

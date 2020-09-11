@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
-from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, ScaleAwareHeatmapGenerator
+from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, ScaleAwareHeatmapGenerator, JointsGenerator
 from Utils.transforms import transforms_hr_train, transforms_hg_eval
 from Utils.loss import MPNLossFactory, MultiLossFactory, ClassMPNLossFactory, ClassMultiLossFactory
 from Utils.Utils import to_device, calc_metrics, subgraph_mask, Logger
@@ -52,13 +52,17 @@ def create_train_validation_split(config):
         elif config.DATASET.HEAT_GENERATOR == "scale_aware":
             heatmap_generator = [ScaleAwareHeatmapGenerator(128, 17, config.DATASET.SIGMA),
                                  ScaleAwareHeatmapGenerator(256, 17, config.DATASET.SIGMA)]
+        joints_generator = [JointsGenerator(30, 17, 128, True),
+                            JointsGenerator(30, 17, 256, True)]
         transforms, _ = transforms_hr_train(config)
         train = CocoKeypoints_hr(config.DATASET.ROOT, mini=False, seed=0, mode="train", img_ids=train_ids, year=17,
-                                 transforms=transforms, heatmap_generator=heatmap_generator)
+                                 transforms=transforms, heatmap_generator=heatmap_generator,
+                                 joint_generator=joints_generator)
         valid = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
-                                 transforms=transforms, heatmap_generator=heatmap_generator)
-        return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8), \
-               DataLoader(valid, batch_size=1, num_workers=8)
+                                 transforms=transforms, heatmap_generator=heatmap_generator,
+                                 joint_generator=joints_generator)
+        return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True), \
+               DataLoader(valid, batch_size=1, num_workers=8, pin_memory=True)
 
     else:
         raise NotImplementedError
@@ -75,17 +79,19 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
     def func(batch):
         optimizer.zero_grad()
         # split batch
-        imgs, heatmaps, masks, keypoints, factors = batch
+        imgs, heatmaps, masks, keypoints, factors, ae_targets = batch
         imgs = imgs.to(kwargs["device"])
         masks = to_device(kwargs["device"], masks)
         keypoints = keypoints.to(kwargs["device"])
         factors = factors.to(kwargs["device"])
         heatmaps = to_device(kwargs["device"], heatmaps)
+        ae_targets = to_device(kwargs["device"], ae_targets)
 
         # _, preds, preds_nodes, preds_classes, joint_det, _, edge_index, edge_labels, node_labels, class_labels, label_mask, label_mask_node, bb_output = model(imgs, keypoints, masks[-1], factors)
         _, output = model(imgs, keypoints, masks[-1], factors, heatmaps)
         output["masks"]["heatmap"] = masks
         output["labels"]["heatmap"] = heatmaps
+        output["labels"]["tag"] = ae_targets
 
         if isinstance(loss_func, (MultiLossFactory, MPNLossFactory)):
             loss, _ = loss_func(output["preds"], output["labels"], output["masks"])
@@ -125,6 +131,7 @@ def main():
     seed = 0
     np.random.seed(seed)
     torch.manual_seed(seed)
+    oom_counter = 0
 
     ##########################################################
     config_name = sys.argv[1]
@@ -197,13 +204,30 @@ def main():
     print("#####Begin Training#####")
     epoch_len = len(train_loader)
     for epoch in range(config.TRAIN.START_EPOCH, config.TRAIN.END_EPOCH):
+        if oom_counter >= 5:
+            print(f"Stopping training due to large amout of oom exceptions: {oom_counter}")
+            break
         model.train()
         if config.TRAIN.FREEZE_BN:
             model.stop_backbone_bn()
         for i, batch in enumerate(train_loader):
             iter = i + (epoch_len * epoch)
 
-            loss, preds, labels, masks, logging = update_model(batch)
+            try:
+                loss, preds, labels, masks, logging = update_model(batch)
+            except RuntimeError as e:
+                if "out of memory" in str(e):
+                    oom_counter += 1
+                    for p in model.parameters():
+                        if p.grad is not None:
+                            del p.grad
+                    torch.cuda.empty_cache()
+                    if oom_counter >= 5:
+                        break
+                    continue
+                else:
+                    raise e
+
             preds_nodes, preds_edges, preds_classes = preds["node"][-1], preds["edge"][-1], preds["class"]
             node_labels, edge_labels, class_labels = labels["node"], labels["edge"][-1], labels["class"]
             node_mask, edge_mask, class_mask = masks["node"], masks["edge"][-1], masks["class"]
@@ -259,7 +283,7 @@ def main():
         with torch.no_grad():
             for batch in valid_loader:
                 # split batch
-                imgs, heatmaps, masks, keypoints, factors = batch
+                imgs, heatmaps, masks, keypoints, factors, ae_targets = batch
                 if keypoints.sum() == 0.0:
                     continue
                 imgs = imgs.to(device)
@@ -267,10 +291,12 @@ def main():
                 keypoints = keypoints.to(device)
                 factors = factors.to(device)
                 heatmaps = to_device(device, heatmaps)
+                ae_targets = to_device(device, ae_targets)
 
                 _, output = model(imgs, keypoints, masks[-1], factors, heatmaps)
                 output["masks"]["heatmap"] = masks
                 output["labels"]["heatmap"] = heatmaps
+                output["labels"]["tag"] = ae_targets
 
                 preds, labels, masks = output["preds"], output["labels"], output["masks"]
                 if isinstance(loss_func, (MultiLossFactory, MPNLossFactory)):

@@ -63,9 +63,6 @@ class NaiveGraphConstructor:
                                                                   pool_kernel=self.pool_kernel_size
                                                                   )
 
-            # duplicate the detections
-            # joint_det = torch.cat([joint_det, joint_det], 0)
-
             # ##############cheating#################
             # extend joint_det with joints_gt in order to have a perfect matching at train time
             # !!! be careufull to use it at test time!!!
@@ -144,7 +141,7 @@ class NaiveGraphConstructor:
                     edge_labels, node_labels, label_mask, label_mask_node = self._construct_edge_labels_5(
                         joint_det.detach(), self.joints_gt[batch], self.factor_list[batch], edge_index.detach())
                 elif self.edge_label_method == 6:
-                    edge_labels, node_labels, node_classes, node_persons, label_mask = self._construct_edge_labels_6(
+                    edge_labels, node_labels, node_classes, node_persons, label_mask, label_mask_node= self._construct_edge_labels_6(
                         joint_det.detach(), self.joints_gt[batch], self.factor_list[batch], edge_index.detach())
                 elif self.edge_label_method == 7:
                     edge_labels, node_labels, node_classes, node_persons, label_mask = self._construct_edge_labels_7(
@@ -153,7 +150,7 @@ class NaiveGraphConstructor:
                 if edge_labels.max() == 0:
                     label_mask = torch.zeros_like(label_mask, device=self.device, dtype=torch.float)
 
-                if self.edge_label_method != 5:
+                if self.edge_label_method != 5 and not (self.edge_label_method == 6 and self.include_neighbouring_keypoints):
                     # masks should only be used for edge_label_method == 6
                     assert label_mask_node.sum() == label_mask_node.shape[0]
                 # node dropout
@@ -177,7 +174,7 @@ class NaiveGraphConstructor:
 
                 # create class labels
                 if node_labels is not None and node_classes is not None:
-                    class_mask = node_labels.clone()
+                    class_mask = node_labels.clone() * label_mask_node
                     if self.use_weighted_class_loss:
                         weights = self.heatmaps[batch, node_classes, joint_det[:, 1], joint_det[:, 2]]
 
@@ -815,7 +812,7 @@ class NaiveGraphConstructor:
 
         ambiguous_dets = []
         if self.include_neighbouring_keypoints:
-            if method == 2:
+            if method == 10:  # previously 2
                 different_type = different_type.cpu().numpy()  # todo make the move earlier
                 cost_mat = similarity.cpu().numpy()
                 cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), col_con] = 0.0
@@ -890,7 +887,11 @@ class NaiveGraphConstructor:
 
         node_persons = torch.zeros(num_joints_det, dtype=torch.long, device=self.device) - 1
         node_persons[col_1] = person_idx_gt_1[row_1].long()
-        return edge_labels, node_labels, node_classes, node_persons, label_mask
+
+        node_mask = torch.ones_like(node_labels, dtype=torch.float32, device=self.device)
+        if self.include_neighbouring_keypoints:
+            node_mask[ambiguous_dets] = 0
+        return edge_labels, node_labels, node_classes, node_persons, label_mask, node_mask
 
     def _construct_edge_labels_7(self, joint_det, joints_gt, factors, edge_index):
         assert not self.use_gt
