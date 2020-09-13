@@ -32,6 +32,7 @@ _C.MODEL.LOSS.NODE_USE_FOCAL = True
 _C.MODEL.LOSS.FOCAL_ALPHA = 1.0
 _C.MODEL.LOSS.FOCAL_GAMMA = 2.0
 _C.MODEL.LOSS.NODE_BCE_POS_WEIGHT = 1.0
+_C.MODEL.LOSS.INCLUDE_BORDERING_NODES = False  # include connections to adjacent nodes of selected nodes for loss
 _C.MODEL.AUX_STEPS = 1
 _C.MODEL.KP_OUTPUT_DIM = 32  # 256 for hg, 32 for HR
 # common params for Hourglass keypoint detector (for reproducibility of the old experiments)
@@ -134,6 +135,7 @@ _C.MODEL.GC.USE_NEIGHBOURS = False
 _C.MODEL.GC.EDGE_LABEL_METHOD = 4
 _C.MODEL.GC.MASK_CROWDS = True
 _C.MODEL.GC.DETECT_THRESHOLD = 0.005
+_C.MODEL.GC.HYBRID_K = 5
 _C.MODEL.GC.MATCHING_RADIUS = 0.1
 _C.MODEL.GC.INCLUSION_RADIUS = 0.75
 _C.MODEL.GC.GRAPH_TYPE = "knn"

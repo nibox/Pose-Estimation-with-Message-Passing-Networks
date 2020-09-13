@@ -67,11 +67,14 @@ def create_train_validation_split(config):
     else:
         raise NotImplementedError
 
-def mask_node_connections(preds_nodes, edge_index, th, node_labels=None):
+def mask_node_connections(preds_nodes, edge_index, th, node_labels=None, include_bordering_nodes=False):
     true_positive_idx = preds_nodes > th
     if node_labels is not None:
         true_positive_idx[node_labels == 1.0] = True
-    mask = subgraph_mask(true_positive_idx, edge_index)
+    if include_bordering_nodes:
+        mask = true_positive_idx[edge_index[0]] | true_positive_idx[edge_index[1]]
+    else:
+        mask = true_positive_idx[edge_index[0]] & true_positive_idx[edge_index[1]]
     return mask
 
 
@@ -100,8 +103,10 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             edge_labels = []
             # first the graph reduction
             for i in range(len(output["preds"]["node"])):
+                include_bordering_nodes = kwargs["config"].MODEL.LOSS.INCLUDE_BORDERING_NODES
                 mask = mask_node_connections(output["preds"]["node"][i].sigmoid().detach(), output["graph"]["edge_index"],
-                                             kwargs["config"].MODEL.MPN.NODE_THRESHOLD, output["labels"]["node"])
+                                             kwargs["config"].MODEL.MPN.NODE_THRESHOLD, output["labels"]["node"],
+                                             include_bordering_nodes=include_bordering_nodes)
                 edge_labels.append(output["labels"]["edge"])
                 edge_masks.append(output["masks"]["edge"] * mask.float())
             output["labels"]["edge"] = edge_labels

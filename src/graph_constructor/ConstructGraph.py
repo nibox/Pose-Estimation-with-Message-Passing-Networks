@@ -24,6 +24,7 @@ class NaiveGraphConstructor:
         self.include_neighbouring_keypoints = config.USE_NEIGHBOURS
         self.mask_crowds = config.MASK_CROWDS
         self.detect_threshold = config.DETECT_THRESHOLD if config.DETECT_THRESHOLD <= 1.5 else None
+        self.hybrid_k = config.HYBRID_K
         self.matching_radius = config.MATCHING_RADIUS  # this is for the initial matching
         self.inclusion_radius = config.INCLUSION_RADIUS  # this is for the neighbouring matching
         self.mpn_graph_type = config.GRAPH_TYPE
@@ -55,12 +56,14 @@ class NaiveGraphConstructor:
                 joint_det, joint_scores = joint_det_from_scoremap(self.scoremaps[batch],
                                                                   threshold=self.detect_threshold,
                                                                   mask=self.masks[batch],
-                                                                  pool_kernel=self.pool_kernel_size
+                                                                  pool_kernel=self.pool_kernel_size,
+                                                                  hybrid_k=self.hybrid_k
                                                                   )
             else:
                 joint_det, joint_scores = joint_det_from_scoremap(self.scoremaps[batch],
                                                                   threshold=self.detect_threshold,
-                                                                  pool_kernel=self.pool_kernel_size
+                                                                  pool_kernel=self.pool_kernel_size,
+                                                                  hybrid_k=self.hybrid_k
                                                                   )
 
             # ##############cheating#################
@@ -1110,14 +1113,14 @@ class NaiveGraphConstructor:
         return loss_mask
 
 
-def joint_det_from_scoremap(scoremap, threshold=0.007, pool_kernel=None, mask=None):
+def joint_det_from_scoremap(scoremap, threshold=0.007, pool_kernel=None, mask=None, hybrid_k=5):
     joint_map = non_maximum_suppression(scoremap, threshold=threshold, pool_kernel=pool_kernel)
     if mask is not None:
         joint_map = joint_map * mask.unsqueeze(0)
     scoremap = scoremap * joint_map
     if threshold is not None:
         # use atleast the top 5 keypoints per type
-        k = 5
+        k = hybrid_k
         scoremap_shape = scoremap.shape
         scores, indices = scoremap.view(17, -1).topk(k=k, dim=1)
         container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.float).reshape(17, -1)
