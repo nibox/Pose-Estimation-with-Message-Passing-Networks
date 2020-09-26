@@ -1,14 +1,16 @@
 import pickle
 import torch
+import sys
 import numpy as np
 from torch_geometric.utils import subgraph
 from tqdm import tqdm
 
+from Utils.Utils import refine
 from Utils.eval import EvalWriter, gen_ann_format
 from config import get_config, update_config
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, JointsGenerator
 from Utils import parse_refinement, pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics, subgraph_mask, one_hot_encode, topk_accuracy
-from Models.PoseEstimation import get_pose_model, get_pose_with_ref_model
+from Models.PoseEstimation import get_pose_model  #, get_pose_with_ref_model
 from Utils.transformations import reverse_affine_map
 from Utils.transforms import transforms_hg_eval, transforms_hr_eval
 
@@ -59,12 +61,19 @@ def main():
     else:
         raise NotImplementedError
 
+    """
+    if config.MODEL.WITH_LOCATION_REFINE:
+        model = get_pose_with_ref_model(config, device)
+    else:
+        model = get_pose_model(config, device)
+    # """
     model = get_pose_model(config, device)
     state_dict = torch.load(config.MODEL.PRETRAINED)
     model.load_state_dict(state_dict["model_state_dict"])
     model.to(device)
     model.eval()
     model.test(True)
+    # model.with_flip_kernel = False
 
     # baseline : predicting full connections
     # baseline: upper bound

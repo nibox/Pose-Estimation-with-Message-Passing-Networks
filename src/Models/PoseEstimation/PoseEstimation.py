@@ -60,11 +60,36 @@ class PoseEstimationBaseline(nn.Module):
                                         bias=True)
         self.num_aux_steps = config.MODEL.AUX_STEPS
         self.scoremap_mode = config.MODEL.HRNET.SCOREMAP_MODE
+        """
+        self.with_flip_kernel = config.MODEL.WITH_FLIP_KERNEL
+        self.pool = nn.MaxPool2d(2, 2)  # used for self attention model
+        if self.with_flip_kernel:
+            # train kernel to rearange features
+            self.flip_kernel = nn.Conv2d(input_feature_size, input_feature_size, 1)
+        else:
+            self.flip_kernel = None
+        # """
 
     def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None, factors=None, heatmaps=None,
                 with_logits=True) -> torch.tensor:
         if self.gc_config.MASK_CROWDS:
             assert masks is not None
+        """
+        flip = torch.rand(1) > 0.5
+        if self.with_flip_kernel and flip:
+            imgs = torch.flip(imgs, [3])
+            bb_output = self.backbone(imgs)
+            scoremaps, features, tags = self.process_output(bb_output, self.scoremap_mode)
+
+            flip_index = FLIP_CONFIG["COCO"]
+            scoremaps = torch.flip(scoremaps, [3])
+            scoremaps = scoremaps[:, flip_index]
+            features = self.flip_kernel(torch.flip(features, [3]))
+            for idx in range(len(bb_output[0])):
+                bb_output[0][idx] = torch.flip(bb_output[0][idx], [3])
+                bb_output[0][idx][:, :17] = bb_output[0][idx][:, flip_index]
+        # """
+
         bb_output = self.backbone(imgs)
         scoremaps, features, tags = self.process_output(bb_output, self.scoremap_mode)
 
@@ -77,7 +102,7 @@ class PoseEstimationBaseline(nn.Module):
 
         x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, batch_index, node_persons = graph_constructor.construct_graph()
 
-        edge_pred, node_pred, class_pred, _, _ = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
+        edge_pred, node_pred, class_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
                                                           edge_labels=edge_labels
                                                           , batch_index=batch_index, node_mask=label_mask_node,
                                                           node_types=joint_det[:, 2].detach())
@@ -127,7 +152,7 @@ class PoseEstimationBaseline(nn.Module):
     def test(self, test=True):
         pass
 
-    def multi_scale_inference(self, img, scales, masks, config):
+    def multi_scale_inference(self, img, scales, config, keypoints=None, factors=None):
         assert img.shape[0] == 1  # batch size of 1
         transforms = torchvision.transforms.Compose(
             [
@@ -251,8 +276,13 @@ def _get_multi_stage_outputs(
         heatmaps_avg = 0
         num_heatmaps = 0
         outputs_flip, features_flip = model(torch.flip(image, [3]))
-        features_flip = feature_gather(features_flip)
-        # features.append(torch.flip(features_flip, [3]))
+        """
+        if flip_kernel is not None:
+            features_flip = flip_kernel(torch.flip(features_flip, [3]))
+            features_flip = feature_gather(features_flip)
+            features.append(features_flip)
+        # """
+
         for i in range(len(outputs_flip)):
             output = outputs_flip[i]
             if len(outputs_flip) > 1 and i != len(outputs_flip) - 1:

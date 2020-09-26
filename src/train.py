@@ -2,12 +2,12 @@ import torch
 from torch.utils.data import DataLoader
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, ScaleAwareHeatmapGenerator, JointsGenerator
 from Utils.transforms import transforms_hr_train, transforms_hg_eval
-from Utils.loss import MPNLossFactory, MultiLossFactory, ClassMPNLossFactory, ClassMultiLossFactory
+from Utils.loss import *
 from Utils.Utils import to_device, calc_metrics, subgraph_mask, Logger
 from config import get_config, update_config
 import numpy as np
 import pickle
-from Models import get_pose_model
+from Models import get_pose_model  # , get_pose_with_ref_model
 import os
 import sys
 
@@ -102,9 +102,25 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             edge_masks = []
             edge_labels = []
             # first the graph reduction
-            for i in range(len(output["preds"]["node"])):
+            for i in range(len(output["preds"]["node"])): # not sure if this is correct?
                 include_bordering_nodes = kwargs["config"].MODEL.LOSS.INCLUDE_BORDERING_NODES
                 mask = mask_node_connections(output["preds"]["node"][i].sigmoid().detach(), output["graph"]["edge_index"],
+                                             kwargs["config"].MODEL.MPN.NODE_THRESHOLD, output["labels"]["node"],
+                                             include_bordering_nodes=include_bordering_nodes)
+                edge_labels.append(output["labels"]["edge"])
+                edge_masks.append(output["masks"]["edge"] * mask.float())
+            output["labels"]["edge"] = edge_labels
+            output["masks"]["edge"] = edge_masks
+
+            loss, logging = loss_func(output["preds"], output["labels"], output["masks"])
+        elif isinstance(loss_func, BackgroundClassMultiLossFactory):
+            edge_masks = []
+            edge_labels = []
+            # first the graph reduction
+            for i in range(len(output["preds"]["edge"])):
+                include_bordering_nodes = kwargs["config"].MODEL.LOSS.INCLUDE_BORDERING_NODES
+                mask = mask_node_connections(output["labels"]["node"],
+                                             output["graph"]["edge_index"],
                                              kwargs["config"].MODEL.MPN.NODE_THRESHOLD, output["labels"]["node"],
                                              include_bordering_nodes=include_bordering_nodes)
                 edge_labels.append(output["labels"]["edge"])
@@ -175,6 +191,8 @@ def main():
             loss_func = MultiLossFactory(config)
         elif config.MODEL.LOSS.NAME == "node_edge_loss":
             loss_func = ClassMultiLossFactory(config)
+        elif config.MODEL.LOSS.NAME == "node_with_background_edge_loss":
+            loss_func = BackgroundClassMultiLossFactory(config)
         else:
             raise NotImplementedError
     else:
@@ -241,14 +259,20 @@ def main():
                 result_nodes = preds_nodes.sigmoid().squeeze()
                 result_nodes = torch.where(result_nodes < 0.5, torch.zeros_like(result_nodes), torch.ones_like(result_nodes))
             else:
-                result_nodes = None
+                # in case that there is a background class
+                # then the node classification performance can be calculated
+                if preds_classes is not None:
+                    result_nodes = preds_classes[-1].argmax(dim=1).squeeze() != 18
+                else:
+                    result_nodes = None
             result_classes = preds_classes[-1].argmax(dim=1).squeeze() if preds_classes is not None else None
             result_edges = preds_edges.sigmoid().squeeze()
             result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
 
             node_metrics = calc_metrics(result_nodes, node_labels, node_mask)
             edge_metrics = calc_metrics(result_edges, edge_labels, edge_mask)
-            class_metrics = calc_metrics(result_classes, class_labels, node_labels, 17)
+            # num_classes argument does not matter because only the accuracy is used which does not use this argument
+            class_metrics = calc_metrics(result_classes, class_labels, class_mask, 17)
 
             logger.log_vars("Metric/train", iter, **(edge_metrics or {}))
             logger.log_vars("Metric/Node/train", iter, **(node_metrics or {}))
@@ -329,6 +353,28 @@ def main():
                         preds["edge"][-1] = default_pred
                     else:
                         preds["edge"] = [default_pred]
+                elif isinstance(loss_func, BackgroundClassMultiLossFactory):
+                    loss_mask = masks["edge"].detach()
+                    edge_masks = []
+                    edge_labels = []
+                    # first the graph reduction
+                    mask = mask_node_connections(preds["class"][-1].softmax(dim=1)[:, -1], output["graph"]["edge_index"], 0.5,
+                                                 None)
+                    edge_labels.append(labels["edge"])
+                    edge_masks.append(masks["edge"] * mask.float())
+
+                    labels["edge"] = edge_labels
+                    masks["edge"] = edge_masks
+
+                    loss, logging = loss_func(preds, labels, masks)
+                    #
+                    default_pred = torch.zeros(output["graph"]["edge_index"].shape[1], dtype=torch.float,
+                                               device=output["graph"]["edge_index"].device) - 1.0
+                    if preds["edge"][-1] is not None:
+                        default_pred[mask] = preds["edge"][-1][mask].detach()
+                        preds["edge"][-1] = default_pred
+                    else:
+                        preds["edge"] = [default_pred]
                 preds_nodes, preds_edges, preds_classes = preds["node"], preds["edge"], preds["class"]
                 node_labels, edge_labels, class_labels = labels["node"], labels["edge"][-1], labels["class"]
                 node_mask, edge_mask, class_mask = masks["node"], masks["edge"][-1], masks["class"]
@@ -336,15 +382,21 @@ def main():
                 result_edges = preds_edges[-1].sigmoid().squeeze()
                 result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
 
-                if preds_nodes is not None:
+                if preds_nodes[-1] is not None:
                     result_nodes = preds_nodes[-1].sigmoid().squeeze()
                     result_nodes = torch.where(result_nodes < 0.5, torch.zeros_like(result_nodes), torch.ones_like(result_nodes))
                 else:
-                    result_nodes = None
-                    node_labels = None
+                    # in case that there is a background class
+                    # then the node classification performance can be calculated
+                    if preds_classes is not None:
+                        result_nodes = preds_classes[-1].argmax(dim=1).squeeze() != 18
+                    else:
+                        result_nodes = None
+                        node_labels = None
                 result_classes = preds_classes[-1].argmax(dim=1).squeeze() if preds_classes is not None else None
 
                 node_metrics = calc_metrics(result_nodes, node_labels, node_mask)
+                # num_classes argument does not matter because only the accuracy is used which does not use this argument
                 class_metrics = calc_metrics(result_classes, class_labels, node_labels, 17)
                 edge_metrics_complete = calc_metrics(result_edges, edge_labels, loss_mask)
                 edge_metrics_masked = calc_metrics(result_edges, edge_labels, edge_mask)

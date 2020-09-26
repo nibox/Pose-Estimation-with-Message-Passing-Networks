@@ -540,6 +540,22 @@ class BCELossWtihLogits(nn.Module):
             bce_loss[targets==1.0] *= self.pos_weight
         return bce_loss.mean()
 
+
+class BCELoss(nn.Module):
+    def __init__(self, pos_weight=None):
+        super().__init__()
+        self.pos_weight = pos_weight
+        self.loss = nn.BCELoss(reduction="none")
+
+    def forward(self, inputs, targets, reduction, mask=None, batch_index=None):
+        bce_loss = self.loss(inputs, targets)
+        if mask is not None:
+            bce_loss = bce_loss * mask
+        if self.pos_weight is not None:
+            bce_loss[targets==1.0] *= self.pos_weight
+        return bce_loss.mean()
+
+
 class CrossEntropyLossWithLogits(nn.Module):
     def __init__(self):
         super().__init__()

@@ -22,16 +22,20 @@ _C.MULTIPROCESSING_DISTRIBUTED = True
 _C.MODEL = CN()
 _C.MODEL.KP = "hrnet"
 _C.MODEL.PRETRAINED = ""  # means the path were the trained model is saved to and where the trained model is loaded from
+# _C.MODEL.WITH_FLIP_KERNEL = False   # did not work but i wont remove it in case
 _C.MODEL.FEATURE_GATHER_KERNEL = 3
 _C.MODEL.FEATURE_GATHER_PADDING = 1
+# _C.MODEL.WITH_LOCATION_REFINE = False  # did not work but wont remove it in case
 _C.MODEL.LOSS = CN()
 _C.MODEL.LOSS.NAME = "edge_loss"
 _C.MODEL.LOSS.LOSS_WEIGHTS = [1.0]
 _C.MODEL.LOSS.USE_FOCAL = True
+_C.MODEL.LOSS.EDGE_WITH_LOGITS = True
 _C.MODEL.LOSS.NODE_USE_FOCAL = True
 _C.MODEL.LOSS.FOCAL_ALPHA = 1.0
 _C.MODEL.LOSS.FOCAL_GAMMA = 2.0
 _C.MODEL.LOSS.NODE_BCE_POS_WEIGHT = 1.0
+_C.MODEL.LOSS.EDGE_BCE_POS_WEIGHT = 1.0
 _C.MODEL.LOSS.INCLUDE_BORDERING_NODES = False  # include connections to adjacent nodes of selected nodes for loss
 _C.MODEL.AUX_STEPS = 1
 _C.MODEL.KP_OUTPUT_DIM = 32  # 256 for hg, 32 for HR
@@ -105,6 +109,7 @@ _C.MODEL.HRNET.EXTRA.DECONV.CAT_OUTPUT = [True]
 _C.MODEL.MPN = CN(new_allowed=True)
 _C.MODEL.MPN.NODE_TYPE_SUMMARY = "not"
 _C.MODEL.MPN.NAME = "VanillaMPN"
+# _C.MODEL.MPN.PRETRAINED = ""
 _C.MODEL.MPN.STEPS = 10
 _C.MODEL.MPN.EDGE_MLP = "agnostic"
 _C.MODEL.MPN.NODE_INPUT_DIM = 128
@@ -123,6 +128,9 @@ _C.MODEL.MPN.SKIP = False
 _C.MODEL.MPN.AUX_LOSS_STEPS = 0  # 0 means only the last prediction is used for loss
 _C.MODEL.MPN.DROP_FEATURE = ""
 _C.MODEL.MPN.EDGE_STEPS = 0
+_C.MODEL.MPN.LATE_FUSION_POS = False
+
+# _C.MODEL.REFINE = CN(new_allowed=True)
 
 
 # configuration for the Graph Constructor
