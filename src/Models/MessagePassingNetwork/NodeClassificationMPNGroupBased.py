@@ -20,7 +20,7 @@ class LateFusionEdgeMLP(torch.nn.Module):
         edge = edge_attr[:, 2:]
         return self.out(nn.functional.relu(torch.cat([self.pos_mlp(pos), self.edge_mlp(edge)], dim=1), inplace=True))
 
-class NodeClassificationMPNSimple(torch.nn.Module):
+class NodeClassificationMPNGroupBased(torch.nn.Module):
 
     def __init__(self, config):
         super().__init__()
@@ -59,21 +59,26 @@ class NodeClassificationMPNSimple(torch.nn.Module):
 
         node_features_initial = node_features
         edge_features_initial = edge_features
-        """
-        if i >= self.steps - self.aux_loss_steps - 1:
-            preds_node.append(self.node_classification(node_features).squeeze())
-            preds_class.append(self.classification(node_features))
-        """
 
         preds_edge = []
         preds_node = []
         preds_class = []
+        mask, mask_2 = get_sub_graphs(node_types, edge_index)
         for i in range(self.edge_steps):
             if self.use_skip_connections:
                 node_features = torch.cat([node_features_initial, node_features], dim=1)
                 edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
-            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index,
+
+            out_edge_features = torch.zeros_like(edge_features_initial)
+            edge_index_1 = edge_index[:, mask]
+            node_features, out_edge_features[mask] = self.mpn_node_cls(node_features, edge_features[mask], edge_index_1,
                                                              node_types=node_types)
+            if self.use_skip_connections:
+                node_features = torch.cat([node_features_initial, node_features], dim=1)
+            edge_index_2 = edge_index[:, mask_2]
+            node_features, out_edge_features[mask_2] = self.mpn_node_cls(node_features, edge_features[mask_2], edge_index_2,
+                                                                   node_types=node_types)
+            edge_features = out_edge_features
 
         preds_edge.append(self.edge_classification(edge_features).squeeze())
 
@@ -89,15 +94,17 @@ class NodeClassificationMPNSimple(torch.nn.Module):
 
         return preds_edge, preds_node, preds_class, node_features, edge_features
 
-    def sum_node_types(self, node_types):
-        # 'nose','eye_l','eye_r','ear_l','ear_r', 'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
-        # 'hip_l','hip_r','kne_l','kne_r','ank_l','ank_r'
-        if self.node_summary == "not":
-            return node_types
-        elif self.node_summary == "left_right":
-            raise NotImplementedError
-        elif self.node_summary == "per_body_part":
-            # head, shoulder, arm left, arm right, left leg, right ,leg
-            mapping = torch.from_numpy(np.array([0, 0, 0, 0, 0, 1, 1, 2, 3, 2, 3, 4, 5, 4, 5, 4, 5])).to(node_types.device)
-            node_types = mapping[node_types]
-            return node_types
+
+def get_sub_graphs(node_cat, edge_index):
+    # 'nose','eye_l','eye_r','ear_l','ear_r', 'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
+    # 'hip_l','hip_r','kne_l','kne_r','ank_l','ank_r'
+    mask = None
+    for i in range(6):
+        cat = node_cat == i
+        if mask is None:
+            mask = cat[edge_index[0]] & cat[edge_index[1]]
+        else:
+            mask = mask | (cat[edge_index[0]] & cat[edge_index[1]])
+    return mask, torch.logical_not(mask)
+
+

@@ -9,7 +9,7 @@ from Utils.transformations import reverse_affine_map
 from Utils.transforms import transforms_hr_eval, transforms_hg_eval
 from config import update_config, get_config
 
-from data import CocoKeypoints_hr, CocoKeypoints_hg, HeatmapGenerator
+from data import CocoKeypoints_hr, CocoKeypoints_hg, HeatmapGenerator, JointsGenerator
 from Utils import graph_cluster_to_persons, adjust, to_tensor
 from Utils.dataset_utils import Graph
 from Models.PoseEstimation import get_upper_bound_model
@@ -111,9 +111,13 @@ def main():
     elif config.UB.SPLIT == "coco_17_mini":
         _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
         heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
+        joints_generator = [JointsGenerator(30, 17, 128, True),
+                            JointsGenerator(30, 17, 256, True)
+                            ]
         transforms, _ = transforms_hr_eval(config)
         eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
-                                    transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False)
+                                    transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
+                                    joint_generator=joints_generator)
     else:
         raise NotImplementedError
 
@@ -124,7 +128,7 @@ def main():
         anns = []
         for i in tqdm(range(config.UB.NUM_EVAL)):
 
-            imgs, _, masks, keypoints, _ = eval_set[i]
+            imgs, _, masks, keypoints, _, _ = eval_set[i]
             num_persons_gt = np.count_nonzero(keypoints[:, :, 2].sum(axis=1))
             persons_pred = keypoints[:num_persons_gt].round()  # rounding lead to ap=0.9
 
@@ -139,22 +143,28 @@ def main():
         coco_eval(eval_set.coco, anns, eval_set.img_ids[:config.UB.NUM_EVAL].astype(np.int))
 
         anns_cc = []
+        # anns_refined = []
         for i in tqdm(range(config.UB.NUM_EVAL)):
 
-            img, _, masks, keypoints, factors = eval_set[i]
+            img, _, masks, keypoints, factors, _ = eval_set[i]
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
-            scoremaps, _, _, class_labels, joint_det, joint_scores, edge_index, edge_labels, node_labels, _, _, _, _ = model(img, keypoints, masks, factors)
 
-            edge_index, edge_labels = subgraph(node_labels > 0.5, edge_index, edge_labels)
-            if edge_labels.shape[0] != 0:
-                test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_labels)
+            scoremaps, output = model(img, keypoints, masks, factors)
+            preds_nodes, preds_edges, preds_classes = output["preds"]["node"], output["preds"]["edge"], output["preds"]["class"]
+            node_labels, edge_labels, class_labels = output["labels"]["node"], output["labels"]["edge"], output["labels"]["class"]
+            joint_det, edge_index = output["graph"]["nodes"], output["graph"]["edge_index"]
+            joint_scores = output["graph"]["detector_scores"]
+            # joint_refined = None
+            edge_index, preds_edges = subgraph(preds_nodes > 0.5, edge_index, preds_edges)
+
+            if preds_edges.shape[0] != 0:
+                test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=preds_edges)
                 sol = cluster_graph(test_graph, str(config.MODEL.GC.CC_METHOD), complete=False)
                 sparse_sol_cc, _ = dense_to_sparse(torch.from_numpy(sol))
                 persons_pred_cc, _, _ = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol_cc,
-                                                                 class_labels)  # might crash
+                                                                 preds_classes)  # might crash
             else:
-                print("None")
                 persons_pred_cc = np.zeros([1, 17, 3])
 
             if config.UB.ADJUST:
@@ -169,6 +179,22 @@ def main():
 
             ann_cc = gen_ann_format(persons_pred_orig_cc, eval_set.img_ids[i])
             anns_cc.append(ann_cc)
+
+            """
+            if joint_refined is not None:
+                if len(joint_refined) != 0:
+                    persons_pred_refine = parse_refinement(joint_refined[:, :3], joint_refined[:, 3], joint_refined[:, 4])
+                else:
+                    persons_pred_refine = np.zeros([1, 17, 3])
+
+                if len(persons_pred_refine.shape) == 1:
+                    persons_pred_refine = np.zeros([1, 17, 3])
+                persons_pred_refine = reverse_affine_map(persons_pred_refine .copy(), (img_info["width"], img_info["height"]),
+                                                      scaling_type=config.DATASET.SCALING_TYPE)
+                ann_refined = gen_ann_format(persons_pred_refine, eval_set.img_ids[i])
+                anns_refined.append(ann_refined)
+            # """
+
         print("Upper bound 2")
         coco_eval(eval_set.coco, anns_cc, eval_set.img_ids[:config.UB.NUM_EVAL].astype(np.int))
 

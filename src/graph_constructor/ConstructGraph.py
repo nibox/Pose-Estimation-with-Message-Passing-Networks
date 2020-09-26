@@ -39,6 +39,7 @@ class NaiveGraphConstructor:
 
         self.node_matching_radius = config.NODE_MATCHING_RADIUS
         self.node_inclusion_radius = config.NODE_INCLUSION_RADIUS
+        self.with_background_class = config.WITH_BACKGROUND
 
     def construct_graph(self):
         x_list, edge_attr_list, edge_index_list, edge_labels_list, joint_det_list = [], [], [], [], []
@@ -144,7 +145,7 @@ class NaiveGraphConstructor:
                     edge_labels, node_labels, label_mask, label_mask_node = self._construct_edge_labels_5(
                         joint_det.detach(), self.joints_gt[batch], self.factor_list[batch], edge_index.detach())
                 elif self.edge_label_method == 6:
-                    edge_labels, node_labels, node_classes, node_persons, label_mask, label_mask_node= self._construct_edge_labels_6(
+                    edge_labels, node_labels, node_classes, node_persons, label_mask, label_mask_node, class_mask= self._construct_edge_labels_6(
                         joint_det.detach(), self.joints_gt[batch], self.factor_list[batch], edge_index.detach())
                 elif self.edge_label_method == 7:
                     edge_labels, node_labels, node_classes, node_persons, label_mask = self._construct_edge_labels_7(
@@ -176,14 +177,12 @@ class NaiveGraphConstructor:
                     label_mask = label_mask[mask]
 
                 # create class labels
-                if node_labels is not None and node_classes is not None:
-                    class_mask = node_labels.clone() * label_mask_node
-                    if self.use_weighted_class_loss:
-                        weights = self.heatmaps[batch, node_classes, joint_det[:, 1], joint_det[:, 2]]
+                if self.use_weighted_class_loss and class_mask is not None:
+                    weights = self.heatmaps[batch, node_classes, joint_det[:, 1], joint_det[:, 2]]
 
-                        weights = torch.where(weights < 0.1, torch.ones_like(weights, device=weights.device) * 0.1,
-                                              weights)
-                        class_mask = weights * class_mask
+                    weights = torch.where(weights < 0.1, torch.ones_like(weights, device=weights.device) * 0.1,
+                                          weights)
+                    class_mask = weights * class_mask
 
             # old label code
             # node_labels_2 = torch.zeros(joint_det.shape[0], device=joint_det.device, dtype=torch.float32)
@@ -878,23 +877,34 @@ class NaiveGraphConstructor:
             col_1 = torch.cat([col_1, col_2], dim=0)
 
         sol = row_1, col_1
-        node_labels = torch.zeros(joint_det.shape[0], dtype=torch.float32, device=self.device)
-        node_labels[col_1] = 1.0
 
+        node_labels, node_mask = None, None
+        # edges
         edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt_1, joint_det, edge_index, sol)
         joint_det_idx = torch.arange(0, len(joint_det), dtype=torch.int64, device=self.device)
         label_mask = NaiveGraphConstructor.create_loss_mask(joint_det_idx[ambiguous_dets], edge_index)
 
-        node_classes = torch.zeros(num_joints_det, dtype=torch.long, device=self.device)
-        node_classes[col_1] = joint_idx_gt_1[row_1]
-
-        node_persons = torch.zeros(num_joints_det, dtype=torch.long, device=self.device) - 1
-        node_persons[col_1] = person_idx_gt_1[row_1].long()
+        # nodes
+        node_labels = torch.zeros(joint_det.shape[0], dtype=torch.float32, device=self.device)
+        node_labels[col_1] = 1.0
 
         node_mask = torch.ones_like(node_labels, dtype=torch.float32, device=self.device)
         if self.include_neighbouring_keypoints:
             node_mask[ambiguous_dets] = 0
-        return edge_labels, node_labels, node_classes, node_persons, label_mask, node_mask
+
+        # classes
+        node_classes = torch.zeros(num_joints_det, dtype=torch.long, device=self.device)
+        node_classes[col_1] = joint_idx_gt_1[row_1]
+        class_mask = node_labels.clone() * node_mask
+        if self.with_background_class:
+            node_classes[node_labels != 1.0] = 17  # background class
+            class_mask[:] = 1.0
+
+        # node clusters
+        node_persons = torch.zeros(num_joints_det, dtype=torch.long, device=self.device) - 1
+        node_persons[col_1] = person_idx_gt_1[row_1].long()
+
+        return edge_labels, node_labels, node_classes, node_persons, label_mask, node_mask, class_mask
 
     def _construct_edge_labels_7(self, joint_det, joints_gt, factors, edge_index):
         assert not self.use_gt
