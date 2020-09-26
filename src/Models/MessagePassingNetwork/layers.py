@@ -241,3 +241,46 @@ class MPLayer2(MessagePassing):
         if self.update_mlp is not None:
             aggr_out = self.update_mlp(aggr_out)
         return aggr_out
+
+"""
+class NaiveNodeMPN(MessagePassing):
+
+    def __init__(self, node_feature_dim, edge_feature_dim, edge_feature_hidden, aggr, use_node_update_mlp, skip=False):
+        super(NaiveNodeMPN, self).__init__(aggr=aggr)
+        # todo better architecture
+
+        node_factor = 2 if skip else 1
+        edge_factor = 2 if skip else 1
+
+        self.mlp_edge = nn.Sequential(nn.Linear(node_feature_dim * 2 * node_factor, edge_feature_hidden),
+                                      nn.ReLU(inplace=True),
+                                      nn.Linear(edge_feature_hidden, edge_feature_dim),
+                                      nn.ReLU(inplace=True),
+                                      )
+
+        # self.mlp_edge = PerInvMLP(node_feature_dim, edge_feature_dim)
+        self.mlp_node = nn.Sequential(nn.Linear(node_feature_dim * node_factor + edge_feature_dim, node_feature_dim),
+                                      nn.ReLU(inplace=True),
+                                      )
+        self.update_mlp = nn.Sequential(nn.Linear(node_feature_dim, node_feature_dim), nn.ReLU()) if use_node_update_mlp else None
+
+
+    def forward(self, x, edge_index):
+        num_nodes = x.size(0)
+
+        j, i = edge_index  # message is from j to i
+        x_i, x_j = x[i], x[j]
+        edge_attr = self.mlp_edge(torch.cat([x_i, x_j], dim=1))
+
+        return self.propagate(edge_index, size=(num_nodes, num_nodes), x=x, edge_attr=edge_attr)
+
+    def message(self, x_i, x_j, edge_attr):
+        # edge_attr = self.mlp_edge(torch.cat([x_i, x_j, edge_attr], dim=1))
+        out = self.mlp_node(torch.cat([x_i, edge_attr], dim=1))
+        return out
+
+    def update(self, aggr_out):
+        if self.update_mlp is not None:
+            aggr_out = self.update_mlp(aggr_out)
+        return aggr_out
+"""

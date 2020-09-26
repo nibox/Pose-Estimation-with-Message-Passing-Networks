@@ -52,3 +52,11 @@ def get_mpn_model(config, **kwargs):
         return JointTypeClassification(config)
     else:
         raise NotImplementedError
+
+"""
+def get_refinement_model(config):
+    if config.NAME == "NaiveRefinement":
+        return NaiveRefinement(config)
+    elif config.NAME == "NaiveRefinementBaseline":
+        return NaiveRefinementBaseline(config)
+# """

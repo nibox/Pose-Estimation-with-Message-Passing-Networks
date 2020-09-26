@@ -244,7 +244,7 @@ def draw_poses(img: [torch.tensor, np.array], persons, fname=None, output_size=1
     :return:
     """
     img = to_numpy(img)
-    assert img.shape[0] == 512 or img.shape[1] == 512
+    # assert img.shape[0] == 512 or img.shape[1] == 512
 
     if len(persons) == 0:
         fig = plt.figure()
@@ -293,6 +293,63 @@ def draw_poses(img: [torch.tensor, np.array], persons, fname=None, output_size=1
     else:
         raise NotImplementedError
 
+
+
+def draw_poses_fp(img: [torch.tensor, np.array], persons, debug_flags, fname=None, output_size=128.0):
+    """
+
+    :param img:
+    :param persons: (N,17,3) array containing the person in the image img. Detected or ground truth does not matter.
+    :param fname: If not none an image will be saved under this name , otherwise the image will be displayed
+    :return:
+    """
+    img = to_numpy(img)
+    # assert img.shape[0] == 512 or img.shape[1] == 512
+
+    if len(persons) == 0:
+        fig = plt.figure()
+        plt.imshow(img)
+        plt.savefig(fig=fig, fname=fname)
+        plt.close(fig)
+        return
+    pair_ref = [
+        [1, 2], [2, 3], [1, 3],
+        [6, 8], [8, 10], [12, 14], [14, 16],
+        [7, 9], [9, 11], [13, 15], [15, 17],
+        [6, 7], [12, 13], [6, 12], [7, 13]
+    ]
+    colors = np.linspace(0, 179, len(persons))
+    colors_joints = (None, 0, 236/2, 116/2)
+    # image to 8bit hsv (i dont know what hsv values opencv expects in 32bit case=)
+    if img.dtype != np.uint8:
+        img = img * 255.0
+        img = img.astype(np.uint8)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    assert len(colors) == len(persons)
+    for person in range(len(persons)):
+        scale = 512.0 / output_size
+        color = (colors[person], 255., 255)
+        valid_joints = persons[person, :, 2] > 0
+        t = persons[person, valid_joints]
+        center_joint = np.mean(persons[person, valid_joints] * scale, axis=0).astype(np.int)
+        for i in range(len(persons[person])):
+            # scale up to 512 x 512
+            joint_1 = persons[person, i]
+            joint_1_valid = joint_1[2] > 0
+            x_1, y_1 = np.multiply(joint_1[:2], scale).astype(np.int)
+            if joint_1_valid:
+                color_joint = (colors_joints[int(debug_flags[person, i])], 255., 255.)
+                cv2.circle(img, (x_1, y_1), 2, color_joint, -1)
+                cv2.line(img, (x_1, y_1), (center_joint[0], center_joint[1]), color)
+
+    img = cv2.cvtColor(img, cv2.COLOR_HSV2RGB)
+    fig = plt.figure()
+    plt.imshow(img)
+    if fname is not None:
+        plt.savefig(fig=fig, fname=fname)
+        plt.close(fig)
+    else:
+        raise NotImplementedError
 
 def draw_edges_conf(img, joint_det, person_labels, node_labels, edge_index, preds_edges, fname=None, output_size=128.0):
     # filter nodes using the node labels -> subgraph
@@ -496,23 +553,20 @@ def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred
             keypoints = np.zeros([17, 3])
             for joint_type in range(17):  # 17 different joint types
                 # take the detected joints of a certain type
-                person_joint_for_type = person_joints[person_joints[:, 2] == joint_type]
-                person_scores_for_type = person_scores[person_joints[:, 2] == joint_type]
+                select = person_joints[:, 2] == joint_type
+                person_joint_for_type = person_joints[select]
+                person_scores_for_type = person_scores[select]
                 if len(person_joint_for_type) != 0:
-                    f = True
-                    if f:
-                        keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
-                        joint_idx = np.argmax(person_scores_for_type, axis=0)
-                        keypoints[joint_type] = person_joint_for_type[joint_idx]# np.mean(person_joint_for_type, axis=0)
-                        keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
-                        # keypoints[joint_type, 2] = np.mean(person_scores_for_type, axis=0)
-                    else:
-                        keypoints[joint_type] = np.mean(person_joint_for_type, axis=0)
+                    #keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
+                    joint_idx = np.argmax(person_scores_for_type, axis=0)
+                    keypoints[joint_type] = person_joint_for_type[joint_idx]# np.mean(person_joint_for_type, axis=0)
+                    keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
 
             #keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
-            keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
-            # keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
-            persons.append(keypoints)
+            if (keypoints[:, 2] > 0).sum() > 0:
+                keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
+                # keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
+                persons.append(keypoints)
         elif len(person_joints) == 1 and False:
 
             keypoints = np.zeros([17, 3])
@@ -529,27 +583,129 @@ def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred
     persons = np.array(persons)
     return persons, mutant_detected, person_labels
 
-"""
-def num_non_detected_points(joint_det, keypoints, threshold, use_gt):
 
-    person_idx_gt, joint_idx_gt = keypoints[0, :, :, 2].nonzero(as_tuple=True)
-    joints_gt = keypoints[0, person_idx_gt, joint_idx_gt, :2].round().long()
-    joints_gt_loc = torch.cat([joints_gt, joint_idx_gt.unsqueeze(1)], 1)
-    distance = torch.norm(joints_gt_loc[:, None, :2] - joint_det[:, :2].float(), dim=2)
+def graph_cluster_to_persons_debug(joints, joint_scores, joint_connections, class_pred, node_labels):
+    """
+    :param class_pred:
+    :param joints: (N, 2) vector of joints
+    :param joint_connections: (2, E) array/tensor that indicates which joint are connected thus belong to the same person
+    :return: (N persons, 17, 3) array. 17 joints, 2 positions + visibiilty flag (in case joints are missing)
+    """
+    joints, joint_connections, joint_scores = to_numpy(joints), to_numpy(joint_connections), to_numpy(joint_scores)
+    joint_classes = to_numpy(class_pred) if class_pred is not None else None
+    node_labels = to_numpy(node_labels)
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import connected_components
+    # construct dense adj matrix
+    num_nodes = len(joints)
+    adj_matrix = np.zeros([num_nodes, num_nodes])
+    adj_matrix[joint_connections[0], joint_connections[1]] = 1
+    graph = csr_matrix(adj_matrix)
+    n_components, person_labels = connected_components(graph, directed=False, return_labels=True)
 
-    different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
-    distance[different_type] = 100000.0
-    non_valid = distance >= threshold
-    distance[non_valid] = 100000.0
-    from scipy.optimize import linear_sum_assignment
-    distance = distance.cpu().numpy()
-    if use_gt:
-        distance = distance[:, :-len(person_idx_gt)]
-    sol = linear_sum_assignment(distance)
-    cost = np.sum(distance[sol[0], sol[1]])
-    num_miss_detections = cost // 100000
-    return num_miss_detections, len(person_idx_gt)
-"""
+    persons = []
+    debug = []
+    for i in range(n_components):
+        # check if cc has more than one node
+        person_joints = joints[person_labels == i]
+        person_scores = joint_scores[person_labels == i]
+        person_node_labels = node_labels[person_labels == i]
+        if joint_classes is not None:
+            person_joints[:, 2] = np.argmax(joint_classes[person_labels == i], axis=1)
+
+        if len(person_joints) > 1:  # isolated joints also form a cluster -> ignore them
+            # rearrange person joints
+            # fourth dimension is used for label information to distinguish joint
+            keypoints = np.zeros([17, 3])
+            person_debug = np.zeros(17)
+            for joint_type in range(17):  # 17 different joint types
+                # take the detected joints of a certain type
+                select = person_joints[:, 2] == joint_type
+                person_joint_for_type = person_joints[select]
+                person_scores_for_type = person_scores[select]
+                person_node_labels_for_type = person_node_labels[select]
+                if len(person_joint_for_type) != 0:
+                    joint_idx = np.argmax(person_scores_for_type, axis=0)
+                    keypoints[joint_type] = person_joint_for_type[joint_idx]
+                    keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
+
+                    # coding 0 : nothin
+                    #        1 : there is a tp and it is replaced with a fp (swap error)
+                    #        2 : there is not tp but there is an fp (fill in)
+                    #        3 : there is tp and it is chosen
+                    chosen_label = person_node_labels_for_type[joint_idx]
+                    available_label = person_node_labels_for_type.max()
+                    if chosen_label == 1:  # 3
+                        person_debug[joint_type] = 3
+                    elif chosen_label == 0 and available_label == 1: # 1
+                        person_debug[joint_type] = 1
+                    elif chosen_label == 0 and available_label == 0: # 2
+                        person_debug[joint_type] = 2
+                    else:
+                        print(f"chose_label: {chosen_label}, available_label: {available_label}")
+                        raise NotImplementedError
+
+            if (keypoints[:, 2] > 0).sum() > 0:
+                keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
+                persons.append(keypoints)
+                assert (person_debug[keypoints[:, 2] > 0] == 0).sum() == 0
+                debug.append(person_debug)
+
+    persons = np.array(persons)
+    debug = np.array(debug)
+    return persons, person_labels, debug
+
+
+def parse_refinement(joints, joint_scores, person_labels):
+    """
+    :param class_pred:
+    :param joints: (N, 2) vector of joints
+    :param joint_connections: (2, E) array/tensor that indicates which joint are connected thus belong to the same person
+    :return: (N persons, 17, 3) array. 17 joints, 2 positions + visibiilty flag (in case joints are missing)
+    """
+    joints, joint_scores = to_numpy(joints), to_numpy(joint_scores)
+    person_labels = to_numpy(person_labels.long())
+
+    persons = []
+    for i in range(person_labels.max() + 1):
+        # check if cc has more than one node
+        person_joints = joints[person_labels == i]
+        person_scores = joint_scores[person_labels == i]
+
+        if len(person_joints) > 1:  # isolated joints also form a cluster -> ignore them
+            # rearrange person joints
+            keypoints = np.zeros([17, 3])
+            for joint_type in range(17):  # 17 different joint types
+                # take the detected joints of a certain type
+                person_joint_for_type = person_joints[person_joints[:, 2] == joint_type]
+                person_scores_for_type = person_scores[person_joints[:, 2] == joint_type]
+                if len(person_joint_for_type) != 0:
+                    f = True
+                    if f:
+                        keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
+                        joint_idx = np.argmax(person_scores_for_type, axis=0)
+                        keypoints[joint_type] = person_joint_for_type[joint_idx]# np.mean(person_joint_for_type, axis=0)
+                        keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
+                        # keypoints[joint_type, 2] = np.mean(person_scores_for_type, axis=0)
+                    else:
+                        keypoints[joint_type] = np.mean(person_joint_for_type, axis=0)
+
+            keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
+            persons.append(keypoints)
+        elif len(person_joints) == 1 and False:
+
+            keypoints = np.zeros([17, 3])
+            joint_type = person_joints[:, 2]
+            person_score = person_scores[0]
+
+            keypoints[joint_type, 2] = person_score
+            keypoints[:, :2] = person_joints[0, :2]
+
+            persons.append(keypoints)
+
+    persons = np.array(persons)
+    return persons
+
 
 def num_non_detected_points(joint_det, keypoints, factors, min_num_joints=1):
     num_joints_det = len(joint_det)

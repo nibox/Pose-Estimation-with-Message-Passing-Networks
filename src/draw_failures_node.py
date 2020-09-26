@@ -3,14 +3,16 @@ import pickle
 import torch
 import numpy as np
 import torchvision
-from torch_geometric.utils import f1_score, subgraph
+from torch_geometric.utils import f1_score, subgraph, dense_to_sparse
 from tqdm import tqdm
 from config import get_config, update_config
 from torch.utils.tensorboard import SummaryWriter
+from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
+from Utils.dataset_utils import Graph
 
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, JointsGenerator
 from Utils.transforms import transforms_hr_eval
-from Utils import draw_detection, draw_poses, pred_to_person, to_tensor, draw_detection_with_conf, draw_detection_with_cluster, draw_edges_conf, subgraph_mask, one_hot_encode
+from Utils import *
 from Models import get_pose_model
 import matplotlib
 matplotlib.use("Agg")
@@ -27,11 +29,12 @@ def main():
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
     # img_ids_to_use = [84015, 84381, 117772, 237976, 281133, 286645, 505421]
+    """
     img_ids_to_use = [2299, 68409, 205324, 361586, 171190, 84674, 238410, 523957,
                       49759, 18491, 68409, 280710, 303713, 100723,
                       13774, 496409, 187362, 177861, 258388, 496854, 252716,
                       303713, 49060, 312421, 468332, 559348, 484415, 581206]
-
+    # """
 
     ######################################
     # set is used, "train" means validation set corresponding to the mini train set is used )
@@ -89,10 +92,12 @@ def main():
 
     image_to_draw = []
     with torch.no_grad():
-        for i in tqdm(range(2302)):
+        for i in tqdm(range(100)):
             img_id = eval_set.img_ids[i]
+            """
             if img_id not in img_ids_to_use:
                 continue
+            # """
             img, _, masks, keypoints, factors, _ = eval_set[i]
             img_transformed = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
@@ -116,14 +121,19 @@ def main():
             mask = subgraph_mask(preds_nodes > config.MODEL.MPN.NODE_THRESHOLD, edge_index)
             sub_preds_edges = result_edges * mask.float()
 
+            persons_pred, person_labels, debug_fp = fp_persons(joint_det, preds_nodes, edge_index, sub_preds_edges,
+                                                               preds_classes, config.MODEL.GC.CC_METHOD, node_labels)
+            """
             persons_pred, mutants, person_labels = pred_to_person(joint_det, preds_nodes, edge_index, sub_preds_edges,
                                                                   preds_classes, config.MODEL.GC.CC_METHOD)
             # persons_pred_label, _, _ = pred_to_person(joint_det, joint_scores, edge_index, edge_labels, config.MODEL.GC.CC_METHOD)
+            """
             num_persons_det = len(persons_pred)
 
 
+
             img = np.array(transforms_inv(img.cpu().squeeze()))
-            if (num_persons_gt != num_persons_det) or mutants or f1_s < 0.9:
+            if (num_persons_gt != num_persons_det) or f1_s < 0.9:
                 keypoints = keypoints[:, :num_persons_gt].squeeze().cpu().numpy()
                 joint_det = joint_det.squeeze().cpu().numpy()
                 preds_nodes = preds_nodes.squeeze().cpu().numpy()
@@ -133,21 +143,22 @@ def main():
                 if len(keypoints.shape) != 3:
                     keypoints = keypoints[np.newaxis]
                 saving_cause = SavingCause(f1=f1_s, additional_p=num_persons_det > num_persons_gt,
-                                           missing_p=num_persons_det < num_persons_gt, mutants=mutants)
+                                           missing_p=num_persons_det < num_persons_gt, mutants=False)
                 image_to_draw.append(
-                    (eval_set.img_ids[i], img, persons_pred, joint_det, preds_nodes, person_labels, keypoints, saving_cause, edge_index, preds_edges, node_labels ))
+                    (eval_set.img_ids[i], img, persons_pred, joint_det, preds_nodes, person_labels, keypoints, saving_cause, edge_index, preds_edges, node_labels, debug_fp))
 
         # draw images
         # best image
         output_dir = f"tmp/output_{config_name}"
         os.makedirs(output_dir, exist_ok=True)
         for i, samples in enumerate(image_to_draw):
-            img_id, img, persons, joint_det, joint_scores, person_labels, keypoints, saving_cause, edge_index, preds_edges, node_labels = samples
+            img_id, img, persons, joint_det, joint_scores, person_labels, keypoints, saving_cause, edge_index, preds_edges, node_labels, debug_fp = samples
             failures = filter(lambda x: x is not None,
                               [cause if getattr(saving_cause, cause) and cause != "f1" else None for cause in
                                saving_cause.__dict__.keys()])
             failures = "|".join(failures)
             draw_poses(img.copy(), persons, f"{output_dir}/{i}_{img_id}_{int(saving_cause.f1 * 100)}_{failures}.png", output_size=output_size)
+            draw_poses_fp(img.copy(), persons, debug_fp, f"{output_dir}/{i}_{img_id}_fp.png", output_size=output_size)
             # draw_poses(img, person_label, f"{output_dir}/{i}_{img_id}_gt_labels.png", output_size=output_size)
             draw_poses(img.copy(), keypoints, f"{output_dir}/{i}_{img_id}_gt.png", output_size=output_size)
             draw_detection_with_conf(img.copy(), joint_det.copy(), joint_scores, keypoints, fname=f"{output_dir}/{i}_{img_id}_conf_det.png", output_size=output_size)
@@ -155,6 +166,17 @@ def main():
             draw_detection_with_cluster(img.copy(), joint_det.copy(), person_labels, keypoints, fname=f"{output_dir}/{i}_{img_id}_clust_det.png", output_size=output_size)
             draw_edges_conf(img.copy(), joint_det, person_labels, node_labels, edge_index, preds_edges, fname=f"{output_dir}/{i}_{img_id}_edges.png", output_size=output_size)
 
+
+
+def fp_persons(joint_det, joint_scores, edge_index, pred, class_pred, cc_method, node_labels):
+    test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
+
+    sol = cluster_graph(test_graph, cc_method, complete=False)
+    sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
+
+    persons_pred, person_labels, debug_flags = graph_cluster_to_persons_debug(joint_det, joint_scores, sparse_sol,
+                                                                    class_pred, node_labels)  # might crash
+    return persons_pred, person_labels, debug_flags
 
 if __name__ == "__main__":
     main()
