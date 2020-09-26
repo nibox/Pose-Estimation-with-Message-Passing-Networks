@@ -9,6 +9,7 @@ def get_multi_scale_size(image, input_size, current_scale, min_scale):
 
     # calculate the size for min_scale
     min_input_size = int((min_scale * input_size + 63)//64 * 64)
+    # scale is relative to min scale and min_input_size
     if w < h:
         w_resized = int(min_input_size * current_scale / min_scale)
         h_resized = int(
@@ -51,8 +52,8 @@ def _get_affine_transform(center,
     if not isinstance(scale, np.ndarray) and not isinstance(scale, list):
         print(scale)
         scale = np.array([scale, scale])
-
-    scale_tmp = scale * 200.0
+    # overall goal is to compute two sets of 3 points which are related by an affine transform
+    scale_tmp = scale * 200.0  # effectively
     src_w = scale_tmp[0]
     dst_w = output_size[0]
     dst_h = output_size[1]
@@ -63,7 +64,7 @@ def _get_affine_transform(center,
 
     src = np.zeros((3, 2), dtype=np.float32)
     dst = np.zeros((3, 2), dtype=np.float32)
-    src[0, :] = center + scale_tmp * shift
+    src[0, :] = center + scale_tmp * shift  # scale_tmp is used to scale the shift s.t. same shift parameters can
     src[1, :] = center + src_dir + scale_tmp * shift
     dst[0, :] = [dst_w * 0.5, dst_h * 0.5]
     dst[1, :] = np.array([dst_w * 0.5, dst_h * 0.5]) + dst_dir
@@ -182,11 +183,14 @@ def _affine_transform(pt, t):
 
 
 def _get_3rd_point(a, b):
+    # direct: is direction from b to a
+    # output: 2d cross product resulting in an orthogonal vector to ba
     direct = a - b
     return b + np.array([-direct[1], direct[0]], dtype=np.float32)
 
 
 def _get_dir(src_point, rot_rad):
+    # src_point is rotated by rot_rad
     sn, cs = np.sin(rot_rad), np.cos(rot_rad)
 
     src_result = [0, 0]
@@ -194,6 +198,26 @@ def _get_dir(src_point, rot_rad):
     src_result[1] = src_point[0] * sn + src_point[1] * cs
 
     return src_result
+
+def multiscale_keypoints(keypoints, factors, image, input_size, scale, min_scale):
+
+    def _affine_joints(joints, mat):
+        joints = np.array(joints)
+        shape = joints.shape
+        joints = joints.reshape(-1, 2)
+        return np.dot(np.concatenate(
+            (joints, joints[:, 0:1]*0+1), axis=1), mat.T).reshape(shape)
+
+    def _affine_factors(factors, mat):
+        return factors * mat[0, 0] * mat[1, 1]
+
+    resized_img, center, scale = get_multi_scale_size(image, input_size, scale, min_scale)
+    mat = _get_affine_transform(center, scale, 0, (int(resized_img[0]), int(resized_img[1])))
+    keypoints[:, :, :2] = _affine_joints(keypoints[:, :, :2], mat)
+    factors = _affine_factors(factors, mat)
+
+    return keypoints, factors
+
 
 FLIP_CONFIG = {
     'COCO': [

@@ -1,6 +1,7 @@
 import pickle
 import torch
 import torchvision
+import sys
 import numpy as np
 from torch_geometric.utils import precision, recall, subgraph
 from tqdm import tqdm
@@ -14,6 +15,12 @@ from Utils.transforms import transforms_to_tensor
 from Utils.eval import gen_ann_format, EvalWriter
 
 
+def merge_dicts(dict_1, dict_2):
+    for key in dict_1.keys():
+        dict_1[key].append(dict_2[key])
+    return dict_1
+
+
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
     torch.backends.cudnn.deterministic = True
@@ -22,10 +29,13 @@ def main():
 
     config_dir = "hybrid_class_agnostic_end2end"
     # config_dir = "train"
-    config_name = "model_56_1_0_8"
+    # config_name = "model_56_1_0_6_0"
+    # file_name = "t"
+    config_name = sys.argv[1]
+    file_name = sys.argv[2]
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
-    eval_writer = EvalWriter(config, fname="eval_10_multiscale_flip_scoremap_filter.txt")
+    eval_writer = EvalWriter(config, fname=f"{file_name}.txt")
 
     heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
     joint_generator = [JointsGenerator(30, 17, 128, True),
@@ -48,7 +58,18 @@ def main():
 
     anns = []
     anns_with_people = []
+    anns_w_refine = []
+    anns_w_adjust = []
+    anns_w_adjust_refine = []
     imgs_with_people = []
+
+    # classification
+    eval_node = {"acc": [], "prec": [], "rec": [], "f1": []}
+    eval_edge = {"acc": [], "prec": [], "rec": [], "f1": []}
+    eval_edge_masked = {"acc": [], "prec": [], "rec": [], "f1": []}
+    eval_classes_baseline_acc = []
+    eval_classes_acc = []
+
     eval_ids = []
     num_iter = len(eval_set)
     with torch.no_grad():
@@ -62,9 +83,11 @@ def main():
 
             if keypoints.sum() == 0.0:
                 keypoints = None
+                factors = None
 
-            scoremaps, output = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, None, config)
+            scoremaps, output = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, config, keypoints, factors)
             preds_nodes, preds_edges, preds_classes = output["preds"]["node"], output["preds"]["edge"], output["preds"]["class"]
+            node_labels, edge_labels, class_labels = output["labels"]["node"], output["labels"]["edge"], output["labels"]["class"]
             joint_det, edge_index = output["graph"]["nodes"], output["graph"]["edge_index"]
             joint_scores = output["graph"]["detector_scores"]
             tags = output["graph"]["tags"]
@@ -76,22 +99,70 @@ def main():
             preds_baseline_class_one_hot = one_hot_encode(preds_baseline_class, 17, torch.float)
             # preds_classes_gt = one_hot_encode(class_labels, 17, torch.float) if class_labels is not None else preds_classes
 
+            # classification metrics
+            if node_labels is not None:
+                true_positive_idx = preds_nodes > config.MODEL.MPN.NODE_THRESHOLD
+                mask = subgraph_mask(true_positive_idx, edge_index)
+                result_edges = preds_edges * mask.float()
+
+                result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
+                result_nodes = torch.where(preds_nodes < config.MODEL.MPN.NODE_THRESHOLD, torch.zeros_like(preds_nodes), torch.ones_like(preds_nodes))
+
+                eval_node = merge_dicts(eval_node, calc_metrics(result_nodes, node_labels))
+                eval_edge = merge_dicts(eval_edge, calc_metrics(result_edges, edge_labels))
+                if preds_classes is not None and node_labels.sum() > 1.0:
+                    eval_classes_baseline_acc.append(calc_metrics(preds_baseline_class, class_labels, node_labels, 17)["acc"])
+                    eval_classes_acc.append(calc_metrics(preds_classes.argmax(dim=1), class_labels, node_labels, 17)["acc"])
+
+                """
+                if node_labels.sum() > 1.0:
+                    true_positive_idx = node_labels == 1.0
+                    mask = subgraph_mask(true_positive_idx, edge_index)
+                    result_edges = torch.where(preds_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
+                    eval_edge_masked = merge_dicts(eval_edge_masked, calc_metrics(result_edges, edge_labels, mask.float()))
+                # """
+
+
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
             ann = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
                               int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, "short_with_resize",
                               min(config.TEST.SCALE_FACTOR), config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD,
                               preds_classes, config.TEST.WITH_REFINE, joint_scores)
+            ann_w_refine = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, "short_with_resize",
+                              min(config.TEST.SCALE_FACTOR), False, config.MODEL.MPN.NODE_THRESHOLD,
+                              preds_classes, True, joint_scores)
+            ann_w_adjust = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, "short_with_resize",
+                              min(config.TEST.SCALE_FACTOR), True, config.MODEL.MPN.NODE_THRESHOLD,
+                              preds_classes, False, joint_scores)
+            ann_w_adjust_refine = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, "short_with_resize",
+                              min(config.TEST.SCALE_FACTOR), True, config.MODEL.MPN.NODE_THRESHOLD,
+                              preds_classes, True, joint_scores)
 
             if ann is not None:
                 anns.append(ann)
+                anns_w_adjust.append(ann_w_adjust)
+                anns_w_adjust_refine.append(ann_w_adjust_refine)
+                anns_w_refine.append(ann_w_refine)
             if keypoints is not None and ann is not None:
                 imgs_with_people.append(int(eval_set.img_ids[i]))
                 anns_with_people.append(ann)
 
 
         eval_writer.eval_coco(eval_set.coco, anns, np.array(eval_ids), "General Evaluation", "kpt_det_full_set_multi_scale.json")
+        eval_writer.eval_coco(eval_set.coco, anns_w_refine, np.array(eval_ids), "With refinment", "full_dt.json")
+        eval_writer.eval_coco(eval_set.coco, anns_w_adjust, np.array(eval_ids), "With adjustment", "full_dt.json")
+        eval_writer.eval_coco(eval_set.coco, anns_w_adjust_refine, np.array(eval_ids), "Wtih refinement + adjustment", "full_dt.json")
         eval_writer.eval_coco(eval_set.coco, anns_with_people, np.array(imgs_with_people), f"General Evaluation on not empty images {len(anns_with_people)}")
+
+        eval_writer.eval_metrics(eval_node, "Node metrics")
+        eval_writer.eval_metrics(eval_edge, "Edge metrics")
+        eval_writer.eval_metrics(eval_edge_masked, "Edge metrics masked")
+        eval_writer.eval_metric(eval_classes_baseline_acc, "Type classification using backbone detections as baseline")
+        eval_writer.eval_metric(eval_classes_acc, "Type classification")
         eval_writer.close()
 
 

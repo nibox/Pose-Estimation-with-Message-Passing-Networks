@@ -143,6 +143,17 @@ class PoseEstimationBaseline(nn.Module):
         base_size, center, scale = get_multi_scale_size(
             image, 512, 1.0, min(scales)
         )
+        # how the fuck to i transform them?
+        if keypoints is not None:
+            assert factors is not None
+            assert config.TEST.PROJECT2IMAGE
+            keypoints = keypoints.cpu().numpy()
+            factors = factors.cpu().numpy()
+            # remove zero
+            keypoints = keypoints[:, keypoints[0, :, :, 2].sum(axis=1) != 0]
+            keypoints, factors = multiscale_keypoints(keypoints, factors, image, 512, 1.0, min(scales))
+            keypoints = torch.from_numpy(keypoints).cuda()
+            factors = torch.from_numpy(factors).cuda()
         final_heatmaps = None
         final_features = None
         tags_list = []
@@ -154,10 +165,11 @@ class PoseEstimationBaseline(nn.Module):
             image_resized = transforms(image_resized)
             image_resized = image_resized[None].cuda()
 
-            outputs, heatmaps, tags, features = _get_multi_stage_outputs(
-                config, self.backbone, image_resized, self.feature_gather, with_flip=config.TEST.FLIP_TEST,
-                project2image=True, size_projected=base_size
-            )
+            outputs, heatmaps, tags, features = _get_multi_stage_outputs(config, self.backbone, image_resized,
+                                                                         self.feature_gather,
+                                                                         with_flip=config.TEST.FLIP_TEST,
+                                                                         project2image=True, size_projected=base_size,
+                                                                         flip_kernel=self.flip_kernel)
 
             final_heatmaps, tags_list, final_features = aggregate_results_mpn(
                 config, s, final_heatmaps, tags_list, final_features, heatmaps, tags, features
@@ -169,7 +181,7 @@ class PoseEstimationBaseline(nn.Module):
         # features = self.feature_gather(features)  # or average after this
 
         graph_constructor = get_graph_constructor(self.gc_config, scoremaps=scoremaps, features=features,
-                                                  joints_gt=None, factor_list=None, masks=masks,
+                                                  joints_gt=keypoints, factor_list=factors, masks=None,
                                                   device=scoremaps.device, testing=not self.training,
                                                   heatmaps=None)
 
@@ -184,6 +196,7 @@ class PoseEstimationBaseline(nn.Module):
         output["preds"] = {"edge": edge_pred, "node": node_pred, "class": class_pred}
         output["graph"] = {"nodes": joint_det, "detector_scores": joint_scores, "edge_index": edge_index,
                            "tags": tags}
+        output["labels"] = {"edge": edge_labels, "node": node_labels, "class": class_labels}
 
         return scoremaps, output
 

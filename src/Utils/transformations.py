@@ -55,6 +55,56 @@ def reverse_affine_map(keypoints, img_size_orig, scaling_type, min_scale=1.0):
     return keypoints
 
 
+def reverse_affine_map_points(points, img_size_orig, scaling_type, min_scale=1.0):
+    """
+    Reverses the transformation resulting from the input argument (using get_transform). Used to map output keypoints to
+    original space in order to evaluate them.
+    :param points: array with shape (N, 3)
+    :param img_size_orig: (Width, Height) of the source image.
+    :param scaling_type: Type of scaling that was performed on the image/keypoints.
+            "short": Short side of the image was resized to target size preserving the original aspect ratio
+            while not adding black borders. Width_new_image != height_new_image
+            "short_long": Width_new_image == height_new_image. Black borders are added to preserve the aspect ratio of
+            the content
+    :return: keypoints with respect to original image coordinates
+    """
+    if scaling_type == "short_mine":
+        resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], 512, 1., 1.)
+        mat = get_transform(center, scale, (int(resized_img[0]/2), int(resized_img[1]/2)))
+    elif scaling_type == "short":
+        resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], 512, 1., min_scale)
+        o_size =(int(resized_img[0]/2), int(resized_img[1]/2))
+        mat = get_affine_transform(center, scale, o_size)
+        mat_2 = np.eye(3, dtype=np.float32)
+        mat_2[:2] = mat
+        mat = mat_2
+        inv_mat = get_affine_transform(center, scale, (int(resized_img[0] / 2), int(resized_img[1] / 2)), inv=True)
+        points[:, :2] = kpt_affine(points[:, :2], inv_mat)
+        return points
+    elif scaling_type == "short_with_resize":
+        resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], 512, 1., min_scale)
+        inv_mat = get_affine_transform(center, scale, (int(resized_img[0]), int(resized_img[1])), inv=True)
+        points[:, :2] = kpt_affine(points[:, :2], inv_mat)
+        return points
+    elif scaling_type == "long":
+        gt_width = img_size_orig[0]
+        gt_height = img_size_orig[1]
+        scale = max(gt_height, gt_width) / 200
+        scale = np.array([scale, scale])
+        # resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], 512, 1., 1.)
+        # mat = get_transform(center, scale, (int(resized_img[0] / 2), int(resized_img[1] / 2)))
+        mat = get_transform((gt_width / 2, gt_height / 2), scale, (128, 128))
+    else:
+        raise NotImplementedError
+
+    inv_mat = np.zeros([3, 3], dtype=np.float)
+    inv_mat[0, 0], inv_mat[1, 1] = 1 / mat[0, 0], 1 / mat[1, 1]
+    inv_mat[0, 2], inv_mat[1, 2] = -mat[0, 2] / mat[0, 0], -mat[1, 2] / mat[1, 1]
+    inv_mat = inv_mat[:2]
+    inv_mat = np.linalg.inv(mat)[:2]  # might this lead to numerical errors?
+    points[:, :2] = kpt_affine(points[:, :2], inv_mat)
+    return points
+
 class NormalizeInverse(torchvision.transforms.Normalize):
     """
     Undoes the normalization and returns the reconstructed images in the input domain.
