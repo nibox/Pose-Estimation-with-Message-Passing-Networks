@@ -25,7 +25,7 @@ def main():
     # config_dir = "regression_mini"
     # config_dir = "train"
     # config_dir = "node_classification_from_scratch"
-    config_name = "model_56_1_0_8"
+    config_name = "model_56_1_0_6_0_12"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
     eval_writer = EvalWriter(config, fname="eval_10_mini.txt")
@@ -89,6 +89,7 @@ def main():
     anns_class_infl = []
     anns_cc_cluster = []
     anns_refined = []
+    anns_with_heatmap_values = []
     eval_ids = []
     imgs_fully_det = []
     with torch.no_grad():
@@ -153,6 +154,9 @@ def main():
             ann = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
                               int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE,
                               config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD, preds_classes, False)
+            ann_heatmap = perd_to_ann(scoremaps[0], tags[0], joint_det, joint_scores, edge_index, preds_edges, img_info,
+                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE,
+                              config.TEST.ADJUST, 0.1, preds_classes, True)
             ann_cc = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
                                  int(eval_set.img_ids[i]), "threshold", config.DATASET.SCALING_TYPE, config.TEST.ADJUST,
                                  config.MODEL.MPN.NODE_THRESHOLD, preds_classes, config.TEST.WITH_REFINE)
@@ -180,6 +184,7 @@ def main():
             anns_perf_node.append(ann_perf_node)
             anns_class_infl.append(ann_class_infl)
             anns_cc_cluster.append(ann_cc)
+            anns_with_heatmap_values.append(ann_heatmap)
             if int(n) == 0:
                 imgs_fully_det.append(eval_set.img_ids[i])
                 anns_full.append(ann)
@@ -191,6 +196,7 @@ def main():
         eval_writer.eval_coco(eval_set.coco, anns_class_infl, np.array(eval_ids), "Perfect node and edge prediction")
         eval_writer.eval_coco(eval_set.coco, anns_cc_cluster, np.array(eval_ids), "Thresholding and connected components")
         eval_writer.eval_coco(eval_set.coco, anns_refined, np.array(eval_ids), "Refined Poses")
+        eval_writer.eval_coco(eval_set.coco, anns_with_heatmap_values, np.array(eval_ids), "Using heatmap scores with refinement")
         eval_writer.eval_coco(eval_set.coco, anns_full, imgs_fully_det, f"Evaluation on perfect images {len(anns_full)}")
 
         eval_writer.eval_metrics(eval_node, "Node metrics")
