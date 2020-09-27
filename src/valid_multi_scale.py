@@ -41,6 +41,7 @@ def main():
     joint_generator = [JointsGenerator(30, 17, 128, True),
                        JointsGenerator(30, 17, 256, True)]
     transforms, _ = transforms_to_tensor(config)
+    scaling_type = "short_with_resize" if config.TEST.PROJECT2IMAGE else "short"
     eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=False, seed=0, mode="val", img_ids=None, year=17,
                                 transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
                                 filter_empty=False, joint_generator=joint_generator)
@@ -55,7 +56,6 @@ def main():
     # baseline: upper bound
 
     # eval model
-
     anns = []
     anns_with_people = []
     anns_w_refine = []
@@ -126,19 +126,19 @@ def main():
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
             ann = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
-                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, "short_with_resize",
+                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
                               min(config.TEST.SCALE_FACTOR), config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD,
                               preds_classes, config.TEST.WITH_REFINE, joint_scores)
             ann_w_refine = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
-                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, "short_with_resize",
+                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
                               min(config.TEST.SCALE_FACTOR), False, config.MODEL.MPN.NODE_THRESHOLD,
                               preds_classes, True, joint_scores)
             ann_w_adjust = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
-                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, "short_with_resize",
+                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
                               min(config.TEST.SCALE_FACTOR), True, config.MODEL.MPN.NODE_THRESHOLD,
                               preds_classes, False, joint_scores)
             ann_w_adjust_refine = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
-                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, "short_with_resize",
+                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
                               min(config.TEST.SCALE_FACTOR), True, config.MODEL.MPN.NODE_THRESHOLD,
                               preds_classes, True, joint_scores)
 

@@ -15,7 +15,8 @@ from .NodeClassificationMPNTypeConstrained import NodeClassificationMPNTypeConst
 from .NodeClassificationMPNGroupBased import NodeClassificationMPNGroupBased
 from .NodeClassificationMPNSelftAttention import NodeClassificationMPNSelfAttention
 
-
+# from .NaiveRefinement import NaiveRefinement
+# from .NaiveRefinementBaseline import NaiveRefinementBaseline
 
 def get_mpn_model(config, **kwargs):
     if config.NAME == "VanillaMPN":

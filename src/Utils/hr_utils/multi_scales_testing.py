@@ -217,7 +217,7 @@ def multiscale_keypoints(keypoints, factors, image, input_size, scale, min_scale
 
     resized_img, center, scale = get_multi_scale_size(image, input_size, scale, min_scale)
     mat = _get_affine_transform(center, scale, 0, (int(resized_img[0]), int(resized_img[1])))
-    keypoints[:, :, :2] = _affine_joints(keypoints[:, :, :2], mat)
+    keypoints[0, :, :, :2] = _affine_joints(keypoints[0, :, :, :2], mat)
     factors = _affine_factors(factors, mat)
 
     return keypoints, factors

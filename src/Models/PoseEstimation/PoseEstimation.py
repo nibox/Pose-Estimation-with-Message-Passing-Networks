@@ -175,8 +175,11 @@ class PoseEstimationBaseline(nn.Module):
             keypoints = keypoints.cpu().numpy()
             factors = factors.cpu().numpy()
             # remove zero
-            keypoints = keypoints[:, keypoints[0, :, :, 2].sum(axis=1) != 0]
-            keypoints, factors = multiscale_keypoints(keypoints, factors, image, 512, 1.0, min(scales))
+            non_zero = keypoints[0, :, :, 2].sum(axis=1) != 0
+            keypoints = keypoints[:, non_zero]
+            factors = factors[:, non_zero]
+            target_size = 512 if config.TEST.PROJECT2IMAGE else 256
+            keypoints, factors = multiscale_keypoints(keypoints, factors, image, target_size, 1.0, min(scales))
             keypoints = torch.from_numpy(keypoints).cuda()
             factors = torch.from_numpy(factors).cuda()
         final_heatmaps = None
@@ -193,8 +196,9 @@ class PoseEstimationBaseline(nn.Module):
             outputs, heatmaps, tags, features = _get_multi_stage_outputs(config, self.backbone, image_resized,
                                                                          self.feature_gather,
                                                                          with_flip=config.TEST.FLIP_TEST,
-                                                                         project2image=True, size_projected=base_size,
-                                                                         flip_kernel=self.flip_kernel)
+                                                                         project2image=config.TEST.PROJECT2IMAGE,
+                                                                         size_projected=base_size,
+            )
 
             final_heatmaps, tags_list, final_features = aggregate_results_mpn(
                 config, s, final_heatmaps, tags_list, final_features, heatmaps, tags, features
@@ -212,7 +216,7 @@ class PoseEstimationBaseline(nn.Module):
 
         x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, batch_index, node_persons = graph_constructor.construct_graph()
 
-        edge_pred, node_pred, class_pred, _, _ = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
+        edge_pred, node_pred, class_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
                                                           edge_labels=edge_labels
                                                           , batch_index=batch_index, node_mask=label_mask_node,
                                                           node_types=joint_det[:, 2])
