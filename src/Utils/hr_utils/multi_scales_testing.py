@@ -203,7 +203,7 @@ def _get_dir(src_point, rot_rad):
 
     return src_result
 
-def multiscale_keypoints(keypoints, factors, image, input_size, scale, min_scale):
+def multiscale_keypoints(keypoints, factors, image, input_size, scale, min_scale, project_to_image):
 
     def _affine_joints(joints, mat):
         joints = np.array(joints)
@@ -216,7 +216,10 @@ def multiscale_keypoints(keypoints, factors, image, input_size, scale, min_scale
         return factors * mat[0, 0] * mat[1, 1]
 
     resized_img, center, scale = get_multi_scale_size(image, input_size, scale, min_scale)
-    mat = _get_affine_transform(center, scale, 0, (int(resized_img[0]), int(resized_img[1])))
+
+    factor = 1 if project_to_image else 0.5
+    target_shape = (int(resized_img[0] * factor), int(resized_img[1] * factor))
+    mat = _get_affine_transform(center, scale, 0, target_shape)
     keypoints[0, :, :, :2] = _affine_joints(keypoints[0, :, :, :2], mat)
     factors = _affine_factors(factors, mat)
 

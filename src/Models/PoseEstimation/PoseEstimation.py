@@ -171,15 +171,13 @@ class PoseEstimationBaseline(nn.Module):
         # how the fuck to i transform them?
         if keypoints is not None:
             assert factors is not None
-            assert config.TEST.PROJECT2IMAGE
             keypoints = keypoints.cpu().numpy()
             factors = factors.cpu().numpy()
             # remove zero
             non_zero = keypoints[0, :, :, 2].sum(axis=1) != 0
             keypoints = keypoints[:, non_zero]
             factors = factors[:, non_zero]
-            target_size = 512 if config.TEST.PROJECT2IMAGE else 256
-            keypoints, factors = multiscale_keypoints(keypoints, factors, image, target_size, 1.0, min(scales))
+            keypoints, factors = multiscale_keypoints(keypoints, factors, image, 512, 1.0, min(scales), config.TEST.PROJECT2IMAGE)
             keypoints = torch.from_numpy(keypoints).cuda()
             factors = torch.from_numpy(factors).cuda()
         final_heatmaps = None
