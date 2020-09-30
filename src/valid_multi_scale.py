@@ -57,6 +57,7 @@ def main():
 
     # eval model
     anns = []
+    anns_back = []
     anns_with_people = []
     anns_w_refine = []
     anns_w_adjust = []
@@ -129,6 +130,10 @@ def main():
                               int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
                               min(config.TEST.SCALE_FACTOR), config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD,
                               preds_classes, config.TEST.WITH_REFINE, joint_scores)
+            ann_bone = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
+                              min(config.TEST.SCALE_FACTOR), config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD,
+                              preds_baseline_class_one_hot, config.TEST.WITH_REFINE, joint_scores)
             ann_w_refine = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
                               int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
                               min(config.TEST.SCALE_FACTOR), False, config.MODEL.MPN.NODE_THRESHOLD,
@@ -144,6 +149,7 @@ def main():
 
             if ann is not None:
                 anns.append(ann)
+                anns_back.append(ann_bone)
                 anns_w_adjust.append(ann_w_adjust)
                 anns_w_adjust_refine.append(ann_w_adjust_refine)
                 anns_w_refine.append(ann_w_refine)
@@ -153,6 +159,7 @@ def main():
 
 
         eval_writer.eval_coco(eval_set.coco, anns, np.array(eval_ids), "General Evaluation", "kpt_det_full_set_multi_scale.json")
+        eval_writer.eval_coco(eval_set.coco, anns_back, np.array(eval_ids), "Using keypoint detector classes", "kpt_det_full_set_multi_scale.json")
         eval_writer.eval_coco(eval_set.coco, anns_w_refine, np.array(eval_ids), "With refinment", "full_dt.json")
         eval_writer.eval_coco(eval_set.coco, anns_w_adjust, np.array(eval_ids), "With adjustment", "full_dt.json")
         eval_writer.eval_coco(eval_set.coco, anns_w_adjust_refine, np.array(eval_ids), "Wtih refinement + adjustment", "full_dt.json")

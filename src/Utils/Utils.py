@@ -487,7 +487,7 @@ def draw_clusters(img: [torch.tensor, np.array], joints, joint_classes, joint_co
         raise NotImplementedError
 
 
-def pred_to_person(joint_det, joint_scores, edge_index, pred, class_pred, cc_method):
+def pred_to_person(joint_det, joint_scores, edge_index, pred, class_pred, cc_method, score_for_poses=None):
     test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
     if cc_method != "threshold":
         sol = cluster_graph(test_graph, cc_method, complete=False)
@@ -495,8 +495,21 @@ def pred_to_person(joint_det, joint_scores, edge_index, pred, class_pred, cc_met
     else:
         sparse_sol = edge_index[:, pred > 0.5]
     persons_pred, mutants, person_labels = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol,
-                                                                    class_pred)  # might crash
+                                                                    class_pred, score_for_poses)  # might crash
     return persons_pred, mutants, person_labels
+
+
+def pred_to_person_debug(joint_det, joint_scores, edge_index, edge_pred, class_pred, node_labels, cc_method):
+    test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_pred)
+    if cc_method != "threshold":
+        sol = cluster_graph(test_graph, cc_method, complete=False)
+        sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
+    else:
+        sparse_sol = edge_index[:, edge_pred > 0.5]
+    persons_pred, person_labels, debug_flags = graph_cluster_to_persons_debug(joint_det, joint_scores, sparse_sol,
+                                                                    class_pred, node_labels)  # might crash
+    return persons_pred, person_labels, debug_flags
+
 
 def pred_to_person_labels(joint_det, edge_index, edge_attr, cc_method="GAEC"):
     test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_attr)
@@ -516,7 +529,7 @@ def pred_to_person_labels(joint_det, edge_index, edge_attr, cc_method="GAEC"):
     return person_labels
 
 
-def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred):
+def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred, scores_for_poses=None):
     """
     :param class_pred:
     :param joints: (N, 2) vector of joints
@@ -525,6 +538,7 @@ def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred
     """
     joints, joint_connections, joint_scores = to_numpy(joints), to_numpy(joint_connections), to_numpy(joint_scores)
     joint_classes = to_numpy(class_pred) if class_pred is not None else None
+    scores_for_poses = to_numpy(scores_for_poses) if scores_for_poses is not None else None
     from scipy.sparse import csr_matrix
     from scipy.sparse.csgraph import connected_components
     # construct dense adj matrix
@@ -539,6 +553,7 @@ def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred
         # check if cc has more than one node
         person_joints = joints[person_labels == i]
         person_scores = joint_scores[person_labels == i]
+        person_pose_scores = scores_for_poses[person_labels == i] if scores_for_poses is not None else None
         if joint_classes is not None:
             c = person_joints[:, 2]
             d = np.argmax(joint_classes[person_labels == i], axis=1)
@@ -556,11 +571,14 @@ def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred
                 select = person_joints[:, 2] == joint_type
                 person_joint_for_type = person_joints[select]
                 person_scores_for_type = person_scores[select]
+                person_pose_scores_for_type = person_pose_scores[select] if person_pose_scores is not None else None
                 if len(person_joint_for_type) != 0:
                     #keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
                     joint_idx = np.argmax(person_scores_for_type, axis=0)
                     keypoints[joint_type] = person_joint_for_type[joint_idx]# np.mean(person_joint_for_type, axis=0)
                     keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
+                    if person_pose_scores_for_type is not None:
+                        keypoints[joint_type, 2] = person_pose_scores_for_type[joint_idx]
 
             #keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
             if (keypoints[:, 2] > 0).sum() > 0:
@@ -906,6 +924,79 @@ def refine(scoremaps, tag, keypoints):
                 # add keypoint if it is not detected
                 if ans[i, 2] > 0 and keypoints[p, i, 2] == 0:
                     # if ans[i, 2] > 0.01 and keypoints[i, 2] == 0:
+                    keypoints[p, i, :2] = ans[i, :2]
+                    keypoints[p, i, 2] = ans[i, 2]
+
+    return keypoints
+
+def refine_tag(scoremaps, tag, keypoints):
+    """
+    Given initial keypoint predictions, we identify missing joints
+    :param det: numpy.ndarray of size (17, 128, 128)
+    :param tag: numpy.ndarray of size (17, 128, 128) if not flip
+    :param keypoints: numpy.ndarray of size (N, 17, 3) if not flip, last dim is (x, y, det score)
+    :return:
+    """
+    if len(tag.shape) == 3:
+        # tag shape: (17, 256, 256, 1)
+        tag = tag[:, :, :, None]
+
+    tags = []
+    for p in range(keypoints.shape[0]):
+        person_tags = []
+        for i in range(keypoints.shape[1]):
+            if keypoints[p, i, 2] > 0:
+                # save tag value of detected keypoint
+                x, y = keypoints[p, i][:2].astype(np.int32)
+                person_tags.append(tag[i, y, x])
+        tags.append(np.array(person_tags))
+
+    # mean tag of current detected people
+    for p in range(keypoints.shape[0]):
+        prev_tag = np.mean(tags[p], axis=0)
+        ans = []
+        keypoint_tag_scores = []
+        for i in range(keypoints.shape[1]):
+            # score of joints i at all position
+            tmp = scoremaps[i, :, :]
+            # distance of all tag values with mean tag of current detected people
+            tt = (((tag[i, :, :] - prev_tag[None, None, :]) ** 2).sum(axis=2) ** 0.5)
+            tmp2 = tmp - np.round(tt)
+            keypoint_tag_scores.append(tmp2[int(keypoints[p, i, 1]), int(keypoints[p, i, 0])])
+
+            # find maximum position
+            y, x = np.unravel_index(np.argmax(tmp2), tmp.shape)
+            val_2 = tmp2[y, x]
+            xx = x
+            yy = y
+            # detection score at maximum position
+            val = tmp[y, x]
+            # offset by 0.5
+            x += 0.5
+            y += 0.5
+
+            # add a quarter offset
+            if tmp[yy, min(xx + 1, tmp.shape[1] - 1)] > tmp[yy, max(xx - 1, 0)]:
+                x += 0.25
+            else:
+                x -= 0.25
+
+            if tmp[min(yy + 1, tmp.shape[0] - 1), xx] > tmp[max(0, yy - 1), xx]:
+                y += 0.25
+            else:
+                y -= 0.25
+
+            ans.append((x, y, val, val_2))
+        ans = np.array(ans)
+
+        if ans is not None:
+            for i in range(scoremaps.shape[0]):
+                # add keypoint if it is not detected
+                if ans[i, 2] > 0 and keypoints[p, i, 2] == 0:
+                    # if ans[i, 2] > 0.01 and keypoints[i, 2] == 0:
+                    keypoints[p, i, :2] = ans[i, :2]
+                    keypoints[p, i, 2] = ans[i, 2]
+                elif ans[i, 2] > 0 and ans[i, 3] > keypoint_tag_scores[i]:
                     keypoints[p, i, :2] = ans[i, :2]
                     keypoints[p, i, 2] = ans[i, 2]
 

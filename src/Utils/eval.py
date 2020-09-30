@@ -1,4 +1,6 @@
 import numpy as np
+import torch
+from torch_scatter import scatter_mean
 
 
 class EvalWriter(object):
@@ -48,6 +50,32 @@ class EvalWriter(object):
             string = f"{part_labels[i]} acc: {eval_dict[i]['acc']:3f} prec: {eval_dict[i]['prec']:3f} rec: {eval_dict[i]['rec']:3f} f1: {eval_dict[i]['f1']:3f}"
             print(string)
             self.f.write(string + "\n")
+
+    def eval_joint_error_types(self, eval_dict, description):
+        assert "groups" in eval_dict.keys() and "errors" in eval_dict.keys()
+
+        print(description)
+        self.f.write(description + " \n")
+        errors = torch.from_numpy(np.array(eval_dict["errors"]))
+        groups = torch.from_numpy(np.array(eval_dict["groups"]))
+        errors = scatter_mean(errors, groups).cpu().numpy()
+        num_free_joints = np.mean(eval_dict["num_free_joints"])
+        string = f" <= 5: {errors[0]} \n" \
+                 f" <= 10: {errors[1]} \n" \
+                 f" <= 15: {errors[2]} \n" \
+                 f" > 15: {errors[3]} \n" \
+                 f" num_free_joints: {num_free_joints}"
+        print(string)
+        self.f.write(string + "\n")
+
+
+
+
+        print(f" <= 5: {errors[0]}")
+        print(f" <= 10: {errors[1]}")
+        print(f" <= 15: {errors[2]}")
+        print(f" < 15: {errors[3]}")
+
     def close(self):
         self.f.close()
 

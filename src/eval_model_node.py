@@ -3,13 +3,14 @@ import torch
 import sys
 import numpy as np
 from torch_geometric.utils import subgraph
+from torch_scatter import scatter_mean
 from tqdm import tqdm
 
-from Utils.Utils import refine
+from Utils.Utils import refine, refine_tag
 from Utils.eval import EvalWriter, gen_ann_format
 from config import get_config, update_config
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, JointsGenerator
-from Utils import parse_refinement, pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics, subgraph_mask, one_hot_encode, topk_accuracy
+from Utils import pred_to_person_debug, pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics, subgraph_mask, one_hot_encode, topk_accuracy
 from Models.PoseEstimation import get_pose_model  #, get_pose_with_ref_model
 from Utils.transformations import reverse_affine_map
 from Utils.transforms import transforms_hg_eval, transforms_hr_eval
@@ -27,7 +28,7 @@ def main():
     # config_dir = "regression_mini"
     # config_dir = "train"
     # config_dir = "node_classification_from_scratch"
-    config_name = "model_56_1_0_6_0_12"
+    config_name = "model_56_1_0_6_0_7_3"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
     eval_writer = EvalWriter(config, fname="eval_10_mini.txt")
@@ -86,6 +87,7 @@ def main():
     eval_classes_baseline_acc = []
     eval_classes_acc = []
     eval_classes_top2_acc = []
+    eval_joint_error_types = {"errors": [], "groups": [], "num_free_joints": []}
     def merge_dicts(dict_1, dict_2):
         for key in dict_1.keys():
             dict_1[key].append(dict_2[key])
@@ -157,35 +159,44 @@ def main():
                 m = joint_det[:, 2] == j
                 eval_node_per_type[j] = merge_dicts(eval_node_per_type[j], calc_metrics(result_nodes[m], node_labels[m]))
 
+            # joint error types
+            out = compute_num_fp(joint_det, preds_nodes, edge_index, preds_edges, preds_classes, node_labels, config.MODEL.MPN.NODE_THRESHOLD,
+                                 config.MODEL.GC.CC_METHOD)
+            if out is not None:
+                eval_joint_error_types["errors"] += out[0]
+                eval_joint_error_types["groups"] += out[1]
+                eval_joint_error_types["num_free_joints"] += out[2]
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
             ann = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
                               int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE,
-                              config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD, preds_classes, False)
+                              config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD, preds_classes, False, None)
             ann_heatmap = perd_to_ann(scoremaps[0], tags[0], joint_det, joint_scores, edge_index, preds_edges, img_info,
-                              int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE,
-                              config.TEST.ADJUST, 0.1, preds_classes, True)
+                                      int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE,
+                                      config.TEST.ADJUST, 0.1, preds_classes, True)
             ann_cc = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
                                  int(eval_set.img_ids[i]), "threshold", config.DATASET.SCALING_TYPE, config.TEST.ADJUST,
                                  config.MODEL.MPN.NODE_THRESHOLD, preds_classes, config.TEST.WITH_REFINE)
             ann_refined = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
                                       int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE,
-                                      config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD, preds_classes, True)
+                                      config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD, preds_classes, True,
+                                      None)
 
             ann_perf_edge = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges,
                                         img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
                                         config.DATASET.SCALING_TYPE, config.TEST.ADJUST,
-                                        config.MODEL.MPN.NODE_THRESHOLD, preds_classes_gt, config.TEST.WITH_REFINE,
-                                        )
-            ann_perf_node = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes * node_labels, edge_index, preds_edges,
-                                        img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+                                        config.MODEL.MPN.NODE_THRESHOLD, preds_classes_gt, config.TEST.WITH_REFINE)
+            ann_perf_node = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes * node_labels, edge_index,
+                                        preds_edges, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
                                         config.DATASET.SCALING_TYPE, config.TEST.ADJUST,
                                         config.MODEL.MPN.NODE_THRESHOLD, preds_classes, config.TEST.WITH_REFINE)
-            ann_class_infl = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes * node_labels, edge_index, edge_labels,
-                                         img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+            ann_class_infl = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes * node_labels, edge_index,
+                                         edge_labels, img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
                                          config.DATASET.SCALING_TYPE, config.TEST.ADJUST,
                                          config.MODEL.MPN.NODE_THRESHOLD, preds_classes, config.TEST.WITH_REFINE)
+
+
 
             anns.append(ann)
             anns_refined.append(ann_refined)
@@ -215,16 +226,17 @@ def main():
         eval_writer.eval_metric(eval_classes_acc, "Type classification")
         eval_writer.eval_metric(eval_classes_top2_acc, "Type classification top 2")
         eval_writer.eval_part_metrics(eval_node_per_type, "Node metrics per type")
-
+        eval_writer.eval_joint_error_types(eval_joint_error_types, "Joint error type 2")
         eval_writer.close()
 
 
 def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, preds_edges, img_info, img_id, cc_method,
-                scaling_type, adjustment, th, preds_classes, with_refine):
+                scaling_type, adjustment, th, preds_classes, with_refine, score_for_poses=None):
     true_positive_idx = joint_scores > th
     edge_index, preds_edges = subgraph(true_positive_idx, edge_index, preds_edges)
     if edge_index.shape[1] != 0:
-        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, preds_edges, preds_classes, cc_method)
+        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, preds_edges, preds_classes, cc_method,
+                                            score_for_poses)
     else:
         persons_pred = np.zeros([1, 17, 3])
     # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
@@ -240,6 +252,32 @@ def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, preds_edge
 
     ann = gen_ann_format(persons_pred_orig, img_id)
     return ann
+
+
+def compute_num_fp(joint_det, joint_scores, edge_index, preds_edges, preds_classes, node_labels, th, cc_method):
+    group_mapping = np.array([0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 3, 3])
+    true_positive_idx = joint_scores > th
+    edge_index, preds_edges = subgraph(true_positive_idx, edge_index, preds_edges)
+    if edge_index.shape[1] != 0:
+        persons_pred, _, debug_fp = pred_to_person_debug(joint_det, joint_scores, edge_index, preds_edges, preds_classes, node_labels, cc_method)
+        # remove persons without a single tp node in the cluster
+        tp_persons = np.logical_or(debug_fp == 3, debug_fp == 1).sum(axis=1) > 0
+        debug_fp = debug_fp[tp_persons]
+        # assign each tp proposal a group based on number of missing joints and joints of type 2
+        # stats are computed per group
+        num_missing_joints = np.logical_or(debug_fp == 2, debug_fp == 0).sum(axis=1)
+        groups = group_mapping[16 - num_missing_joints]
+        num_fp_joints = (debug_fp == 2).sum(axis=1)
+        out = num_fp_joints / num_missing_joints
+
+        num_free_joints = (debug_fp == 0).sum(axis=1)
+
+
+        return list(out), list(groups), list(num_free_joints)
+
+    else:
+        return None
+
 
 
 if __name__ == "__main__":
