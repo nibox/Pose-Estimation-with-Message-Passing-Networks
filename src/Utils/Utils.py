@@ -925,7 +925,7 @@ def refine(scoremaps, tag, keypoints):
                 if ans[i, 2] > 0 and keypoints[p, i, 2] == 0:
                     # if ans[i, 2] > 0.01 and keypoints[i, 2] == 0:
                     keypoints[p, i, :2] = ans[i, :2]
-                    keypoints[p, i, 2] = ans[i, 2]
+                    keypoints[p, i, 2] = 0.001 # ans[i, 2]
 
     return keypoints
 

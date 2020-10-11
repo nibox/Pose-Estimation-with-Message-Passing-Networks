@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from torch_scatter import scatter_mean
+from sklearn.metrics import roc_auc_score
 
 
 class EvalWriter(object):
@@ -60,11 +61,7 @@ class EvalWriter(object):
         groups = torch.from_numpy(np.array(eval_dict["groups"]))
         errors = scatter_mean(errors, groups).cpu().numpy()
         num_free_joints = np.mean(eval_dict["num_free_joints"])
-        string = f" <= 5: {errors[0]} \n" \
-                 f" <= 10: {errors[1]} \n" \
-                 f" <= 15: {errors[2]} \n" \
-                 f" > 15: {errors[3]} \n" \
-                 f" num_free_joints: {num_free_joints}"
+        string = f" <= 5: {errors[0]} \n <= 10: {errors[1]} \n <= 15: {errors[2]} \n > 15: {errors[3]} \n num_free_joints: {num_free_joints}"
         print(string)
         self.f.write(string + "\n")
 
@@ -75,6 +72,34 @@ class EvalWriter(object):
         print(f" <= 10: {errors[1]}")
         print(f" <= 15: {errors[2]}")
         print(f" < 15: {errors[3]}")
+
+    def eval_roc_auc(self, eval_dict, description):
+        print(description)
+        self.f.write(description + " \n")
+
+        part_labels = ['nose','eye_l','eye_r','ear_l','ear_r',
+                       'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
+                       'hip_l','hip_r','kne_l','kne_r','ank_l','ank_r']
+        if eval_dict["node"] is not None:
+            pred = np.array(eval_dict["node"]["pred"])
+            label = np.array(eval_dict["node"]["label"]).astype(np.int)
+            score = roc_auc_score(label, pred)
+            string = f"node roc_auc: {score}"
+            print(string)
+            self.f.write(string + "\n")
+
+            classes = np.array(eval_dict["node"]["class"])
+            for i in range(17):
+                mask = classes == i
+                class_score = roc_auc_score(label[mask], pred[mask])
+                string = f"{part_labels[i]}  roc_auc: {class_score}"
+                print(string)
+                self.f.write(string + "\n")
+
+
+        if eval_dict["edge"] is not None:
+            raise NotImplementedError
+
 
     def close(self):
         self.f.close()

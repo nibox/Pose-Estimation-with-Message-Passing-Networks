@@ -3,7 +3,7 @@ import torch.nn as nn
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from Utils.Utils import subgraph_mask
-from .layers import _make_mlp, MPLayer
+from .layers import _make_mlp, MPLayer, TypeAwareMPNLayer
 
 
 class NodeMlpType(torch.nn.Module):
@@ -29,8 +29,14 @@ class NodeClassificationMPNTypeBased(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
         self.use_skip_connections = config.SKIP
-        self.mpn_node_cls = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
-                                  aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP)
+        if config.AGGR_TYPE == "agnostic":
+            self.mpn_node_cls = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
+                                        aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP,
+                                        edge_mlp=config.EDGE_MLP)
+        elif config.AGGR_TYPE == "per_type":
+            self.mpn_node_cls = TypeAwareMPNLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
+                                                  aggr=config.AGGR, skip=config.SKIP,
+                                                  edge_mlp=config.EDGE_MLP, )
 
         self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, bn=config.EDGE_EMB.BN,
                                         end_with_relu=config.NODE_EMB.END_WITH_RELU)
@@ -64,18 +70,14 @@ class NodeClassificationMPNTypeBased(torch.nn.Module):
             if self.use_skip_connections:
                 node_features = torch.cat([node_features_initial, node_features], dim=1)
                 edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
-            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index)
+            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index,
+                                                             node_types=kwargs["node_types"])
 
         preds_edge.append(self.edge_classification(edge_features).squeeze())
 
-        for i in range(self.node_steps):
-            if self.use_skip_connections:
-                node_features = torch.cat([node_features_initial, node_features], dim=1)
-                edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
-            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index)
 
         preds_node.append(self.node_classification(node_features).squeeze())
         preds_class.append(self.classification(node_features))
 
 
-        return preds_edge, preds_node, preds_class, node_features, edge_features
+        return preds_edge, preds_node, preds_class

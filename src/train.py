@@ -166,18 +166,15 @@ def main():
     if not config.MODEL.GC.USE_GT:
         assert config.TRAIN.USE_LABEL_MASK  # this ensures that images with no "persons"/clusters do not contribute to the loss
     print("Load model")
-    if config.MODEL.WITH_LOCATION_REFINE:
-        model = get_pose_with_ref_model(config, device)
-    else:
-        model = get_pose_model(config, device)
+    model = get_pose_model(config, device)
     if config.TRAIN.END_TO_END:
         assert config.TRAIN.KP_FREEZE_MODE != "complete"
         model.freeze_backbone(mode=config.TRAIN.KP_FREEZE_MODE)
         model_params = list(model.mpn.parameters()) + list(model.feature_gather.parameters())
-        if config.TRAIN.SPLIT_OPTIMIZER and not config.MODEL.WITH_LOCATION_REFINE:
+        if config.TRAIN.SPLIT_OPTIMIZER:
             optimizer = torch.optim.Adam([{"params": model_params, "lr": config.TRAIN.LR, "weight_decay": config.TRAIN.W_DECAY},
                                           {"params": model.backbone.parameters(), "lr": config.TRAIN.KP_LR, "weight_decay": config.TRAIN.W_DECAY}])
-        elif config.TRAIN.SPLIT_OPTIMIZER and config.MODEL.WITH_LOCATION_REFINE:
+        elif config.TRAIN.SPLIT_OPTIMIZER:
             reg_param = model.refinement_network.parameters()
             optimizer = torch.optim.Adam(
                 [{"params": model_params, "lr": config.TRAIN.LR, "weight_decay": config.TRAIN.W_DECAY},

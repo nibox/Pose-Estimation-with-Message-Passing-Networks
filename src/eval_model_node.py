@@ -84,6 +84,7 @@ def main():
     eval_edge = {"acc": [], "prec": [], "rec": [], "f1": []}
     eval_edge_masked = {"acc": [], "prec": [], "rec": [], "f1": []}
     eval_node_per_type = {i: {"acc": [], "prec": [], "rec": [], "f1": []} for i in range(17)}
+    eval_roc_auc = {"node": {"pred": [], "label": [], "class": []}, "edge": None}
     eval_classes_baseline_acc = []
     eval_classes_acc = []
     eval_classes_top2_acc = []
@@ -136,6 +137,11 @@ def main():
             result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
             result_nodes = torch.where(preds_nodes < config.MODEL.MPN.NODE_THRESHOLD, torch.zeros_like(preds_nodes), torch.ones_like(preds_nodes))
             n, _, _, _ = num_non_detected_points(joint_det.cpu(), keypoints[0].cpu(), factors[0].cpu())
+
+            eval_roc_auc["node"]["pred"] += list(preds_nodes.cpu().numpy())
+            eval_roc_auc["node"]["label"] += list(node_labels.cpu().numpy())
+            eval_roc_auc["node"]["class"] += list(preds_classes.argmax(dim=1).cpu().numpy())
+
 
             eval_node = merge_dicts(eval_node, calc_metrics(result_nodes, node_labels))
             eval_edge = merge_dicts(eval_edge, calc_metrics(result_edges, edge_labels))
@@ -227,6 +233,7 @@ def main():
         eval_writer.eval_metric(eval_classes_top2_acc, "Type classification top 2")
         eval_writer.eval_part_metrics(eval_node_per_type, "Node metrics per type")
         eval_writer.eval_joint_error_types(eval_joint_error_types, "Joint error type 2")
+        eval_writer.eval_roc_auc(eval_roc_auc, "Roc Auc scores")
         eval_writer.close()
 
 
@@ -271,7 +278,6 @@ def compute_num_fp(joint_det, joint_scores, edge_index, preds_edges, preds_class
         out = num_fp_joints / num_missing_joints
 
         num_free_joints = (debug_fp == 0).sum(axis=1)
-
 
         return list(out), list(groups), list(num_free_joints)
 

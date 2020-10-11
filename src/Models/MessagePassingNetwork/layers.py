@@ -90,12 +90,13 @@ class TypeAwareMPNLayer(MessagePassing):
 
     # todo with or without inital feature skip connection
     def __init__(self, node_feature_dim, edge_feature_dim, edge_feature_hidden, aggr, skip=False,
-                 edge_mlp="agnostic"):
+                 edge_mlp="agnostic", num_types=17):
         super().__init__(aggr=aggr)
         # todo better architecture
 
         node_factor = 2 if skip else 1
         edge_factor = 2 if skip else 1
+        self.num_types = num_types
 
         self.edge_mlp = edge_mlp
         if edge_mlp == "agnostic":
@@ -108,11 +109,8 @@ class TypeAwareMPNLayer(MessagePassing):
         elif edge_mlp == "per_type":
             self.mlp_edge = TypeAwareEdgeUpdate(node_feature_dim * node_factor, edge_feature_dim * node_factor, edge_feature_hidden)
 
-
-        # self.mlp_edge = PerInvMLP(node_feature_dim, edge_feature_dim)
-
         self.mlp_node = TypeAwareNodeUpdate(node_feature_dim * node_factor + edge_feature_dim, node_feature_dim)
-        self.update_mlp = nn.Sequential(nn.Linear(node_feature_dim * 17, node_feature_dim), nn.ReLU(inplace=True))
+        self.update_mlp = nn.Sequential(nn.Linear(node_feature_dim * num_types, node_feature_dim), nn.ReLU(inplace=True))
 
 
     def forward(self, x, edge_attr, edge_index, **kwargs):
@@ -137,8 +135,8 @@ class TypeAwareMPNLayer(MessagePassing):
     def aggregate(self, inputs, index, source_type, num_nodes, target_nodes):
 
         feature_dim = inputs.shape[1]
-        updates = torch.zeros(num_nodes, 17, feature_dim, dtype=torch.float32, device=inputs.device)
-        for i in range(17):
+        updates = torch.zeros(num_nodes, self.num_types, feature_dim, dtype=torch.float32, device=inputs.device)
+        for i in range(self.num_types):
             types = source_type==i
             updates[:, i] = scatter(inputs[types], index[types], dim=0, reduce=self.aggr, dim_size=num_nodes)
         return updates.reshape(num_nodes, -1)
