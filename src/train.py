@@ -98,7 +98,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
 
         if isinstance(loss_func, (MultiLossFactory, MPNLossFactory)):
             loss, _ = loss_func(output["preds"], output["labels"], output["masks"])
-        elif isinstance(loss_func, (ClassMultiLossFactory, ClassMPNLossFactory)):
+        elif isinstance(loss_func, (ClassMultiLossFactory, ClassMPNLossFactory, TagMultiLossFactory)):
             edge_masks = []
             edge_labels = []
             # first the graph reduction
@@ -190,6 +190,8 @@ def main():
             loss_func = ClassMultiLossFactory(config)
         elif config.MODEL.LOSS.NAME == "node_with_background_edge_loss":
             loss_func = BackgroundClassMultiLossFactory(config)
+        elif config.MODEL.LOSS.NAME == "tag_loss":
+            loss_func = TagMultiLossFactory(config)
         else:
             raise NotImplementedError
     else:
@@ -263,8 +265,11 @@ def main():
                 else:
                     result_nodes = None
             result_classes = preds_classes[-1].argmax(dim=1).squeeze() if preds_classes is not None else None
-            result_edges = preds_edges.sigmoid().squeeze()
-            result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
+            if preds_edges is not None:
+                result_edges = preds_edges.sigmoid().squeeze()
+                result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
+            else:
+                result_edges = None
 
             node_metrics = calc_metrics(result_nodes, node_labels, node_mask)
             edge_metrics = calc_metrics(result_edges, edge_labels, edge_mask)
@@ -325,7 +330,7 @@ def main():
                 output["labels"]["tag"] = ae_targets
 
                 preds, labels, masks = output["preds"], output["labels"], output["masks"]
-                if isinstance(loss_func, (MultiLossFactory, MPNLossFactory)):
+                if isinstance(loss_func, (MultiLossFactory, MPNLossFactory, TagMultiLossFactory)):
                     loss, logging = loss_func(preds, labels, masks)
                     loss_mask = masks["edge"]
                 elif isinstance(loss_func, (ClassMultiLossFactory, ClassMPNLossFactory)):
@@ -376,8 +381,11 @@ def main():
                 node_labels, edge_labels, class_labels = labels["node"], labels["edge"][-1], labels["class"]
                 node_mask, edge_mask, class_mask = masks["node"], masks["edge"][-1], masks["class"]
 
-                result_edges = preds_edges[-1].sigmoid().squeeze()
-                result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
+                if preds_edges[-1] is not None:
+                    result_edges = preds_edges[-1].sigmoid().squeeze()
+                    result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
+                else:
+                    result_edges = None
 
                 if preds_nodes[-1] is not None:
                     result_nodes = preds_nodes[-1].sigmoid().squeeze()

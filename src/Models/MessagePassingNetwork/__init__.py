@@ -14,6 +14,7 @@ from .NodeClassificationMPNWithBackground import NodeClassificationMPNWithBackgr
 from .NodeClassificationMPNTypeConstrained import NodeClassificationMPNTypeConstrained
 from .NodeClassificationMPNGroupBased import NodeClassificationMPNGroupBased
 from .NodeClassificationMPNSelftAttention import NodeClassificationMPNSelfAttention
+from .NodeClassificationMPNTag import NodeClassificationMPNTag
 
 # from .NaiveRefinement import NaiveRefinement
 # from .NaiveRefinementBaseline import NaiveRefinementBaseline
@@ -47,6 +48,8 @@ def get_mpn_model(config, **kwargs):
         return NodeClassificationMPNFPConstrained(config)
     elif config.NAME == "NodeClassificationMPNTypeConstrained":
         return NodeClassificationMPNTypeConstrained(config)
+    elif config.NAME == "NodeClassificationMPNTag":
+        return NodeClassificationMPNTag(config)
     elif config.NAME == "NodeClassificationMPNGroupBased":
         return NodeClassificationMPNGroupBased(config)
     elif config.NAME == "JointTypeClassification":

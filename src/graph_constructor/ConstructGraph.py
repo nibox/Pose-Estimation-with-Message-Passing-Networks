@@ -8,8 +8,9 @@ from Utils.Utils import non_maximum_suppression, subgraph_mask
 
 class NaiveGraphConstructor:
 
-    def __init__(self, scoremaps, features, joints_gt, factor_list, masks, device, config, testing, heatmaps):
+    def __init__(self, scoremaps, tagmaps, features, joints_gt, factor_list, masks, device, config, testing, heatmaps):
         self.scoremaps = scoremaps.to(device)
+        self.tagmaps = tagmaps.to(device)
         self.heatmaps = heatmaps[1].to(device).float() if heatmaps is not None else None
         self.features = features.to(device)
         self.joints_gt = joints_gt.to(device) if joints_gt is not None else None
@@ -50,6 +51,7 @@ class NaiveGraphConstructor:
         label_mask_list = []
         label_mask_node_list = []
         class_mask_list = []
+        joint_tag_list = []
         batch_index = []
         num_node_list = [0]
         for batch in range(self.batch_size):
@@ -66,6 +68,7 @@ class NaiveGraphConstructor:
                                                                   pool_kernel=self.pool_kernel_size,
                                                                   hybrid_k=self.hybrid_k
                                                                   )
+            joint_tags = self.tagmaps[batch, joint_det[:, 2], joint_det[:, 1], joint_det[:, 0]]
 
             # ##############cheating#################
             # extend joint_det with joints_gt in order to have a perfect matching at train time
@@ -226,6 +229,7 @@ class NaiveGraphConstructor:
             label_mask_list.append(label_mask)
             label_mask_node_list.append(label_mask_node)
             class_mask_list.append(class_mask)
+            joint_tag_list.append(joint_tags)
         # update edge_indices for batching
         for i in range(1, len(x_list)):
             edge_index_list[i] += num_node_list[i]
@@ -236,6 +240,7 @@ class NaiveGraphConstructor:
         edge_index_list = torch.cat(edge_index_list, 1)
         joint_det_list = torch.cat(joint_det_list, 0)
         joint_score_list = torch.cat(joint_score_list, 0)
+        joint_tag_list = torch.cat(joint_tag_list, 0)
         if self.joints_gt is not None:
             assert edge_labels_list[0] is not None
             edge_labels_list = torch.cat(edge_labels_list, 0)
@@ -244,34 +249,16 @@ class NaiveGraphConstructor:
             label_mask_node_list = torch.cat(label_mask_node_list, 0)
             class_mask_list = torch.cat(class_mask_list, 0) if self.edge_label_method in [6, 7] else None
             node_class_list = torch.cat(node_class_list, 0) if self.edge_label_method in [6, 7] else None
-            # recompute the person idx
-            if self.edge_label_method == 6:
-                total_persons = node_persons_list[0].max() + 1
-                keypoint_positions = [self.joints_gt[0, :total_persons]]
-                for i in range(1, len(node_persons_list)):
-                    num_persons = node_persons_list[i].max() + 1
-                    keypoint_positions.append(self.joints_gt[i, :num_persons])
-                    node_persons_list[i][node_persons_list[i] != -1] += total_persons
-                    total_persons += num_persons
-                node_persons_list = torch.cat(node_persons_list, 0)
-                keypoint_positions = torch.cat(keypoint_positions, dim=0)
-
-                """
-                keypoint_positions_2 = self.joints_gt.clone().reshape(-1, 17, 3)
-                zero_rows = keypoint_positions_2[:, :, 2].sum(dim=1) == 0.0
-                keypoint_positions_2 = keypoint_positions_2[torch.logical_not(zero_rows)]
-                # """
-
-            else:
-                node_persons_list = None
-                keypoint_positions = None
+            keypoint_positions = None
+            node_persons_list = torch.cat(node_persons_list, 0) if self.edge_label_method in [6, 7] else None
 
         else:
             edge_labels_list, node_label_list, label_mask_list, label_mask_node_list, class_mask_list = None, None, None, None, None
             node_class_list = None
             keypoint_positions = None
 
-        return x_list, edge_attr_list, edge_index_list, edge_labels_list, node_label_list, node_class_list, keypoint_positions, joint_det_list, label_mask_list, label_mask_node_list, class_mask_list, joint_score_list, batch_index, node_persons_list
+        return x_list, edge_attr_list, edge_index_list, edge_labels_list, node_label_list, node_class_list, keypoint_positions, \
+               joint_det_list, label_mask_list, label_mask_node_list, class_mask_list, joint_score_list, batch_index, node_persons_list, joint_tag_list
 
     def _construct_mpn_graph(self, joint_det, features, graph_type, joint_scores, edge_features_to_use):
         """

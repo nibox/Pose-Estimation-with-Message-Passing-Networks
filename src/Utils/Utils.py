@@ -799,7 +799,7 @@ def set_bn_feeze(module):
 
 
 def calc_metrics(output, targets, mask=None, num_classes=2):
-    if output is None and targets is None:
+    if output is None:
         # do nothing
         return None
 

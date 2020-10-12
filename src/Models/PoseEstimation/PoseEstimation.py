@@ -98,14 +98,16 @@ class PoseEstimationBaseline(nn.Module):
 
         graph_constructor = get_graph_constructor(self.gc_config, scoremaps=scoremaps, features=features,
                                                   joints_gt=keypoints_gt, factor_list=factors, masks=masks,
-                                                  device=scoremaps.device, testing=not self.training, heatmaps=heatmaps)
+                                                  device=scoremaps.device, testing=not self.training, heatmaps=heatmaps,
+                                                  tagmaps=tags)
 
-        x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, batch_index, node_persons = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, batch_index, node_persons, joint_tags = graph_constructor.construct_graph()
 
-        edge_pred, node_pred, class_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
-                                                          edge_labels=edge_labels
-                                                          , batch_index=batch_index, node_mask=label_mask_node,
-                                                          node_types=joint_det[:, 2].detach())
+        edge_pred, node_pred, class_pred, tag_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
+                                                              edge_labels=edge_labels, batch_index=batch_index,
+                                                              node_mask=label_mask_node,
+                                                              node_types=joint_det[:, 2].detach(),
+                                                              joint_tags=joint_tags)
 
         if not with_logits:
             if edge_pred[-1] is not None:
@@ -116,9 +118,11 @@ class PoseEstimationBaseline(nn.Module):
                 class_pred[-1] = torch.softmax(class_pred[-1], dim=1)
 
         output = {}
-        output["labels"] = {"edge": edge_labels, "node": node_labels, "class": class_labels}
+        output["labels"] = {"edge": edge_labels, "node": node_labels, "class": class_labels, "person": node_persons,
+                            "batch_index": batch_index}
         output["masks"] = {"edge": label_mask, "node": label_mask_node, "class": class_mask}
-        output["preds"] = {"edge": edge_pred, "node": node_pred, "class": class_pred, "heatmap": bb_output[0]}
+        output["preds"] = {"edge": edge_pred, "node": node_pred, "class": class_pred, "heatmap": bb_output[0],
+                           "tag": tag_pred}
         output["graph"] = {"nodes": joint_det, "detector_scores": joint_scores, "edge_index": edge_index, "tags": tags}
 
         return scoremaps, output
@@ -163,7 +167,7 @@ class PoseEstimationBaseline(nn.Module):
                 )
             ]
         )
-        image = img[0].cpu().permute(1, 2, 0).numpy() # prepair for transformation
+        image = img[0].cpu().permute(1, 2, 0).numpy()  # prepair for transformation
 
         base_size, center, scale = get_multi_scale_size(
             image, 512, 1.0, min(scales)
@@ -177,7 +181,8 @@ class PoseEstimationBaseline(nn.Module):
             non_zero = keypoints[0, :, :, 2].sum(axis=1) != 0
             keypoints = keypoints[:, non_zero]
             factors = factors[:, non_zero]
-            keypoints, factors = multiscale_keypoints(keypoints, factors, image, 512, 1.0, min(scales), config.TEST.PROJECT2IMAGE)
+            keypoints, factors = multiscale_keypoints(keypoints, factors, image, 512, 1.0, min(scales),
+                                                      config.TEST.PROJECT2IMAGE)
             keypoints = torch.from_numpy(keypoints).cuda()
             factors = torch.from_numpy(factors).cuda()
         final_heatmaps = None
@@ -196,7 +201,7 @@ class PoseEstimationBaseline(nn.Module):
                                                                          with_flip=config.TEST.FLIP_TEST,
                                                                          project2image=config.TEST.PROJECT2IMAGE,
                                                                          size_projected=base_size,
-            )
+                                                                         )
 
             final_heatmaps, tags_list, final_features = aggregate_results_mpn(
                 config, s, final_heatmaps, tags_list, final_features, heatmaps, tags, features
@@ -215,9 +220,9 @@ class PoseEstimationBaseline(nn.Module):
         x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, batch_index, node_persons = graph_constructor.construct_graph()
 
         edge_pred, node_pred, class_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
-                                                          edge_labels=edge_labels
-                                                          , batch_index=batch_index, node_mask=label_mask_node,
-                                                          node_types=joint_det[:, 2])
+                                                    edge_labels=edge_labels
+                                                    , batch_index=batch_index, node_mask=label_mask_node,
+                                                    node_types=joint_det[:, 2])
 
         output = {}
         output["preds"] = {"edge": edge_pred, "node": node_pred, "class": class_pred}
@@ -226,6 +231,7 @@ class PoseEstimationBaseline(nn.Module):
         output["labels"] = {"edge": edge_labels, "node": node_labels, "class": class_labels}
 
         return scoremaps, output
+
 
 def _get_multi_stage_outputs(
         cfg, model, image, feature_gather, with_flip=False,
@@ -262,7 +268,7 @@ def _get_multi_stage_outputs(
             tags.append(output[:, offset_feat:])
     # now average heatmaps (or normalization part of average)
     if num_heatmaps > 0:
-        heatmaps.append(heatmaps_avg/num_heatmaps)
+        heatmaps.append(heatmaps_avg / num_heatmaps)
 
     if with_flip:
         if 'coco' in cfg.DATASET.DATASET:
@@ -310,7 +316,7 @@ def _get_multi_stage_outputs(
                 if cfg.MODEL.HRNET.TAG_PER_JOINT:
                     tags[-1] = tags[-1][:, flip_index, :, :]
 
-        heatmaps.append(heatmaps_avg/num_heatmaps)
+        heatmaps.append(heatmaps_avg / num_heatmaps)
 
     assert not cfg.DATASET.WITH_CENTER
     """

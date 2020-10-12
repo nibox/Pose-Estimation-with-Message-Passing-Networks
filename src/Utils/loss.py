@@ -33,6 +33,7 @@ def _make_input(t, requires_grad=False, need_cuda=True):
         inp = inp.cuda()
     return inp
 
+
 class AELoss(nn.Module):
     def __init__(self, loss_type):
         super().__init__()
@@ -42,7 +43,7 @@ class AELoss(nn.Module):
         """
         associative embedding loss for one image
         """
-        tags = []
+        tags = []  # contains reference tags
         pull = 0
         for joints_per_person in joints:
             tmp = []
@@ -52,14 +53,14 @@ class AELoss(nn.Module):
             if len(tmp) == 0:
                 continue
             tmp = torch.stack(tmp)
-            tags.append(torch.mean(tmp, dim=0))
-            pull = pull + torch.mean((tmp - tags[-1].expand_as(tmp))**2)
+            tags.append(torch.mean(tmp, dim=0))  # compute reference tags for the person
+            pull = pull + torch.mean((tmp - tags[-1].expand_as(tmp))**2)  # compute squared diff to reference tags
 
         num_tags = len(tags)
-        if num_tags == 0:
+        if num_tags == 0:  # no loss at all
             return _make_input(torch.zeros(1).float()), \
                    _make_input(torch.zeros(1).float())
-        elif num_tags == 1:
+        elif num_tags == 1:  # no push loss because no other person is there
             return _make_input(torch.zeros(1).float()), \
                    pull/(num_tags)
 
@@ -80,7 +81,6 @@ class AELoss(nn.Module):
             push = torch.clamp(diff, min=0).sum() - num_tags
         else:
             raise ValueError('Unkown ae loss type')
-
         return push/((num_tags - 1) * num_tags) * 0.5, \
                pull/(num_tags)
 
@@ -95,6 +95,67 @@ class AELoss(nn.Module):
             push, pull = self.singleTagLoss(tags[i], joints[i])
             pushes.append(push)
             pulls.append(pull)
+        return torch.stack(pushes), torch.stack(pulls)
+
+
+class NodeAELoss(nn.Module):
+
+    def __init__(self, loss_type):
+        super().__init__()
+        self.loss_type = loss_type
+
+    def singleTagLoss(self, pred_tags, person_label):
+        """
+        associative embedding loss for one image
+        """
+        tags = scatter_mean(pred_tags, person_label, dim=0)
+        """
+        pull_real = 0
+        num_persons = person_label.max().item() + 1
+        for i in range(num_persons):
+            tmp = pred_tags[person_label == i]
+            pull_real = pull_real + torch.mean((tmp - tags[i].expand_as(tmp))**2)  # compute squared diff to reference tags
+        # alternative
+        """
+        pull = scatter_mean((pred_tags - tags[person_label])**2, person_label, dim=0).sum()
+
+        num_tags = tags.shape[0]
+        if num_tags == 0:  # no loss at all
+            return torch.tensor(0.0), torch.tensor(0.0)
+        elif num_tags == 1:  # no push loss because no other person is there
+            return torch.tensor(0.0, device=pred_tags.device).float(), pull/num_tags
+
+        # tags = torch.stack(tags)
+
+        size = (num_tags, num_tags)
+        A = tags.expand(*size)
+        B = A.permute(1, 0)
+
+        diff = A - B
+
+        if self.loss_type == 'exp':
+            diff = torch.pow(diff, 2)
+            push = torch.exp(-diff)
+            push = torch.sum(push) - num_tags
+        elif self.loss_type == 'max':
+            diff = 1 - torch.abs(diff)
+            push = torch.clamp(diff, min=0).sum() - num_tags
+        else:
+            raise ValueError('Unkown ae loss type')
+
+        return push/((num_tags - 1) * num_tags) * 0.5, \
+               pull/num_tags
+
+    def forward(self, tags, person_label, batch_index):
+        """
+        accumulate the tag loss for each image in the batch
+        """
+        pushes, pulls = [], []
+        batch_size = batch_index.max().cpu().item() + 1
+        for i in range(batch_size):
+            push, pull = self.singleTagLoss(tags[batch_index==i], person_label[batch_index==i])
+            pushes.append(push.to(tags.device))
+            pulls.append(pull.to(tags.device))
         return torch.stack(pushes), torch.stack(pulls)
 
 
@@ -246,7 +307,121 @@ class BackgroundClassMultiLossFactory(nn.Module):
         class_loss *= self.loss_weights[1]
         edge_loss *= self.loss_weights[0]
 
-        loss = edge_loss  + heatmap_loss + ae_loss + class_loss
+        loss = edge_loss + heatmap_loss + ae_loss + class_loss
+        logging["loss"] = loss.cpu().item()
+
+        return loss, logging
+
+
+class TagMultiLossFactory(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+        # init check
+
+        self.num_joints = config.MODEL.HRNET.NUM_JOINTS
+        self.num_stages = config.MODEL.HRNET.LOSS.NUM_STAGES
+        self.loss_weights = config.MODEL.LOSS.LOSS_WEIGHTS
+        assert len(self.loss_weights) in [2,3]
+
+        self.heatmaps_loss = \
+            nn.ModuleList(
+                [
+                    HeatmapLoss()
+                    if with_heatmaps_loss else None
+                    for with_heatmaps_loss in config.MODEL.HRNET.LOSS.WITH_HEATMAPS_LOSS
+                ]
+            )
+        self.heatmaps_loss_factor = config.MODEL.HRNET.LOSS.HEATMAPS_LOSS_FACTOR
+
+        self.ae_loss = \
+            nn.ModuleList(
+                [
+                    AELoss(config.MODEL.HRNET.LOSS.AE_LOSS_TYPE) if with_ae_loss else None
+                    for with_ae_loss in config.TRAIN.WITH_AE_LOSS
+                ]
+            )
+        self.push_loss_factor = config.MODEL.HRNET.LOSS.PUSH_LOSS_FACTOR
+        self.pull_loss_factor = config.MODEL.HRNET.LOSS.PULL_LOSS_FACTOR
+
+        self.tag_loss = NodeAELoss(config.MODEL.HRNET.LOSS.AE_LOSS_TYPE)
+        if config.MODEL.LOSS.NODE_USE_FOCAL:
+            self.node_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA,
+                                       logits=True)
+        else:
+            raise NotImplementedError
+        self.class_loss = CrossEntropyLossWithLogits()
+        self.reg_loss = nn.SmoothL1Loss()
+        self.score_loss = nn.BCELoss()
+        # removed ae loss
+
+
+    def forward(self, outputs, labels, masks):
+
+        preds_heatmaps, heatmap_labels, heatmap_masks = outputs["heatmap"], labels["heatmap"], masks["heatmap"]
+        tag_labels = labels["tag"]
+        preds_tags, edge_labels, edge_masks = outputs["tag"], labels["edge"], masks["edge"]
+        batch_index = labels["batch_index"]
+        node_person = labels["person"]
+        preds_nodes, node_labels, node_masks = outputs["node"], labels["node"], masks["node"]
+        preds_classes, class_labels, class_masks = outputs["class"], labels["class"], masks["class"]  # classes use
+
+
+        heatmap_loss = 0.0
+        ae_loss = 0.0
+        for idx in range(len(preds_heatmaps)):
+            if self.heatmaps_loss[idx]:
+                heatmaps_pred = preds_heatmaps[idx][:, :self.num_joints]
+
+                heatmaps_loss = self.heatmaps_loss[idx](
+                    heatmaps_pred, heatmap_labels[idx], heatmap_masks[idx]
+                )
+                heatmaps_loss = heatmaps_loss * self.heatmaps_loss_factor[idx]
+                heatmap_loss += heatmaps_loss.mean()  # average over batch
+
+            if self.ae_loss[idx]:
+                tags_pred = preds_heatmaps[idx][:, 17:]
+                batch_size = tags_pred.size()[0]
+                tags_pred = tags_pred.contiguous().view(batch_size, -1, 1)
+
+                push_loss, pull_loss = self.ae_loss[idx](
+                    tags_pred, tag_labels[idx]
+                )
+                push_loss = push_loss * self.push_loss_factor[idx]
+                pull_loss = pull_loss * self.pull_loss_factor[idx]
+
+                ae_loss += push_loss.mean() + pull_loss.mean()
+
+
+
+        node_loss = 0.0
+        for i in range(len(preds_nodes)):
+            node_loss += self.node_loss(preds_nodes[i], node_labels, "mean", node_masks)
+        node_loss = node_loss / len(preds_nodes)
+
+        tag_loss = 0
+        for i in range(len(preds_tags)):
+            if (node_labels == 1.0).sum() > 0.0:
+                push, pull = self.tag_loss(preds_tags[i][node_labels == 1.0], node_person[node_labels == 1.0],
+                                           batch_index[node_labels == 1.0])
+                tag_loss += push.mean() + pull.mean()
+
+        class_loss = 0.0
+        if preds_classes is not None:
+            for i in range(len(preds_classes)):
+                class_loss += self.class_loss(preds_classes[i], class_labels, "mean", node_labels)
+            class_loss = class_loss / len(preds_classes)
+
+        logging = {"heatmap": heatmap_loss.cpu().item(),
+                   "tag_loss": ae_loss.cpu().item() if isinstance(ae_loss, torch.Tensor) else ae_loss,
+                   "tag": tag_loss.cpu().item() if isinstance(tag_loss, torch.Tensor) else tag_loss,
+                   "node": node_loss.cpu().item(),
+                   "class_loss": class_loss.cpu().item() if isinstance(class_loss, torch.Tensor) else class_loss,
+                   }
+        if len(self.loss_weights) == 3:
+            class_loss *= self.loss_weights[2]
+
+        loss = self.loss_weights[0] * node_loss + tag_loss * self.loss_weights[1] + heatmap_loss + ae_loss + class_loss
         logging["loss"] = loss.cpu().item()
 
         return loss, logging
