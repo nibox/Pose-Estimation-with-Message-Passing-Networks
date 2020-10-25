@@ -7,10 +7,17 @@ from Utils.hr_utils.multi_scales_testing import *
 
 def get_hr_model(config, device):
 
+    def rename_key(key):
+        # assume structure is module.REAL_NAME
+        return ".".join(key.split(".")[1:])
     model = PoseEstimationAeGroup(config)
 
     if config.MODEL.KP == "hrnet":
+
         state_dict = torch.load(config.MODEL.HRNET.PRETRAINED, map_location=device)
+        if config.MODEL.HRNET.PRETRAINED == "../PretrainedModels/pose_higher_hrnet_w48_640_crowdpose.pth.tar":
+            state_dict = {rename_key(k): v for k, v in state_dict.items()}
+
     else:
         raise NotImplementedError
 
@@ -32,6 +39,7 @@ class PoseEstimationAeGroup(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.backbone = load_back_bone(config)
+        self.num_joints = config.DATASET.NUM_JOINTS
 
     def forward(self, imgs: torch.Tensor) -> torch.tensor:
         outputs, _ = self.backbone(imgs)
@@ -55,11 +63,11 @@ class PoseEstimationAeGroup(nn.Module):
                     align_corners=False
                 )
 
-            offset_feat = 17 \
+            offset_feat = self.num_joints \
                 if loss_with_heatmaps[i] else 0
 
             if loss_with_heatmaps[i] and test_with_heatmaps[i]:
-                heatmaps_avg += output[:, :17]
+                heatmaps_avg += output[:, :self.num_joints]
                 num_heatmaps += 1
 
             if los_with_ae[i] and test_with_ae[i]:
@@ -94,7 +102,7 @@ class PoseEstimationAeGroup(nn.Module):
         return heatmaps, tags
 
 
-    def multi_scale_inference(self, img, scales, config):
+    def multi_scale_inference(self, img, scales, device, config):
         # need: scales
         assert img.shape[0] == 1  # batch size of 1
         transforms = torchvision.transforms.Compose(
@@ -119,7 +127,7 @@ class PoseEstimationAeGroup(nn.Module):
                 image, input_size, s, min(scales)
             )
             image_resized = transforms(image_resized)
-            image_resized = image_resized[None].cuda()
+            image_resized = image_resized[None].to(device)
 
             outputs, heatmaps, tags = _get_multi_stage_outputs(
                 config, self.backbone, image_resized, with_flip=True,

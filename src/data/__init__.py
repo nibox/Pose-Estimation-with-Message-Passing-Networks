@@ -2,4 +2,5 @@ from .CocoKeypoints_hr import CocoKeypoints as CocoKeypoints_hr, ScaleAwareHeatm
 from .utils import JointsGenerator, HeatmapGenerator
 from .CocoKeypoints_hg import CocoKeypoints as CocoKeypoints_hg
 from .OCHumans import OCHumans
+from .CrowdPoseKeypoints import CrowdPoseKeypoints
 

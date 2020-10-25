@@ -70,7 +70,7 @@ def _filter_visible(keypoints, output_shape):
     out_h = output_shape[0]
     vis_keypoints = keypoints.copy()
     for i in range(len(keypoints)):
-        for j in range(17):
+        for j in range(len(keypoints[i])):
             x, y = keypoints[i, j, :2]
             if x < 0 or x >= out_w or y < 0 or y >= out_h:
                 vis_keypoints[i, j] = 0.0
