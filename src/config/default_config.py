@@ -124,6 +124,8 @@ _C.MODEL.MPN.EDGE_EMB = CN(new_allowed=True)
 _C.MODEL.MPN.CLASS = CN(new_allowed=True)
 _C.MODEL.MPN.BN = True
 _C.MODEL.MPN.AGGR = "max"
+_C.MODEL.MPN.AGGR_SUB = "None"
+_C.MODEL.MPN.UPDATE_TYPE = "mlp"  # only used for type aware mpn
 _C.MODEL.MPN.SKIP = False
 _C.MODEL.MPN.AUX_LOSS_STEPS = 0  # 0 means only the last prediction is used for loss
 _C.MODEL.MPN.DROP_FEATURE = ""
@@ -185,6 +187,7 @@ _C.UB.GC = "NaiveGraphConstructor"
 _C.UB.NUM_EVAL = 500
 _C.UB.ADJUST = True
 _C.UB.SPLIT = "coco_17_mini"
+_C.UB.REFINE = False
 
 _C.TEST = CN()
 _C.TEST.SPLIT = "coco_17_mini"

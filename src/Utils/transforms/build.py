@@ -51,14 +51,16 @@ def transforms_hr_train(config):
 
 def transforms_hg_eval(config):
 
-    max_rotation = 0
-    min_scale = 1
-    max_scale = 1
-    max_translate = 0
-    input_size = 512
-    output_size = 128
     scale_type = config.DATASET.SCALING_TYPE
     assert scale_type == "long"
+    max_rotation = config.DATASET.MAX_ROTATION
+    min_scale = config.DATASET.MIN_SCALE
+    max_scale = config.DATASET.MAX_SCALE
+    max_translate = config.DATASET.MAX_TRANSLATE
+    input_size = config.DATASET.INPUT_SIZE
+    output_size = config.DATASET.OUTPUT_SIZE
+    flip = config.DATASET.FLIP
+    scale_type = config.DATASET.SCALING_TYPE
 
     transforms = T.Compose(
         [
@@ -74,8 +76,9 @@ def transforms_hg_eval(config):
             T.ToTensor()
         ]
     )
+    transforms_inv = torchvision.transforms.Compose([torchvision.transforms.ToPILImage()])
 
-    return transforms
+    return transforms, transforms_inv
 
 
 def transforms_hr_eval(config):

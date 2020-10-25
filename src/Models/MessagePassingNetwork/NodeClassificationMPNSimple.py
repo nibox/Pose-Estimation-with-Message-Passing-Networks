@@ -40,7 +40,8 @@ class NodeClassificationMPNSimple(torch.nn.Module):
                 num_types = 9
             self.mpn_node_cls = TypeAwareMPNLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
                                         aggr=config.AGGR, skip=config.SKIP,
-                                        edge_mlp=config.EDGE_MLP, num_types=num_types)
+                                        edge_mlp=config.EDGE_MLP, num_types=num_types, aggr_sub=config.AGGR_SUB,
+                                                  update_type=config.UPDATE_TYPE)
 
         if config.LATE_FUSION_POS:
             self.edge_embedding = LateFusionEdgeMLP(config)
@@ -66,11 +67,7 @@ class NodeClassificationMPNSimple(torch.nn.Module):
 
         node_features_initial = node_features
         edge_features_initial = edge_features
-        """
-        if i >= self.steps - self.aux_loss_steps - 1:
-            preds_node.append(self.node_classification(node_features).squeeze())
-            preds_class.append(self.classification(node_features))
-        """
+
 
         preds_edge = []
         preds_node = []
@@ -81,8 +78,11 @@ class NodeClassificationMPNSimple(torch.nn.Module):
                 edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
             node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index,
                                                              node_types=node_types)
+            if i >= self.edge_steps - self.aux_loss_steps - 1:
+                preds_node.append(self.node_classification(node_features).squeeze())
+                preds_class.append(self.classification(node_features))
+                preds_edge.append(self.edge_classification(edge_features).squeeze())
 
-        preds_edge.append(self.edge_classification(edge_features).squeeze())
 
         for i in range(self.node_steps):
             if self.use_skip_connections:
@@ -94,4 +94,4 @@ class NodeClassificationMPNSimple(torch.nn.Module):
         preds_class.append(self.classification(node_features))
 
 
-        return preds_edge, preds_node, preds_class
+        return preds_edge, preds_node, preds_class, [None]

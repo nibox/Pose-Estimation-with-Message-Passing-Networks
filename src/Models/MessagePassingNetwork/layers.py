@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch import nn as nn
 from torch_geometric.nn import MessagePassing
-from torch_scatter import scatter, scatter_max
+from torch_scatter import scatter, scatter_max, scatter_softmax
 
 
 def _make_mlp(input_dim, hidden_dims, bn=False, init_trick=False, end_with_relu=False):
@@ -90,7 +90,7 @@ class TypeAwareMPNLayer(MessagePassing):
 
     # todo with or without inital feature skip connection
     def __init__(self, node_feature_dim, edge_feature_dim, edge_feature_hidden, aggr, skip=False,
-                 edge_mlp="agnostic", num_types=17):
+                 edge_mlp="agnostic", num_types=17, aggr_sub=None, update_type="mlp"):
         super().__init__(aggr=aggr)
         # todo better architecture
 
@@ -110,7 +110,23 @@ class TypeAwareMPNLayer(MessagePassing):
             self.mlp_edge = TypeAwareEdgeUpdate(node_feature_dim * node_factor, edge_feature_dim * node_factor, edge_feature_hidden)
 
         self.mlp_node = TypeAwareNodeUpdate(node_feature_dim * node_factor + edge_feature_dim, node_feature_dim)
-        self.update_mlp = nn.Sequential(nn.Linear(node_feature_dim * num_types, node_feature_dim), nn.ReLU(inplace=True))
+
+        self.update_type = update_type
+        if update_type == "mlp":
+            self.update_mlp = nn.Sequential(nn.Linear(node_feature_dim * num_types, node_feature_dim), nn.ReLU(inplace=True))
+        elif update_type == "hierarch_mlp":
+            self.update_mlp = HierarchUpdateMlp(node_feature_dim)
+        elif update_type == "hierarch_cnn":
+            self.update_mlp = HierarchUpdateCnn(node_feature_dim)
+        else:
+            raise NotImplementedError
+
+        self.aggr_sub = aggr_sub
+        if self.aggr_sub == "node_edge_attn":
+            # self.attn_net = nn.Sequential(nn.Linear(edge_feature_dim, 1), nn.LeakyReLU(negative_slope=0.2, inplace=True))
+            self.attn_net = nn.Sequential(nn.Linear(edge_feature_dim, 1))
+        else:
+            self.attn_net = None
 
 
     def forward(self, x, edge_attr, edge_index, **kwargs):
@@ -132,17 +148,36 @@ class TypeAwareMPNLayer(MessagePassing):
         out = self.mlp_node(x_i, edge_attr, source_type)
         return out
 
-    def aggregate(self, inputs, index, source_type, num_nodes, target_nodes):
+    def aggregate(self, inputs, index, source_type, num_nodes, target_nodes, edge_attr):
 
+        if self.aggr in ["add", "max", "mean"] and self.aggr_sub == "None":
+            return self.aggr_vanilla(inputs, index, source_type, num_nodes, target_nodes, edge_attr)
+        elif self.aggr_sub == "node_edge_attn":
+            return self.aggr_node_attn(inputs, index, source_type, num_nodes, target_nodes, edge_attr)
+
+
+    def aggr_vanilla(self, inputs, index, source_type, num_nodes, target_nodes, edge_attr):
         feature_dim = inputs.shape[1]
         updates = torch.zeros(num_nodes, self.num_types, feature_dim, dtype=torch.float32, device=inputs.device)
         for i in range(self.num_types):
             types = source_type==i
             updates[:, i] = scatter(inputs[types], index[types], dim=0, reduce=self.aggr, dim_size=num_nodes)
-        return updates.reshape(num_nodes, -1)
+        return updates
 
+    def aggr_node_attn(self, inputs, index, source_type, num_nodes, target_nodes, edge_attr):
+        feature_dim = inputs.shape[1]
+        updates = torch.zeros(num_nodes, self.num_types, feature_dim, dtype=torch.float32, device=inputs.device)
+        attn_scores = self.attn_net(edge_attr)
+        for i in range(self.num_types):
+            types = source_type==i
+            attn = scatter_softmax(attn_scores[types], index[types], dim=0)
+            updates[:, i] = scatter(inputs[types] * attn, index[types], dim=0, reduce="add", dim_size=num_nodes)
+        return updates
 
     def update(self, aggr_out):
+        num_nodes = aggr_out.shape[0]
+        if self.update_type  == "mlp":
+            aggr_out = aggr_out.reshape(num_nodes, -1)
         aggr_out = self.update_mlp(aggr_out)
         return aggr_out
 

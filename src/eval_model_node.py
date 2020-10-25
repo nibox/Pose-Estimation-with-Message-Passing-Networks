@@ -79,6 +79,7 @@ def main():
     # baseline : predicting full connections
     # baseline: upper bound
 
+    avg_time = []
     # eval model
     eval_node = {"acc": [], "prec": [], "rec": [], "f1": []}
     eval_edge = {"acc": [], "prec": [], "rec": [], "f1": []}
@@ -175,9 +176,14 @@ def main():
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
+
+            t1 = time.clock()
             ann = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
                               int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE,
                               config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD, preds_classes, False, None)
+            t2 = time.clock()
+            avg_time.append(t2 - t1)
+
             ann_heatmap = perd_to_ann(scoremaps[0], tags[0], joint_det, joint_scores, edge_index, preds_edges, img_info,
                                       int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, config.DATASET.SCALING_TYPE,
                                       config.TEST.ADJUST, 0.1, preds_classes, True)
@@ -215,6 +221,7 @@ def main():
                 imgs_fully_det.append(eval_set.img_ids[i])
                 anns_full.append(ann)
 
+        print(f"average time: {np.array(avg_time).mean()}")
         print("##################")
         eval_writer.eval_coco(eval_set.coco, anns, np.array(eval_ids), "General Evaluation", "kpt_det.json")
         eval_writer.eval_coco(eval_set.coco, anns_perf_edge, np.array(eval_ids), "Perfect classification")
@@ -249,6 +256,15 @@ def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, preds_edge
     # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
     if len(persons_pred.shape) == 1:  # this means none persons were detected
         persons_pred = np.zeros([1, 17, 3])
+
+    with_filter = True
+    if with_filter and persons_pred.sum() != 0:
+        max_scores = persons_pred[:, :, 2].max(axis=1)
+        keep = max_scores > 0.25
+        persons_pred = persons_pred[keep]
+        if persons_pred.shape[0] == 0:
+            persons_pred = np.zeros([1, 17, 3])
+
     if with_refine and persons_pred[0, :, 2].sum() != 0:
         tags = tags.cpu().numpy()
         scoremaps = scoremaps.cpu().numpy()

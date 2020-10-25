@@ -65,13 +65,12 @@ class PoseNet(nn.Module):
         x = self.pre(imgs)
         preds = []
         feature = None
-        early_features = x.clone()
         for i in range(self.nstack):
             feature = self.features[i](x)
             preds.append(self.outs[i](feature))
             if i != self.nstack - 1:
                 x = x + self.merge_preds[i](preds[-1]) + self.merge_features[i](feature)
-        return torch.stack(preds, 1), feature, early_features
+        return preds, feature
 
     def calc_loss(self, preds, heatmaps=None, masks=None):
         # removed tag loss
@@ -85,7 +84,8 @@ class PoseNet(nn.Module):
         return detection_loss
 
 
-def hg_process_output(output):
-    scoremaps = output[0]
-    scoremaps = scoremaps[:, -1, :17]
-    return scoremaps, output[1]
+def hg_process_output(output, scoremap_mode):
+    out = output[0]
+    scoremaps = out[-1][:, :17]
+    tags = out[-1][:, 17:34]
+    return scoremaps, output[1], tags

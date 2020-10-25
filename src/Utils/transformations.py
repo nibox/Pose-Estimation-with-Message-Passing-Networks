@@ -42,7 +42,40 @@ def reverse_affine_map(keypoints, img_size_orig, scaling_type, min_scale=1.0):
         scale = np.array([scale, scale])
         # resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], 512, 1., 1.)
         # mat = get_transform(center, scale, (int(resized_img[0] / 2), int(resized_img[1] / 2)))
-        mat = get_transform((gt_width / 2, gt_height / 2), scale, (128, 128))
+        mat = get_transform(np.array((gt_width / 2, gt_height / 2)), scale, (512, 512))
+
+        inv_mat = np.linalg.pinv(mat)[:2]  # might this lead to numerical errors?
+        keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2] * 4, inv_mat)
+        return keypoints
+        """
+        mat = get_affine_transform(np.array((gt_width / 2, gt_height / 2)), scale, (128, 128), inv=True)
+        keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], mat)
+        return keypoints
+        # """
+    elif scaling_type == "long_with_multiscale":
+        # """
+        gt_width = img_size_orig[0]
+        gt_height = img_size_orig[1]
+        scale = max(gt_height, gt_width) / 200
+        scale = np.array([scale, scale])
+        # resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], 512, 1., 1.)
+        # mat = get_transform(center, scale, (int(resized_img[0] / 2), int(resized_img[1] / 2)))
+        mat = get_transform((gt_width / 2, gt_height / 2), scale, (1024, 1024))
+
+        inv_mat = np.linalg.pinv(mat)[:2]  # might this lead to numerical errors?
+        keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2] * 4, inv_mat)
+        return keypoints
+        # """
+        """
+        h, w = img_size_orig[1], img_size_orig[0]
+        center = np.array([int(w / 2.0), int(h / 2.0)])
+        scale = max(h, w) / 200
+
+        inp_res = int((1 * 512 + 63) // 64 * 64)
+        inv_mat = get_affine_transform(center, scale, (int(inp_res), int(inp_res)), inv=True)
+        keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], inv_mat)
+        return keypoints
+        # """
     else:
         raise NotImplementedError
 
@@ -101,7 +134,7 @@ def reverse_affine_map_points(points, img_size_orig, scaling_type, min_scale=1.0
     inv_mat[0, 0], inv_mat[1, 1] = 1 / mat[0, 0], 1 / mat[1, 1]
     inv_mat[0, 2], inv_mat[1, 2] = -mat[0, 2] / mat[0, 0], -mat[1, 2] / mat[1, 1]
     inv_mat = inv_mat[:2]
-    inv_mat = np.linalg.inv(mat)[:2]  # might this lead to numerical errors?
+    inv_mat = np.linalg.pinv(mat)[:2]  # might this lead to numerical errors?
     points[:, :2] = kpt_affine(points[:, :2], inv_mat)
     return points
 
@@ -134,6 +167,7 @@ def factor_affine(factors, mat):
 
 def get_transform(center, scale, res, rot=0):
     # Generate transformation matrix
+    # assert isinstance(scale, np.array)
     h = 200 * scale
     t = np.zeros((3, 3))
     t[0, 0] = float(res[1]) / h[1]

@@ -72,15 +72,16 @@ class UpperBoundModel(nn.Module):
             assert masks is not None
 
         bb_output = self.backbone(imgs)
-        scoremaps, features, _ = self.process_output(bb_output, self.scoremap_mode)
+        scoremaps, features, tags = self.process_output(bb_output, self.scoremap_mode)
         features = self.feature_gather(features)
 
         graph_constructor = get_graph_constructor(self.gc_config, scoremaps=scoremaps, features=features,
                                                   joints_gt=keypoints_gt, factor_list=factor_list, masks=masks,
-                                                  device=scoremaps.device, testing=not self.training, heatmaps=heatmaps)
+                                                  device=scoremaps.device, testing=not self.training, heatmaps=heatmaps,
+                                                  tagmaps=tags)
 
 
-        x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, _, node_persons = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, _, node_persons, _ = graph_constructor.construct_graph()
 
         # prepare class output
         if class_labels is not None:
@@ -119,7 +120,7 @@ class UpperBoundModel(nn.Module):
         output["labels"] = {"edge": edge_labels, "node": node_labels, "class": class_labels, "refine": node_persons}
         output["masks"] = {"edge": label_mask, "node": label_mask_node}
         output["preds"] = {"edge": edge_labels, "node": node_labels, "class": node_classes, "heatmap": bb_output[0]}
-        output["graph"] = {"nodes": joint_det, "detector_scores": joint_scores, "edge_index": edge_index}
+        output["graph"] = {"nodes": joint_det, "detector_scores": joint_scores, "edge_index": edge_index, "tags": tags}
 
         return scoremaps, output
 

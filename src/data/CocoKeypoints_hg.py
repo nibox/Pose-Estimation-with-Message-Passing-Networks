@@ -7,14 +7,16 @@ from PIL import Image
 import cv2
 import pickle
 import os
+from .utils import HeatmapGenerator, JointsGenerator, _filter_visible
 
 from Utils.transformations import kpt_affine, factor_affine, get_transform
 
 
 class CocoKeypoints(Dataset):
 
-    def __init__(self, path, mini=False, input_size=512, output_size=128, mode="train", seed=0, filter_empty=True,
-                 img_ids=None, year=14, transforms=None, mask_crowds=True):
+    def __init__(self, path, mini=False, mode="train", seed=0, filter_empty=True,
+                 img_ids=None, year=14, transforms=None, mask_crowds=True, heatmap_generator=None,
+                 joint_generator=None):
         np.random.seed(seed)
         torch.manual_seed(seed)
 
@@ -24,6 +26,9 @@ class CocoKeypoints(Dataset):
         self.coco = COCO(ann_path)
         self.transforms = transforms
         assert self.transforms is not None
+        self.heatmap_generator = heatmap_generator
+        self.joints_generator = joint_generator
+        self.num_scales = len(heatmap_generator)
         # self.input_size = input_size
         # self.output_size = output_size
 
@@ -105,54 +110,47 @@ class CocoKeypoints(Dataset):
         if self.mask_crowds:
             for j in ann:
                 if j["iscrowd"]:
-                    assert j["num_keypoints"] == 0
+                    rle = maskapi.frPyObjects(
+                        j['segmentation'], img_info['height'], img_info['width'])
+                    mask += maskapi.decode(rle)
                 # testing for the number of keypoints should be sufficient if the assertion above is true
-                if j["num_keypoints"] == 0:
-                    encoding = maskapi.frPyObjects(j["segmentation"], img_height, img_width)
-                    inst_mask = maskapi.decode(encoding)
-                    if len(inst_mask.shape) == 3:
-                        inst_mask = maskapi.decode(encoding).sum(axis=2)
-                    mask += inst_mask
+                elif j["num_keypoints"] == 0:
+                    rles = maskapi.frPyObjects(
+                        j['segmentation'], img_info['height'], img_info['width'])
+                    for rle in rles:
+                        mask += maskapi.decode(rle)
+
         mask = (mask < 0.5).astype(np.float32)
 
-        """
-        # img processing
-        # todo random scaling
-        # todo random rotation
-        # todo random horizontal flip
-        center = np.array([img_width / 2, img_height / 2])  # probably for opencv?
-        scale = max(img_height, img_width) / 200
-        scale = np.array([scale, scale])
-
-        dx = 0
-        dy = 0
-        center[0] += dx * center[0]
-        center[1] += dy * center[1]
-
-        mat_mask = get_transform(center, scale, (self.output_size, self.output_size), 0)[:2]
-        mask = cv2.warpAffine((mask * 255).astype(np.uint8), mat_mask, (self.output_size, self.output_size)) / 255.0
-        mask = (mask > 0.5).astype(np.float32)
-
-        mat = get_transform(center, scale, (self.input_size, self.input_size), 0)[:2]
-        img = cv2.warpAffine(img, mat, (self.input_size, self.input_size)).astype(np.float32) / 255.0
-
-        keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], mat_mask).astype(np.float32)
-        keypoints = pack_keypoints_for_batch(keypoints, max_num_people=self.max_num_people)
-
-        factors = factor_affine(factors, mat_mask)
-        factors = pack_for_batch(factors, self.max_num_people)
-        """
-        mask_list = [mask.copy()]
-        keypoint_list = [keypoints.copy()]
+        mask_list = [mask.copy() for _ in range(self.num_scales)]
+        keypoint_list = [keypoints.copy() for _ in range(self.num_scales)]
         heatmaps = []
 
         if self.transforms is not None:
             img, mask, keypoint_list, factors = self.transforms(img, mask_list, keypoint_list, factors)
 
-        factors = pack_for_batch(factors, 30)
-        keypoints = pack_for_batch(keypoint_list[-1], 30)
+        if self.heatmap_generator is not None:
+            for scale_idx in range(self.num_scales):
+                heatmap = self.heatmap_generator[scale_idx](keypoint_list[scale_idx], None)
+                keypoint_list[scale_idx] = _filter_visible(keypoint_list[scale_idx], mask[scale_idx].shape)
+                # keypoint_list[scale_idx] = remove_empty_rows(keypoint_list[scale_idx])
 
-        return img, heatmaps, mask, keypoints, factors
+                heatmaps.append(heatmap.astype(np.float32))
+                mask_list[scale_idx] = mask_list[scale_idx].astype(np.float32)
+                # keypoint_list[scale_idx] = pack_for_batch(keypoint_list[scale_idx].astype(np.float32), 30)
+
+        kpts = keypoint_list[-1]
+        if len(kpts) != 0:
+            empty_row = kpts[:, :, 2].sum(axis=1) == 0.0
+            rows_to_keep = np.logical_not(empty_row)
+            keypoint_list[-1] = pack_for_batch(kpts[rows_to_keep].astype(np.float32), 30)
+            factors = pack_for_batch(factors[rows_to_keep],
+                                     30)  # assuming the visible keypoints are the same for all scales
+        else:
+            keypoint_list[-1] = pack_for_batch(kpts, 30)
+            factors = pack_for_batch(factors, 30)  # assuming the visible keypoints are the same for all scales
+
+        return img, heatmaps, mask, keypoint_list[-1], factors, 0
 
     def __len__(self):
         return len(self.img_ids)

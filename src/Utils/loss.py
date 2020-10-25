@@ -438,25 +438,34 @@ class ClassMultiLossFactory(nn.Module):
         self.loss_weights = config.MODEL.LOSS.LOSS_WEIGHTS
         assert len(self.loss_weights) in [2,3]
 
-        self.heatmaps_loss = \
-            nn.ModuleList(
-                [
-                    HeatmapLoss()
-                    if with_heatmaps_loss else None
-                    for with_heatmaps_loss in config.MODEL.HRNET.LOSS.WITH_HEATMAPS_LOSS
-                ]
-            )
-        self.heatmaps_loss_factor = config.MODEL.HRNET.LOSS.HEATMAPS_LOSS_FACTOR
 
-        self.ae_loss = \
-            nn.ModuleList(
-                [
-                    AELoss(config.MODEL.HRNET.LOSS.AE_LOSS_TYPE) if with_ae_loss else None
-                    for with_ae_loss in config.TRAIN.WITH_AE_LOSS
-                ]
-            )
-        self.push_loss_factor = config.MODEL.HRNET.LOSS.PUSH_LOSS_FACTOR
-        self.pull_loss_factor = config.MODEL.HRNET.LOSS.PULL_LOSS_FACTOR
+        if config.MODEL.KP == "hrnet":
+            self.heatmaps_loss = \
+                nn.ModuleList(
+                    [
+                        HeatmapLoss()
+                        if with_heatmaps_loss else None
+                        for with_heatmaps_loss in config.MODEL.HRNET.LOSS.WITH_HEATMAPS_LOSS
+                    ]
+                )
+            self.heatmaps_loss_factor = config.MODEL.HRNET.LOSS.HEATMAPS_LOSS_FACTOR
+
+            self.ae_loss = \
+                nn.ModuleList(
+                    [
+                        AELoss(config.MODEL.HRNET.LOSS.AE_LOSS_TYPE) if with_ae_loss else None
+                        for with_ae_loss in config.TRAIN.WITH_AE_LOSS
+                    ]
+                )
+            self.push_loss_factor = config.MODEL.HRNET.LOSS.PUSH_LOSS_FACTOR
+            self.pull_loss_factor = config.MODEL.HRNET.LOSS.PULL_LOSS_FACTOR
+        elif config.MODEL.KP == "hourglass":
+            self.heatmaps_loss = \
+                nn.ModuleList(
+                    [HeatmapLoss() for _ in range(config.MODEL.HG.NSTACK)]
+                )
+            self.ae_loss = [None for _ in range(config.MODEL.HG.NSTACK)]
+            self.heatmaps_loss_factor = [1.0, 1.0, 1.0, 1.0]
 
         if config.MODEL.LOSS.USE_FOCAL:
             self.edge_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA, logits=True)
@@ -568,6 +577,7 @@ class ClassMultiLossFactory(nn.Module):
         logging["loss"] = loss.cpu().item()
 
         return loss, logging
+
 
 class MPNLossFactory(nn.Module):
 

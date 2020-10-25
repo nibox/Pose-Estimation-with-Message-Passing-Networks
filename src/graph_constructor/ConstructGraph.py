@@ -327,11 +327,18 @@ class NaiveGraphConstructor:
         edge_attr_y = (joint_y[edge_index[1]] - joint_y[edge_index[0]]).float() / norm_factor
         edge_attr_x = (joint_x[edge_index[1]] - joint_x[edge_index[0]]).float() / norm_factor
 
+        a_x, a_y = (joint_x[edge_index[0]] - joint_x[edge_index[1]]).float(), (joint_y[edge_index[0]] - joint_y[edge_index[1]]).float()
+        edge_attr_theta = torch.abs(torch.acos(a_x * torch.rsqrt(a_x**2 + a_y**2)))
+        edge_attr_theta[torch.isnan(edge_attr_theta)] = 0.0
+
         if {"position", "connection_type"} == set(edge_features_to_use):
             edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1), connection_label_2.float()],
                                   dim=1)
         elif {"position"} == set(edge_features_to_use):
             edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1)], dim=1)
+        elif {"position", "angle", "connection_type"} == set(edge_features_to_use):
+            edge_attr = torch.cat([edge_attr_x[:, None], edge_attr_y[:, None], edge_attr_theta[:, None], connection_label_2.float()],
+                                  dim=1)
         else:
             raise NotImplementedError
 

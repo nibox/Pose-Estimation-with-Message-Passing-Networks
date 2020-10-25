@@ -52,6 +52,7 @@ class PoseEstimationBaseline(nn.Module):
         # self.backbone = config["backbone"](**config["backbone_config"])
         self.backbone, self.process_output = load_back_bone(config)
         self.mpn = get_mpn_model(config.MODEL.MPN)
+        self.backbone_name = config.MODEL.KP
         self.gc_config = config.MODEL.GC
 
         input_feature_size = config.MODEL.KP_OUTPUT_DIM if config.MODEL.HRNET.FEATURE_FUSION != "cat_multi" else 352
@@ -133,16 +134,21 @@ class PoseEstimationBaseline(nn.Module):
                 param.requires_grad = False
         elif mode == "stem":
             self.backbone.apply(set_bn_feeze)
-            for param in self.backbone.conv1.parameters():
-                param.requires_grad = False
-            for param in self.backbone.bn1.parameters():
-                param.requires_grad = False
-            for param in self.backbone.conv2.parameters():
-                param.requires_grad = False
-            for param in self.backbone.bn2.parameters():
-                param.requires_grad = False
-            for param in self.backbone.layer1.parameters():
-                param.requires_grad = False
+
+            if self.backbone_name == "hrnet":
+                for param in self.backbone.conv1.parameters():
+                    param.requires_grad = False
+                for param in self.backbone.bn1.parameters():
+                    param.requires_grad = False
+                for param in self.backbone.conv2.parameters():
+                    param.requires_grad = False
+                for param in self.backbone.bn2.parameters():
+                    param.requires_grad = False
+                for param in self.backbone.layer1.parameters():
+                    param.requires_grad = False
+            elif self.backbone == "hourglass":
+                for param in self.backbone.pre.parameters():
+                    param.requires_grad = False
         elif mode == "nothing":
             self.backbone.apply(set_bn_feeze)
         elif mode == "from_scratch":
@@ -215,11 +221,11 @@ class PoseEstimationBaseline(nn.Module):
         graph_constructor = get_graph_constructor(self.gc_config, scoremaps=scoremaps, features=features,
                                                   joints_gt=keypoints, factor_list=factors, masks=None,
                                                   device=scoremaps.device, testing=not self.training,
-                                                  heatmaps=None)
+                                                  heatmaps=None, tagmaps=tags)
 
-        x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, batch_index, node_persons = graph_constructor.construct_graph()
+        x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, batch_index, node_persons, _ = graph_constructor.construct_graph()
 
-        edge_pred, node_pred, class_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
+        edge_pred, node_pred, class_pred, _ = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
                                                     edge_labels=edge_labels
                                                     , batch_index=batch_index, node_mask=label_mask_node,
                                                     node_types=joint_det[:, 2])
@@ -231,6 +237,79 @@ class PoseEstimationBaseline(nn.Module):
         output["labels"] = {"edge": edge_labels, "node": node_labels, "class": class_labels}
 
         return scoremaps, output
+
+
+def multi_scale_inference_hourglass(model, img, scales, device, config, keypoints=None, factors=None):
+
+    assert img.shape[0] == 1  # batch size of 1
+    transforms = torchvision.transforms.Compose(
+        [
+            torchvision.transforms.ToTensor(),
+        ]
+    )
+    image = img[0].cpu().permute(1, 2, 0).numpy()  # prepair for transformation
+
+    base_size, center, scale = get_multi_scale_size_hourglass(
+        image, 512, 1.0, min(scales)
+    )
+    if keypoints is not None:
+        assert factors is not None
+        keypoints = keypoints.cpu().numpy()
+        factors = factors.cpu().numpy()
+        # remove zero
+        non_zero = keypoints[0, :, :, 2].sum(axis=1) != 0
+        keypoints = keypoints[:, non_zero]
+        factors = factors[:, non_zero]
+        keypoints, factors = multiscale_keypoints_hourglass(keypoints, factors, image, 512, 1.0, min(scales),  # hack!! parameters
+                                                  config.TEST.PROJECT2IMAGE)
+        keypoints = torch.from_numpy(keypoints).to(device)
+        factors = torch.from_numpy(factors).to(device)
+    final_heatmaps = None
+    final_features = None
+    tags_list = []
+    for idx, s in enumerate(sorted(scales, reverse=True)):
+        input_size = 512
+        image_resized, center, scale = resize_align_multi_scale_hourglass(
+            image, input_size, s, min(scales)
+        )
+        image_resized = transforms(image_resized)
+        image_resized = image_resized[None].to(device)
+
+        outputs, heatmaps, tags, features = _get_multi_stage_outputs_hourglass(config, model.backbone, image_resized,
+                                                                     model.feature_gather,
+                                                                     with_flip=config.TEST.FLIP_TEST,
+                                                                     project2image=config.TEST.PROJECT2IMAGE,
+                                                                     size_projected=base_size,
+                                                                     )
+
+        final_heatmaps, tags_list, final_features = aggregate_results_mpn_hourglass(
+            config, s, final_heatmaps, tags_list, final_features, heatmaps, tags, features
+        )
+    scoremaps = final_heatmaps / float(len(scales))
+    features = final_features / float(len(scales))
+    tags = torch.cat(tags_list, dim=4)
+
+    # features = self.feature_gather(features)  # or average after this
+
+    graph_constructor = get_graph_constructor(model.gc_config, scoremaps=scoremaps, features=features,
+                                              joints_gt=keypoints, factor_list=factors, masks=None,
+                                              device=scoremaps.device, testing=not model.training,
+                                              heatmaps=None, tagmaps=tags)
+
+    x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, batch_index, node_persons, _ = graph_constructor.construct_graph()
+
+    edge_pred, node_pred, class_pred, _ = model.mpn(x, edge_attr, edge_index, node_labels=node_labels,
+                                                   edge_labels=edge_labels
+                                                   , batch_index=batch_index, node_mask=label_mask_node,
+                                                   node_types=joint_det[:, 2])
+
+    output = {}
+    output["preds"] = {"edge": edge_pred, "node": node_pred, "class": class_pred}
+    output["graph"] = {"nodes": joint_det, "detector_scores": joint_scores, "edge_index": edge_index,
+                       "tags": tags}
+    output["labels"] = {"edge": edge_labels, "node": node_labels, "class": class_labels}
+
+    return scoremaps, output
 
 
 def _get_multi_stage_outputs(
@@ -359,6 +438,72 @@ def _get_multi_stage_outputs(
     return outputs, heatmaps, tags, features
 
 
+def _get_multi_stage_outputs_hourglass(
+        cfg, model, image, feature_gather, with_flip=False,
+        project2image=False, size_projected=None,
+):
+    heatmaps = []  # collects heatmaps for image and flip image (size is always 2)
+    tags = []
+    features = []
+
+    outputs, feat = model(image)
+    feat = feature_gather(feat)
+    features.append(feat)
+    heatmaps.append(outputs[-1][:, :17])
+
+    tags.append(outputs[-1][:, 17:34])
+
+    if with_flip:
+        if 'coco' in cfg.DATASET.DATASET:
+            dataset_name = 'COCO'
+        else:
+            raise ValueError('Please implement flip_index for new dataset: %s.' % cfg.DATASET.DATASET)
+        flip_index = FLIP_CONFIG[dataset_name]
+
+        outputs_flip, features_flip = model(torch.flip(image, [3]))
+
+        output = outputs_flip[-1]
+        output = torch.flip(output, [3])
+
+        tags.append(output[:, 17:34])
+        tags[-1] = tags[-1][:, flip_index, :, :]
+
+        heatmaps.append(output[:, flip_index])
+
+    assert not cfg.DATASET.WITH_CENTER
+
+    # upscale to input image size
+    if project2image and size_projected:
+        heatmaps = [
+            torch.nn.functional.interpolate(
+                hms,
+                size=(size_projected[1], size_projected[0]),
+                mode='bilinear',
+                align_corners=False
+            )
+            for hms in heatmaps
+        ]
+
+        tags = [
+            torch.nn.functional.interpolate(
+                tms,
+                size=(size_projected[1], size_projected[0]),
+                mode='bilinear',
+                align_corners=False
+            )
+            for tms in tags
+        ]
+        features = [
+            torch.nn.functional.interpolate(
+                feat,
+                size=(size_projected[1], size_projected[0]),
+                mode='bilinear',
+                align_corners=False
+            )
+            for feat in features
+        ]
+
+    return outputs, heatmaps, tags, features
 """
 def load_model(path, model_class, config, device, pretrained_path=None):
 

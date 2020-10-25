@@ -11,6 +11,12 @@ from Models import get_pose_model  # , get_pose_with_ref_model
 import os
 import sys
 
+def difference(arr_1: np.array, arr_2: np.array):
+    arr_1 = set(list(arr_1))
+    arr_2 = set(list(arr_2))
+    arr_1 = arr_1.difference(arr_2)
+    return np.array(list(arr_1))
+
 
 def create_train_validation_split(config):
     batch_size = config.TRAIN.BATCH_SIZE
@@ -43,6 +49,18 @@ def create_train_validation_split(config):
                                  transforms=transforms, heatmap_generator=heatmap_generator)
         return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8), \
                DataLoader(valid, batch_size=1, num_workers=8)
+    elif config.TRAIN.SPLIT == "coco_hourglass":
+        train_ids, _ = pickle.load(open("tmp/coco_17_full_split.p", "rb"))  # mini_train_valid_split_4 old one
+        valid_ids = np.loadtxt("tmp/valid_id")
+        train_ids = difference(train_ids, valid_ids)
+        heatmap_generator = [HeatmapGenerator(128, 17, config.DATASET.SIGMA) for _ in range(4)]   # nStacks
+        transforms, _ = transforms_hg_eval(config)
+        train = CocoKeypoints_hg(config.DATASET.ROOT, mini=False, seed=0, mode="train", img_ids=train_ids, year=17,
+                                 transforms=transforms, heatmap_generator=heatmap_generator)
+        valid = CocoKeypoints_hg(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=valid_ids, year=14,
+                                 transforms=transforms, heatmap_generator=heatmap_generator)
+        return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True), \
+               DataLoader(valid, batch_size=1, num_workers=8, pin_memory=True)
     elif config.TRAIN.SPLIT == "coco_17_full":
         train_ids, _ = pickle.load(open("tmp/coco_17_full_split.p", "rb"))  # mini_train_valid_split_4 old one
         _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
@@ -239,6 +257,7 @@ def main():
                 loss, preds, labels, masks, logging = update_model(batch)
             except RuntimeError as e:
                 if "out of memory" in str(e):
+                    print("Out of Memory")
                     oom_counter += 1
                     for p in model.parameters():
                         if p.grad is not None:

@@ -1,6 +1,7 @@
 import numpy as np
 import cv2
 import torch
+from Utils.transformations import get_transform
 
 
 def get_multi_scale_size(image, input_size, current_scale, min_scale):
@@ -28,11 +29,36 @@ def get_multi_scale_size(image, input_size, current_scale, min_scale):
     return (w_resized, h_resized), center, np.array([scale_w, scale_h])
 
 
+def get_multi_scale_size_hourglass(image, input_size, currect_scale, min_scale):
+    h, w, _ = image.shape
+    center = np.array([w / 2.0, h / 2.0])
+    scale = max(h, w) / 200
+
+    inp_res = int((currect_scale * 512 + 63) // 64 * 64)
+
+    return (inp_res, inp_res), center, np.array([scale, scale])
+
+
 def resize_align_multi_scale(image, input_size, current_scale, min_scale):
     size_resized, center, scale = get_multi_scale_size(
         image, input_size, current_scale, min_scale
     )
     trans = _get_affine_transform(center, scale, 0, size_resized)
+
+    image_resized = cv2.warpAffine(
+        image,
+        trans,
+        size_resized
+        # (int(w_resized), int(h_resized))
+    )
+
+    return image_resized, center, scale
+
+def resize_align_multi_scale_hourglass(image, input_size, current_scale, min_scale):
+    size_resized, center, scale = get_multi_scale_size_hourglass(
+        image, input_size, current_scale, min_scale
+    )
+    trans = get_transform(center, scale, size_resized, 0)[:2]
 
     image_resized = cv2.warpAffine(
         image,
@@ -162,6 +188,96 @@ def aggregate_results_mpn(
 
     return final_heatmaps, tags_list, final_features
 
+
+def aggregate_results_mpn_hourglass(
+        cfg, scale_factor, final_heatmaps, tags_list, final_features, heatmaps, tags, features
+):
+
+    if scale_factor == 1 or len(cfg.TEST.SCALE_FACTOR) == 1:
+        if final_heatmaps is not None and not cfg.TEST.PROJECT2IMAGE:
+            tags = [
+                torch.nn.functional.interpolate(
+                    tms,
+                    size=(final_heatmaps.size(2), final_heatmaps.size(3)),
+                    mode='bilinear',
+                    align_corners=False
+                )
+                for tms in tags
+            ]
+        for tms in tags:
+            tags_list.append(torch.unsqueeze(tms, dim=4))
+
+    heatmaps_avg = (heatmaps[0] + heatmaps[1])/2.0 if cfg.TEST.FLIP_TEST \
+        else heatmaps[0]
+    if len(features) == 2:
+        raise NotImplementedError
+    else:
+        assert len(features) == 1
+        features_avg = features[0]
+
+    if final_heatmaps is None:
+        final_heatmaps = heatmaps_avg
+    elif cfg.TEST.PROJECT2IMAGE:
+        final_heatmaps += heatmaps_avg
+    else:
+        final_heatmaps += torch.nn.functional.interpolate(
+            heatmaps_avg,
+            size=(final_heatmaps.size(2), final_heatmaps.size(3)),
+            mode='bilinear',
+            align_corners=False
+        )
+
+    if final_features is None:
+        final_features = features_avg
+    elif cfg.TEST.PROJECT2IMAGE:
+        final_features += features_avg
+    else:
+        final_features += torch.nn.functional.interpolate(
+            features_avg,
+            size=(final_features.size(2), final_features.size(3)),
+            mode='bilinear',
+            align_corners=False
+        )
+
+    return final_heatmaps, tags_list, final_features
+
+
+def aggregate_results_hourglass(
+        cfg, scale_factor, final_heatmaps, tags_list, heatmaps, tags
+):
+
+    if scale_factor == 1 or len(cfg.TEST.SCALE_FACTOR) == 1:
+        if final_heatmaps is not None and not cfg.TEST.PROJECT2IMAGE:
+            tags = [
+                torch.nn.functional.interpolate(
+                    tms,
+                    size=(final_heatmaps.size(2), final_heatmaps.size(3)),
+                    mode='bilinear',
+                    align_corners=False
+                )
+                for tms in tags
+            ]
+        for tms in tags:
+            tags_list.append(torch.unsqueeze(tms, dim=4))
+
+    heatmaps_avg = (heatmaps[0] + heatmaps[1])/2.0 if cfg.TEST.FLIP_TEST \
+        else heatmaps[0]
+
+    if final_heatmaps is None:
+        final_heatmaps = heatmaps_avg
+    elif cfg.TEST.PROJECT2IMAGE:
+        final_heatmaps += heatmaps_avg
+    else:
+        final_heatmaps += torch.nn.functional.interpolate(
+            heatmaps_avg,
+            size=(final_heatmaps.size(2), final_heatmaps.size(3)),
+            mode='bilinear',
+            align_corners=False
+        )
+
+    return final_heatmaps, tags_list
+
+
 def get_final_preds(grouped_joints, center, scale, heatmap_size):
     final_results = []
     for person in grouped_joints[0]:
@@ -225,6 +341,28 @@ def multiscale_keypoints(keypoints, factors, image, input_size, scale, min_scale
 
     return keypoints, factors
 
+
+def multiscale_keypoints_hourglass(keypoints, factors, image, input_size, scale, min_scale, project_to_image):
+
+    def _affine_joints(joints, mat):
+        joints = np.array(joints)
+        shape = joints.shape
+        joints = joints.reshape(-1, 2)
+        return np.dot(np.concatenate(
+            (joints, joints[:, 0:1]*0+1), axis=1), mat.T).reshape(shape)
+
+    def _affine_factors(factors, mat):
+        return factors * mat[0, 0] * mat[1, 1]
+
+    resized_img, center, scale = get_multi_scale_size_hourglass(image, input_size, scale, min_scale)
+
+    factor = 1 if project_to_image else 0.25
+    target_shape = (int(resized_img[0] * factor), int(resized_img[1] * factor))
+    mat = _get_affine_transform(center, scale, 0, target_shape)
+    keypoints[0, :, :, :2] = _affine_joints(keypoints[0, :, :, :2], mat)
+    factors = _affine_factors(factors, mat)
+
+    return keypoints, factors
 
 FLIP_CONFIG = {
     'COCO': [
