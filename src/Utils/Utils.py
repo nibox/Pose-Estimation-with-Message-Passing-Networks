@@ -487,7 +487,7 @@ def draw_clusters(img: [torch.tensor, np.array], joints, joint_classes, joint_co
         raise NotImplementedError
 
 
-def pred_to_person(joint_det, joint_scores, edge_index, pred, class_pred, cc_method, score_for_poses=None):
+def pred_to_person(joint_det, joint_scores, edge_index, pred, class_pred, cc_method, num_joints, score_for_poses=None):
     test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
     if cc_method != "threshold":
         sol = cluster_graph(test_graph, cc_method, complete=False)
@@ -495,11 +495,11 @@ def pred_to_person(joint_det, joint_scores, edge_index, pred, class_pred, cc_met
     else:
         sparse_sol = edge_index[:, pred > 0.5]
     persons_pred, mutants, person_labels = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol,
-                                                                    class_pred, score_for_poses)  # might crash
+                                                                    class_pred, num_joints, score_for_poses)  # might crash
     return persons_pred, mutants, person_labels
 
 
-def pred_to_person_debug(joint_det, joint_scores, edge_index, edge_pred, class_pred, node_labels, cc_method):
+def pred_to_person_debug(joint_det, joint_scores, edge_index, edge_pred, class_pred, node_labels, cc_method, num_joints):
     test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_pred)
     if cc_method != "threshold":
         sol = cluster_graph(test_graph, cc_method, complete=False)
@@ -507,7 +507,7 @@ def pred_to_person_debug(joint_det, joint_scores, edge_index, edge_pred, class_p
     else:
         sparse_sol = edge_index[:, edge_pred > 0.5]
     persons_pred, person_labels, debug_flags = graph_cluster_to_persons_debug(joint_det, joint_scores, sparse_sol,
-                                                                    class_pred, node_labels)  # might crash
+                                                                    class_pred, node_labels, num_joints)  # might crash
     return persons_pred, person_labels, debug_flags
 
 
@@ -529,7 +529,7 @@ def pred_to_person_labels(joint_det, edge_index, edge_attr, cc_method="GAEC"):
     return person_labels
 
 
-def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred, scores_for_poses=None):
+def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred, num_joints, scores_for_poses=None):
     """
     :param class_pred:
     :param joints: (N, 2) vector of joints
@@ -558,15 +558,15 @@ def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred
             c = person_joints[:, 2]
             d = np.argmax(joint_classes[person_labels == i], axis=1)
             person_joints[:, 2] = np.argmax(joint_classes[person_labels == i], axis=1)
-        if len(person_joints) > 17:
+        if len(person_joints) > num_joints:
             # print(f"Mutant detected!! It has {len(person_joints)} joints!!")
             # todo change meaning of mutant
             mutant_detected = True
 
         if len(person_joints) > 1:  # isolated joints also form a cluster -> ignore them
             # rearrange person joints
-            keypoints = np.zeros([17, 3])
-            for joint_type in range(17):  # 17 different joint types
+            keypoints = np.zeros([num_joints, 3])
+            for joint_type in range(num_joints):  # 17 different joint types
                 # take the detected joints of a certain type
                 select = person_joints[:, 2] == joint_type
                 person_joint_for_type = person_joints[select]
@@ -587,7 +587,7 @@ def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred
                 persons.append(keypoints)
         elif len(person_joints) == 1 and False:
 
-            keypoints = np.zeros([17, 3])
+            keypoints = np.zeros([num_joints, 3])
             joint_type = person_joints[:, 2]
             person_score = person_scores[0]
             if person_score < 0.5:

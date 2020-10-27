@@ -90,7 +90,6 @@ def main():
 
     parser = HeatmapParser(config)
     transforms, _ = transforms_to_tensor(config)
-    transforms_for_inference, _ = transforms_minimal(config)
     eval_set = OCHumans('../../storage/user/kistern/OCHuman', seed=0, mode="val",
                                 transforms=transforms, mask_crowds=False)
 

@@ -52,12 +52,6 @@ def gen_ann_format(pred, scores, image_id=0):
     return ans
 
 
-def eval_single_img(coco, dt, image_id, tmp_dir="tmp"):
-    ann = [gen_ann_format(dt, image_id)]
-    stats = coco_eval(coco, ann, [image_id], log=False)
-    return stats[:2]
-
-
 def coco_eval(coco, dt, image_ids, tmp_dir="tmp", log=True):
     """
     from https://github.com/princeton-vl/pose-ae-train
@@ -87,15 +81,15 @@ def main():
     ######################################
 
     config = get_hrnet_config()
-    config = update_config(config, f"../experiments/hrnet/w48_640_adam_lr1e-3_crowdpose.yaml")
-    eval_writer = EvalWriter(config, fname="w48_640_adam_lr1e-3_multi_scale_flip_without_refine.txt")
+    config = update_config(config, f"../experiments/hrnet/w32_512_adam_lr1e-3_crowdpose.yaml")
+    print(f"test: {config.LOG_DIR}")
+    eval_writer = EvalWriter(config, fname="hrnet_32_crowdpose_multi_scale.txt")
 
     parser = HeatmapParser(config)
-    heatmap_generator = [HeatmapGenerator(128, 14), HeatmapGenerator(256, 14)]
-    joint_generator = [JointsGenerator(30, 14, 128, True),
-                       JointsGenerator(30, 14, 256, True)]
+    heatmap_generator = [HeatmapGenerator(160, 14), HeatmapGenerator(320, 14)]
+    joint_generator = [JointsGenerator(30, 14, 160, True),
+                       JointsGenerator(30, 14, 320, True)]
     transforms, _ = transforms_to_tensor(config)
-    transforms_for_inference, _ = transforms_minimal(config)
     eval_set = CrowdPoseKeypoints(config.DATASET.ROOT, mini=False, seed=0, mode="test", transforms=transforms,
                                   heatmap_generator=heatmap_generator, filter_empty=False,
                                   joint_generator=joint_generator)
@@ -109,7 +103,7 @@ def main():
     imgs_with_people = []
 
     eval_ids = []
-    num_iter =  len(eval_set)
+    num_iter = len(eval_set)
     with torch.no_grad():
         for i in tqdm(range(num_iter)):
             eval_ids.append(eval_set.img_ids[i])
@@ -126,7 +120,7 @@ def main():
 
 
             if len(grouped[0]) != 0:
-                ann = perd_to_ann(grouped[0], scores, img_info, int(eval_set.img_ids[i]), "short_with_resize",
+                ann, debug_tmp = perd_to_ann(grouped[0], scores, (img.shape[2], img.shape[3]), int(eval_set.img_ids[i]), config.DATASET.INPUT_SIZE, "short_with_resize",
                                   min(config.TEST.SCALE_FACTOR))
                 anns.append(ann)
                 if keypoints.sum() != 0:
@@ -140,12 +134,12 @@ def main():
         eval_writer.close()
 
 
-def perd_to_ann(grouped, scores, img_info, img_id, scaling_type, min_scale):
-    persons_pred_orig = reverse_affine_map(grouped.copy(), (img_info["width"], img_info["height"]), scaling_type=scaling_type,
+def perd_to_ann(grouped, scores, img_shape, img_id, input_size, scaling_type, min_scale):
+    persons_pred_orig = reverse_affine_map(grouped.copy(), (img_shape[1], img_shape[0]), input_size, scaling_type=scaling_type,
                                            min_scale=min_scale)
 
     ann = gen_ann_format(persons_pred_orig, scores, img_id)
-    return ann
+    return ann, persons_pred_orig
 
 
 if __name__ == "__main__":

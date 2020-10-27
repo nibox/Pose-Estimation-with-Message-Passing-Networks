@@ -4,7 +4,7 @@ import torch
 import cv2
 
 
-def reverse_affine_map(keypoints, img_size_orig, scaling_type, min_scale=1.0):
+def reverse_affine_map(keypoints, img_size_orig, input_size, scaling_type, min_scale=1.0):
     """
     Reverses the transformation resulting from the input argument (using get_transform). Used to map output keypoints to
     original space in order to evaluate them.
@@ -21,7 +21,7 @@ def reverse_affine_map(keypoints, img_size_orig, scaling_type, min_scale=1.0):
         resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], 512, 1., 1.)
         mat = get_transform(center, scale, (int(resized_img[0]/2), int(resized_img[1]/2)))
     elif scaling_type == "short":
-        resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], 512, 1., min_scale)
+        resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], input_size, 1., min_scale)
         o_size =(int(resized_img[0]/2), int(resized_img[1]/2))
         mat = get_affine_transform(center, scale, o_size)
         mat_2 = np.eye(3, dtype=np.float32)
@@ -31,7 +31,7 @@ def reverse_affine_map(keypoints, img_size_orig, scaling_type, min_scale=1.0):
         keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], inv_mat)
         return keypoints
     elif scaling_type == "short_with_resize":
-        resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], 512, 1., min_scale)
+        resized_img, center, scale = get_multi_scale_size(img_size_orig[1], img_size_orig[0], input_size, 1., min_scale)
         inv_mat = get_affine_transform(center, scale, (int(resized_img[0]), int(resized_img[1])), inv=True)
         keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], inv_mat)
         return keypoints

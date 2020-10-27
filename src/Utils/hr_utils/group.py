@@ -116,14 +116,13 @@ def match_by_tag(inp, params):
 
 class Params(object):
     def __init__(self, cfg):
-        self.num_joints = 17
-        self.max_num_people = 30
+        self.num_joints = cfg.DATASET.NUM_JOINTS
+        self.max_num_people = cfg.DATASET.MAX_NUM_PEOPLE
 
         self.detection_threshold = 0.1
         self.tag_threshold = 1.0
         self.use_detection_val = True
         self.ignore_too_much = False
-
 
         self.joint_order = [
             i-1 for i in [1, 2, 3, 4, 5, 6, 7, 12, 13, 8, 9, 10, 11, 14, 15, 16, 17]

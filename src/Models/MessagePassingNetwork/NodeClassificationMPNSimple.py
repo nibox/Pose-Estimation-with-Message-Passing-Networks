@@ -35,7 +35,7 @@ class NodeClassificationMPNSimple(torch.nn.Module):
             if self.node_summary == "per_body_part":
                 num_types = 6
             elif self.node_summary == "not":
-                num_types = 17
+                num_types = config.NUM_JOINTS
             elif self.node_summary == "left_right":
                 num_types = 9
             self.mpn_node_cls = TypeAwareMPNLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,

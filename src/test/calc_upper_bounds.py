@@ -9,8 +9,8 @@ from Utils.transformations import reverse_affine_map
 from Utils.transforms import transforms_hr_eval, transforms_hg_eval
 from config import update_config, get_config
 
-from data import CocoKeypoints_hr, CocoKeypoints_hg, HeatmapGenerator, JointsGenerator
-from Utils import graph_cluster_to_persons, adjust, to_tensor
+from data import CocoKeypoints_hr, CocoKeypoints_hg, HeatmapGenerator, JointsGenerator, CrowdPoseKeypoints
+from Utils import graph_cluster_to_persons, adjust, to_tensor, refine
 from Utils.dataset_utils import Graph
 from Models.PoseEstimation import get_upper_bound_model
 from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
@@ -66,6 +66,27 @@ def coco_eval(coco, dt, image_ids, tmp_dir="tmp", log=True):
     coco_eval.summarize()
     return coco_eval.stats
 
+def crowd_pose_eval(coco, dt, image_ids, tmp_dir="tmp"):
+    """
+    from https://github.com/princeton-vl/pose-ae-train
+    Evaluate the result with COCO API
+    """
+    from crowdposetools.cocoeval import COCOeval
+
+    import json
+    with open(tmp_dir + '/dt.json', 'w') as f:
+        json.dump(sum(dt, []), f)
+
+    # load coco
+    coco_dets = coco.loadRes(tmp_dir + '/dt.json')
+    coco_eval = COCOeval(coco, coco_dets, "keypoints")
+    coco_eval.params.imgIds = image_ids
+    coco_eval.params.catIds = [1]
+    coco_eval.params.useSegm = None
+    coco_eval.evaluate()
+    coco_eval.accumulate()
+    coco_eval.summarize()
+    return coco_eval.stats
 
 def fill_person_pred(persons):
     """
@@ -86,7 +107,7 @@ def main():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     ######################################
-    config_name = "hrnet"
+    config_name = "mmpose_hrnet"
     config = get_config()
     config = update_config(config, f"../experiments/upper_bound/{config_name}.yaml")
 
@@ -96,18 +117,21 @@ def main():
     if config.UB.SPLIT == "mini":
         train_ids, valid_ids = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))
         assert len(set(train_ids).intersection(set(valid_ids))) == 0
-        transforms = transforms_hg_eval(config)
+        transforms, _ = transforms_hg_eval(config)
+        heatmap_generator = [HeatmapGenerator(128, 17) for _ in range(4)]
         eval_set = CocoKeypoints_hg(config.DATASET.ROOT, mini=True, seed=0, mode="train",
-                                    img_ids=valid_ids, transforms=transforms)
+                                    img_ids=valid_ids, transforms=transforms, heatmap_generator=heatmap_generator)
     elif config.UB.SPLIT == "mini_real":
         train_ids, valid_ids = pickle.load(open("tmp/mini_real_train_valid_split_1.p", "rb"))
         assert len(set(train_ids).intersection(set(valid_ids))) == 0
         eval_set = CocoKeypoints_hg(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids)
     elif config.UB.SPLIT == "princeton":
-        _, valid_ids = pickle.load(open("tmp/princeton_split.p", "rb"))
-        transforms = transforms_hg_eval(config)
+        valid_ids = np.loadtxt("tmp/valid_id")
+        transforms, _ = transforms_hg_eval(config)
+        heatmap_generator = [HeatmapGenerator(128, 17) for _ in range(4)]
         eval_set = CocoKeypoints_hg(config.DATASET.ROOT, mini=True, seed=0, mode="train",
-                                    img_ids=valid_ids, transforms=transforms, mask_crowds=False)
+                                    img_ids=valid_ids, transforms=transforms, mask_crowds=True,
+                                    heatmap_generator=heatmap_generator)
     elif config.UB.SPLIT == "coco_17_mini":
         _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
         heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
@@ -118,6 +142,12 @@ def main():
         eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
                                     transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
                                     joint_generator=joints_generator)
+    elif config.UB.SPLIT == "crowd_pose_val":
+        heatmap_generator = [HeatmapGenerator(128, 14, 2), HeatmapGenerator(256, 14, 2)]
+        joint_generator = [JointsGenerator(30, 14, 128, True), JointsGenerator(30, 14, 256, True)]
+        transforms, _ = transforms_hr_eval(config)
+        eval_set = CrowdPoseKeypoints(config.DATASET.ROOT, mini=True, seed=0, mode="val", transforms=transforms,
+                                     heatmap_generator=heatmap_generator, joint_generator=joint_generator)
     else:
         raise NotImplementedError
 
@@ -135,15 +165,16 @@ def main():
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
             persons_pred = fill_person_pred(persons_pred)
             persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]),
-                                                   scaling_type=config.DATASET.SCALING_TYPE)
+                                                   config.DATASET.INPUT_SIZE, scaling_type=config.DATASET.SCALING_TYPE)
 
             ann = gen_ann_format(persons_pred_orig, eval_set.img_ids[i])
             anns.append(ann)
         print("Upper bound")
-        coco_eval(eval_set.coco, anns, eval_set.img_ids[:config.UB.NUM_EVAL].astype(np.int))
+        #coco_eval(eval_set.coco, anns, eval_set.img_ids[:config.UB.NUM_EVAL].astype(np.int))
+        if not (config.UB.SPLIT in ["crowd_pose_val", "crowd_pose_test"]):
+            coco_eval(eval_set.coco, anns, eval_set.img_ids[:config.UB.NUM_EVAL].astype(np.int))
 
         anns_cc = []
-        # anns_refined = []
         for i in tqdm(range(config.UB.NUM_EVAL)):
 
             img, _, masks, keypoints, factors, _ = eval_set[i]
@@ -155,6 +186,7 @@ def main():
             node_labels, edge_labels, class_labels = output["labels"]["node"], output["labels"]["edge"], output["labels"]["class"]
             joint_det, edge_index = output["graph"]["nodes"], output["graph"]["edge_index"]
             joint_scores = output["graph"]["detector_scores"]
+            tags = output["graph"]["tags"]
             # joint_refined = None
             edge_index, preds_edges = subgraph(preds_nodes > 0.5, edge_index, preds_edges)
 
@@ -163,10 +195,14 @@ def main():
                 sol = cluster_graph(test_graph, str(config.MODEL.GC.CC_METHOD), complete=False)
                 sparse_sol_cc, _ = dense_to_sparse(torch.from_numpy(sol))
                 persons_pred_cc, _, _ = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol_cc,
-                                                                 preds_classes)  # might crash
+                                                                 preds_classes, config.DATASET.NUM_JOINTS)  # might crash
             else:
                 persons_pred_cc = np.zeros([1, 17, 3])
 
+            if config.UB.REFINE and persons_pred_cc[0, :, 2].sum() != 0:
+                tags = tags.cpu().numpy()
+                scoremaps = scoremaps.cpu().numpy()
+                persons_pred_cc = refine(scoremaps[0], tags[0], persons_pred_cc)
             if config.UB.ADJUST:
                 persons_pred_cc = adjust(persons_pred_cc, scoremaps[0])
 
@@ -175,28 +211,16 @@ def main():
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
             persons_pred_orig_cc = reverse_affine_map(persons_pred_cc.copy(), (img_info["width"], img_info["height"]),
-                                                      scaling_type=config.DATASET.SCALING_TYPE)
+                                                      config.DATASET.INPUT_SIZE, scaling_type=config.DATASET.SCALING_TYPE)
 
             ann_cc = gen_ann_format(persons_pred_orig_cc, eval_set.img_ids[i])
             anns_cc.append(ann_cc)
 
-            """
-            if joint_refined is not None:
-                if len(joint_refined) != 0:
-                    persons_pred_refine = parse_refinement(joint_refined[:, :3], joint_refined[:, 3], joint_refined[:, 4])
-                else:
-                    persons_pred_refine = np.zeros([1, 17, 3])
-
-                if len(persons_pred_refine.shape) == 1:
-                    persons_pred_refine = np.zeros([1, 17, 3])
-                persons_pred_refine = reverse_affine_map(persons_pred_refine .copy(), (img_info["width"], img_info["height"]),
-                                                      scaling_type=config.DATASET.SCALING_TYPE)
-                ann_refined = gen_ann_format(persons_pred_refine, eval_set.img_ids[i])
-                anns_refined.append(ann_refined)
-            # """
-
         print("Upper bound 2")
-        coco_eval(eval_set.coco, anns_cc, eval_set.img_ids[:config.UB.NUM_EVAL].astype(np.int))
+        if not (config.UB.SPLIT in ["crowd_pose_val", "crowd_pose_test"]):
+            coco_eval(eval_set.coco, anns_cc, eval_set.img_ids[:config.UB.NUM_EVAL].astype(np.int))
+        else:
+            crowd_pose_eval(eval_set.coco, anns_cc, eval_set.img_ids[:config.UB.NUM_EVAL].astype(np.int))
 
 
 if __name__ == "__main__":

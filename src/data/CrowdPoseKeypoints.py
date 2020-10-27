@@ -37,7 +37,7 @@ class CrowdPoseKeypoints(Dataset):
         self.img_ids = list(self.coco.imgs.keys())
         assert len(self.img_ids) == len(set(self.img_ids))
         if filter_empty:
-            self.img_ids = [id for id in self.img_ids if len(self.coco.getAnnIds(img_ids=id, iscrowd=None)) > 0]
+            self.img_ids = [id for id in self.img_ids if len(self.coco.getAnnIds(imgIds=id, iscrowd=None)) > 0]
         if mini:
             assert mode in ["test", "val"]
             self.img_ids = np.random.choice(self.img_ids, 500, replace=False)
@@ -51,13 +51,14 @@ class CrowdPoseKeypoints(Dataset):
         ann = self.coco.loadAnns(ids=ann_ids)
 
         num_people = len(ann)
-        img_height = img_info["height"]
-        img_width = img_info["width"]
 
         # load image
         # todo reading the image for each iteration is probably not efficient
         with open(f"{self.root_path}/images/{img_info['file_name']}", "rb") as f:
             img = np.array(Image.open(f).convert("RGB"))
+
+        img_height = img.shape[0]
+        img_width = img.shape[1]
 
         # load keypoints
         kpt_oks_sigmas = np.array([.79, .79, .72, .72, .62, .62, 1.07, 1.07, .87, .87, .89, .89, .79, .79])/10.0

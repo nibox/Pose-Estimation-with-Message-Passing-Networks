@@ -393,7 +393,6 @@ class TagMultiLossFactory(nn.Module):
                 ae_loss += push_loss.mean() + pull_loss.mean()
 
 
-
         node_loss = 0.0
         for i in range(len(preds_nodes)):
             node_loss += self.node_loss(preds_nodes[i], node_labels, "mean", node_masks)
@@ -439,7 +438,7 @@ class ClassMultiLossFactory(nn.Module):
         assert len(self.loss_weights) in [2,3]
 
 
-        if config.MODEL.KP == "hrnet":
+        if config.MODEL.KP in ["hrnet", "mmpose_hrnet"]:
             self.heatmaps_loss = \
                 nn.ModuleList(
                     [

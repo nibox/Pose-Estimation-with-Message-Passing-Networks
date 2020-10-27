@@ -8,7 +8,7 @@ from Utils.Utils import non_maximum_suppression, subgraph_mask
 
 class NaiveGraphConstructor:
 
-    def __init__(self, scoremaps, tagmaps, features, joints_gt, factor_list, masks, device, config, testing, heatmaps):
+    def __init__(self, scoremaps, tagmaps, features, joints_gt, factor_list, masks, device, config, testing, heatmaps, num_joints):
         self.scoremaps = scoremaps.to(device)
         self.tagmaps = tagmaps.to(device)
         self.heatmaps = heatmaps[1].to(device).float() if heatmaps is not None else None
@@ -18,6 +18,7 @@ class NaiveGraphConstructor:
         self.masks = masks.to(device) if masks is not None else None
         self.batch_size = scoremaps.shape[0]
         self.device = device
+        self.num_joints = num_joints
 
         self.use_gt = config.USE_GT
         self.no_false_positives = config.CHEAT
@@ -56,18 +57,15 @@ class NaiveGraphConstructor:
         num_node_list = [0]
         for batch in range(self.batch_size):
             if self.mask_crowds:
-                joint_det, joint_scores = joint_det_from_scoremap(self.scoremaps[batch],
+                joint_det, joint_scores = joint_det_from_scoremap(self.scoremaps[batch], self.num_joints,
                                                                   threshold=self.detect_threshold,
-                                                                  mask=self.masks[batch],
                                                                   pool_kernel=self.pool_kernel_size,
-                                                                  hybrid_k=self.hybrid_k
-                                                                  )
+                                                                  mask=self.masks[batch], hybrid_k=self.hybrid_k)
             else:
-                joint_det, joint_scores = joint_det_from_scoremap(self.scoremaps[batch],
+                joint_det, joint_scores = joint_det_from_scoremap(self.scoremaps[batch], self.num_joints,
                                                                   threshold=self.detect_threshold,
                                                                   pool_kernel=self.pool_kernel_size,
-                                                                  hybrid_k=self.hybrid_k
-                                                                  )
+                                                                  hybrid_k=self.hybrid_k)
             joint_tags = self.tagmaps[batch, joint_det[:, 2], joint_det[:, 1], joint_det[:, 0]]
 
             # ##############cheating#################
@@ -297,7 +295,7 @@ class NaiveGraphConstructor:
             raise NotImplementedError
 
         # construct edge labels (each connection type is one label
-        labels = torch.arange(0, 17 * 17, dtype=torch.long, device=self.device).view(17, 17)
+        labels = torch.arange(0, self.num_joints * self.num_joints, dtype=torch.long, device=self.device).view(self.num_joints, self.num_joints)
         connection_type = labels[joint_type[edge_index[0]], joint_type[edge_index[1]]]
         """  use this line to remove connections between same type
         same_type_connection_types = torch.arange(0, 17 * 17, 18, dtype=torch.long, device=self.device)
@@ -314,7 +312,7 @@ class NaiveGraphConstructor:
         # connection label 2
         # """
         num_edges = edge_index.shape[1]
-        connection_label_2 = torch.zeros(num_edges, 17, dtype=torch.long, device=self.device)
+        connection_label_2 = torch.zeros(num_edges, self.num_joints, dtype=torch.long, device=self.device)
         connection_label_2[list(range(0, num_edges)), joint_type[edge_index[0]]] = 1
         connection_label_2[list(range(0, num_edges)), joint_type[edge_index[1]]] = 1
         # """
@@ -365,7 +363,7 @@ class NaiveGraphConstructor:
         return edge_index.to(self.device)
 
     def top_k_mpn_graph(self, joint_det, k):
-        edge_index = torch.zeros(2, len(joint_det), 17 * k, dtype=torch.long, device=self.device)
+        edge_index = torch.zeros(2, len(joint_det), self.num_joints * k, dtype=torch.long, device=self.device)
         edge_index[0] = edge_index[0] + torch.arange(0, len(joint_det), dtype=torch.long, device=self.device)[:, None]
         edge_index = edge_index.reshape(2, -1)
         joint_det = joint_det.float()
@@ -377,8 +375,8 @@ class NaiveGraphConstructor:
         # distance shape is (num_det * 17, num_det_per_type)
         _, top_k_idx = distance.topk(k=k, dim=1, largest=False)
         # top_k_idx shape (num_det * 17, k)
-        top_k_idx = top_k_idx.view(len(joint_det), 17, k) + \
-                    torch.arange(0, 17, dtype=torch.long, device=self.device)[:, None] * 30
+        top_k_idx = top_k_idx.view(len(joint_det), self.num_joints, k) + \
+                    torch.arange(0, self.num_joints, dtype=torch.long, device=self.device)[:, None] * 30
         top_k_idx = top_k_idx.view(-1)
         edge_index[1] = indices[top_k_idx]
 
@@ -415,13 +413,13 @@ class NaiveGraphConstructor:
         :return:
         """
         num_joints = len(joint_det)
-        joint_det = joint_det.view(17, 30, 3)
-        joint_scores = joint_scores.view(17, 30)
+        joint_det = joint_det.view(self.num_joints, 30, 3)
+        joint_scores = joint_scores.view(self.num_joints, 30)
         _, indices = joint_scores.topk(k=2, dim=1)
 
-        type_idx = joint_det[np.arange(0, 17).reshape(17, 1), indices, 2]
+        type_idx = joint_det[np.arange(0, self.num_joints).reshape(self.num_joints, 1), indices, 2]
         indices = indices.reshape(-1)
-        root_joint_idx = indices + type_idx.view(-1) * 17
+        root_joint_idx = indices + type_idx.view(-1) * self.num_joints
 
         adj_mat = torch.zeros([num_joints, num_joints], dtype=torch.long)
         adj_mat[root_joint_idx] = 1
@@ -467,9 +465,9 @@ class NaiveGraphConstructor:
         joints_position_gt = joints_gt[:, :, :2]
         joints_position_gt = joints_position_gt.view(-1, 1, 2).round().float()  # !!! cast to long !!! and then to float
         distances = torch.norm(joint_det[:, :2] - joints_position_gt, dim=2)
-        distances = distances.view(30, 17, num_joints_det)  # todo include ref to max number of people
+        distances = distances.view(30, self.num_joints, num_joints_det)  # todo include ref to max number of people
         # set the distances of joint pairse of different types to high cost s.t. they are not matched
-        for jt in range(17):
+        for jt in range(self.num_joints):
             distances[:, jt, joint_det[:, 2] != jt] = 1000000.0
         cost_mat = distances[person_idx_gt, joint_idx_gt].detach().cpu().numpy()
         sol = linear_sum_assignment(cost_mat)
@@ -891,7 +889,7 @@ class NaiveGraphConstructor:
         node_classes[col_1] = joint_idx_gt_1[row_1]
         class_mask = node_labels.clone() * node_mask
         if self.with_background_class:
-            node_classes[node_labels != 1.0] = 17  # background class
+            node_classes[node_labels != 1.0] = self.num_joints  # background class
             class_mask[:] = 1.0
 
         # node clusters
@@ -1117,7 +1115,7 @@ class NaiveGraphConstructor:
         return loss_mask
 
 
-def joint_det_from_scoremap(scoremap, threshold=0.007, pool_kernel=None, mask=None, hybrid_k=5):
+def joint_det_from_scoremap(scoremap, num_joints, threshold=0.007, pool_kernel=None, mask=None, hybrid_k=5):
     joint_map = non_maximum_suppression(scoremap, threshold=threshold, pool_kernel=pool_kernel)
     if mask is not None:
         joint_map = joint_map * mask.unsqueeze(0)
@@ -1126,9 +1124,9 @@ def joint_det_from_scoremap(scoremap, threshold=0.007, pool_kernel=None, mask=No
         # use atleast the top 5 keypoints per type
         k = hybrid_k
         scoremap_shape = scoremap.shape
-        scores, indices = scoremap.view(17, -1).topk(k=k, dim=1)
-        container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.float).reshape(17, -1)
-        container[np.arange(0, 17).reshape(17, 1), indices] = scores
+        scores, indices = scoremap.view(num_joints, -1).topk(k=k, dim=1)
+        container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.float).reshape(num_joints, -1)
+        container[np.arange(0, num_joints).reshape(num_joints, 1), indices] = scores
         container = container.reshape(scoremap_shape)
         top_joint_idx_det, top_joint_y, top_joint_x = container.nonzero(as_tuple=True)
         # top_joint_scores = container[top_joint_idx_det, top_joint_y, top_joint_x]
@@ -1143,13 +1141,13 @@ def joint_det_from_scoremap(scoremap, threshold=0.007, pool_kernel=None, mask=No
     else:
         k = 20
         scoremap_shape = scoremap.shape
-        scores, indices = scoremap.view(17, -1).topk(k=k, dim=1)
-        container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.float).reshape(17, -1)
-        container[np.arange(0, 17).reshape(17, 1), indices] = scores + 1e-10  #
+        scores, indices = scoremap.view(num_joints, -1).topk(k=k, dim=1)
+        container = torch.zeros_like(scoremap, device=scoremap.device, dtype=torch.float).reshape(num_joints, -1)
+        container[np.arange(0, num_joints).reshape(num_joints, 1), indices] = scores + 1e-10  #
         container = container.reshape(scoremap_shape)
         joint_idx_det, joint_y, joint_x = container.nonzero(as_tuple=True)
         joint_scores = container[joint_idx_det, joint_y, joint_x]
-        assert len(joint_idx_det) == k * 17
+        assert len(joint_idx_det) == k * num_joints
 
         joint_positions_det = torch.stack([joint_x, joint_y, joint_idx_det], 1)
     return joint_positions_det, joint_scores

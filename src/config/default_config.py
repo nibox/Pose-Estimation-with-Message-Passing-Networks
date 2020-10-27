@@ -131,6 +131,7 @@ _C.MODEL.MPN.AUX_LOSS_STEPS = 0  # 0 means only the last prediction is used for 
 _C.MODEL.MPN.DROP_FEATURE = ""
 _C.MODEL.MPN.EDGE_STEPS = 0
 _C.MODEL.MPN.LATE_FUSION_POS = False
+_C.MODEL.MPN.NUM_JOINTS = 17
 
 # _C.MODEL.REFINE = CN(new_allowed=True)
 

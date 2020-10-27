@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import DataLoader
-from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, ScaleAwareHeatmapGenerator, JointsGenerator
+from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, ScaleAwareHeatmapGenerator, JointsGenerator, CrowdPoseKeypoints
 from Utils.transforms import transforms_hr_train, transforms_hg_eval
 from Utils.loss import *
 from Utils.Utils import to_device, calc_metrics, subgraph_mask, Logger
@@ -16,7 +16,6 @@ def difference(arr_1: np.array, arr_2: np.array):
     arr_2 = set(list(arr_2))
     arr_1 = arr_1.difference(arr_2)
     return np.array(list(arr_1))
-
 
 def create_train_validation_split(config):
     batch_size = config.TRAIN.BATCH_SIZE
@@ -81,6 +80,22 @@ def create_train_validation_split(config):
                                  joint_generator=joints_generator)
         return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True), \
                DataLoader(valid, batch_size=1, num_workers=8, pin_memory=True)
+    elif config.TRAIN.SPLIT == "crowd_pose":
+        assert config.DATASET.NUM_JOINTS == 14
+        assert len(config.DATASET.OUTPUT_SIZE) == 2
+        output_sizes = config.DATASET.OUTPUT_SIZE
+        heatmap_generator = [HeatmapGenerator(output_sizes[0], 14, config.DATASET.SIGMA),
+                             HeatmapGenerator(output_sizes[1], 14, config.DATASET.SIGMA)]
+        joints_generator = [JointsGenerator(30, 14, output_sizes[0], True),
+                            JointsGenerator(30, 14, output_sizes[1], True)]
+        transforms, _ = transforms_hr_train(config)
+        train = CrowdPoseKeypoints(config.DATASET.ROOT, mini=False, seed=0, mode="train", transforms=transforms,
+                                   heatmap_generator=heatmap_generator, joint_generator=joints_generator)
+        valid = CrowdPoseKeypoints(config.DATASET.ROOT, mini=True, seed=0, mode="val", transforms=transforms,
+                                   heatmap_generator=heatmap_generator, joint_generator=joints_generator)
+        return DataLoader(train, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True), \
+               DataLoader(valid, batch_size=1, num_workers=8, pin_memory=True)
+
 
     else:
         raise NotImplementedError

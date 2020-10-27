@@ -584,25 +584,28 @@ def get_pose_net(cfg, is_train, **kwargs):
 
     return model
 
-def hr_process_output(output, mode):
-    (scoremap_1, scoremap_2), features = output
-    if mode == "avg" or mode == "small":
+def create_process_func_hr(config):
+    num_joints = config.DATASET.NUM_JOINTS
+    def hr_process_output(output, mode):
+        (scoremap_1, scoremap_2), features = output
+        if mode == "avg" or mode == "small":
 
-        scoremap_1 = torch.nn.functional.interpolate(
-            scoremap_1,
-            size=(scoremap_2.shape[2], scoremap_2.shape[3]),
-            mode='bilinear',
-            align_corners=False
-        )
-    tags = scoremap_1[:, 17:]
+            scoremap_1 = torch.nn.functional.interpolate(
+                scoremap_1,
+                size=(scoremap_2.shape[2], scoremap_2.shape[3]),
+                mode='bilinear',
+                align_corners=False
+            )
+        tags = scoremap_1[:, num_joints:]
 
-    if mode == "avg":
-        scoremaps = (scoremap_2 + scoremap_1[:, :17]) / 2
-    elif mode == "small":
-        scoremaps = scoremap_1
-    elif mode == "large":
-        scoremaps = scoremap_2
-    else:
-        raise NotImplementedError
+        if mode == "avg":
+            scoremaps = (scoremap_2 + scoremap_1[:, :num_joints]) / 2
+        elif mode == "small":
+            scoremaps = scoremap_1
+        elif mode == "large":
+            scoremaps = scoremap_2
+        else:
+            raise NotImplementedError
 
-    return scoremaps, features, tags
+        return scoremaps, features, tags
+    return hr_process_output

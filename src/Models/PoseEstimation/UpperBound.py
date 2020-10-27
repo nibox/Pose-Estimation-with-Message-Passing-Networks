@@ -1,5 +1,5 @@
 from ..Hourglass import PoseNet, hg_process_output
-from ..HigherHRNet import get_pose_net, hr_process_output
+from ..HigherHRNet import get_pose_net, create_process_func_hr, get_mmpose_hrnet
 from graph_constructor import get_graph_constructor
 
 import torch
@@ -30,7 +30,9 @@ def load_back_bone(config):
                      "oup_dim": config.MODEL.HG.OUTPUT_DIM}
         return PoseNet(**hg_config), hg_process_output
     elif config.UB.KP == "hrnet":
-        return get_pose_net(config, False), hr_process_output
+        return get_pose_net(config, False), create_process_func_hr(config)
+    elif config.UB.KP == "mmpose_hrnet":
+        return get_mmpose_hrnet(config), create_process_func_hr(config)
 
 
 def get_upper_bound_model(config, device):
@@ -38,19 +40,28 @@ def get_upper_bound_model(config, device):
     def rename_key(key):
         # assume structure is model.module.REAL_NAME
         return ".".join(key.split(".")[2:])
+
     def rename_key_hr(key):
         return key[2:]
+
+    def rename_key_hr_2(key):
+        return ".".join(key.split(".")[1:])
 
     model = UpperBoundModel(config)
 
     if config.UB.KP == "hrnet":
         state_dict = torch.load(config.MODEL.HRNET.PRETRAINED, map_location=device)
-        if config.MODEL.HRNET.PRETRAINED != '../PretrainedModels/pose_higher_hrnet_w32_512.pth':
+        if config.MODEL.HRNET.PRETRAINED == "../PretrainedModels/pose_higher_hrnet_w48_640_crowdpose.pth.tar":
+            state_dict = {rename_key_hr_2(k): v for k, v in state_dict.items()}
+        elif config.MODEL.HRNET.PRETRAINED != '../PretrainedModels/pose_higher_hrnet_w32_512.pth':
             state_dict = {rename_key_hr(k): v for k, v in state_dict.items()}
+
 
     elif config.UB.KP == "hourglass":
         state_dict = torch.load(config.MODEL.HG.PRETRAINED, map_location=device)
         state_dict = {rename_key(k): v for k, v in state_dict["state_dict"].items()}
+    elif config.UB.KP == "mmpose_hrnet":
+        state_dict = torch.load(config.MODEL.HRNET.PRETRAINED, map_location=device)["state_dict"]
     else:
         raise NotImplementedError
     model.backbone.load_state_dict(state_dict)
@@ -66,6 +77,7 @@ class UpperBoundModel(nn.Module):
         self.gc_config = config.MODEL.GC
         self.feature_gather = nn.AvgPool2d(3, 1, 1)
         self.scoremap_mode = config.MODEL.HRNET.SCOREMAP_MODE
+        self.num_joints = config.DATASET.NUM_JOINTS
 
     def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None, factor_list=None, heatmaps=None) -> torch.tensor:
         if self.gc_config.MASK_CROWDS:
@@ -78,7 +90,7 @@ class UpperBoundModel(nn.Module):
         graph_constructor = get_graph_constructor(self.gc_config, scoremaps=scoremaps, features=features,
                                                   joints_gt=keypoints_gt, factor_list=factor_list, masks=masks,
                                                   device=scoremaps.device, testing=not self.training, heatmaps=heatmaps,
-                                                  tagmaps=tags)
+                                                  tagmaps=tags, num_joints=self.num_joints)
 
 
         x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, _, node_persons, _ = graph_constructor.construct_graph()

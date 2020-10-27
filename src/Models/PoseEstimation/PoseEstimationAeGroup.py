@@ -1,4 +1,4 @@
-from Models.HigherHRNet import get_pose_net, hr_process_output
+from Models.HigherHRNet import get_pose_net, create_process_func_hr, get_mmpose_hrnet
 import torch
 import torchvision
 import torch.nn as nn
@@ -18,8 +18,8 @@ def get_hr_model(config, device):
         if config.MODEL.HRNET.PRETRAINED == "../PretrainedModels/pose_higher_hrnet_w48_640_crowdpose.pth.tar":
             state_dict = {rename_key(k): v for k, v in state_dict.items()}
 
-    else:
-        raise NotImplementedError
+    elif config.MODEL.KP =="mmpose_hrnet":
+        state_dict = torch.load(config.MODEL.HRNET.PRETRAINED, map_location=device)["state_dict"]
 
     model.backbone.load_state_dict(state_dict)
 
@@ -30,6 +30,8 @@ def load_back_bone(config):
 
     if config.MODEL.KP == "hrnet":
         return get_pose_net(config, False)
+    elif config.MODEL.KP == "mmpose_hrnet":
+        return get_mmpose_hrnet(config)
     else:
         raise NotImplementedError
 
@@ -117,12 +119,12 @@ class PoseEstimationAeGroup(nn.Module):
         image = img[0].cpu().permute(1, 2, 0).numpy() # prepair for transformation
 
         base_size, center, scale = get_multi_scale_size(
-            image, 512, 1.0, min(scales)
+            image, config.DATASET.INPUT_SIZE, 1.0, min(scales)
         )
         final_heatmaps = None
         tags_list = []
         for idx, s in enumerate(sorted(scales, reverse=True)):
-            input_size = 512
+            input_size = config.DATASET.INPUT_SIZE
             image_resized, center, scale = resize_align_multi_scale(
                 image, input_size, s, min(scales)
             )
@@ -130,8 +132,8 @@ class PoseEstimationAeGroup(nn.Module):
             image_resized = image_resized[None].to(device)
 
             outputs, heatmaps, tags = _get_multi_stage_outputs(
-                config, self.backbone, image_resized, with_flip=True,
-                project2image=True, size_projected=base_size
+                config, self.backbone, image_resized, with_flip=config.TEST.FLIP_TEST,
+                project2image=config.TEST.PROJECT2IMAGE, size_projected=base_size
             )
 
             final_heatmaps, tags_list = aggregate_results(

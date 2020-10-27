@@ -1,8 +1,8 @@
 from Utils.Utils import set_bn_eval, set_bn_feeze
-from Models.HigherHRNet import get_pose_net, hr_process_output
-from Models.Hourglass import PoseNet, hg_process_output
+from ..HigherHRNet import get_pose_net, create_process_func_hr, get_mmpose_hrnet
+from ..Hourglass import PoseNet, hg_process_output
 from graph_constructor import get_graph_constructor
-from Models.MessagePassingNetwork import get_mpn_model
+from ..MessagePassingNetwork import get_mpn_model
 from Utils.hr_utils.multi_scales_testing import *
 
 import torch
@@ -27,6 +27,8 @@ def get_pose_model(config, device):
     elif config.MODEL.KP == "hourglass":
         state_dict = torch.load(config.MODEL.HG.PRETRAINED, map_location=device)
         state_dict = {rename_key(k): v for k, v in state_dict["state_dict"].items()}
+    elif config.MODEL.KP == "mmpose_hrnet":
+        state_dict = torch.load(config.MODEL.HRNET.PRETRAINED, map_location=device)["state_dict"]
     else:
         raise NotImplementedError
 
@@ -42,7 +44,9 @@ def load_back_bone(config):
                      "oup_dim": config.MODEL.HG.OUTPUT_DIM}
         return PoseNet(**hg_config), hg_process_output
     elif config.MODEL.KP == "hrnet":
-        return get_pose_net(config, False), hr_process_output
+        return get_pose_net(config, False), create_process_func_hr(config)
+    elif config.MODEL.KP == "mmpose_hrnet":
+        return get_mmpose_hrnet(config), create_process_func_hr(config)
 
 
 class PoseEstimationBaseline(nn.Module):
@@ -61,6 +65,7 @@ class PoseEstimationBaseline(nn.Module):
                                         bias=True)
         self.num_aux_steps = config.MODEL.AUX_STEPS
         self.scoremap_mode = config.MODEL.HRNET.SCOREMAP_MODE
+        self.num_joints = config.DATASET.NUM_JOINTS
         """
         self.with_flip_kernel = config.MODEL.WITH_FLIP_KERNEL
         self.pool = nn.MaxPool2d(2, 2)  # used for self attention model
@@ -100,7 +105,7 @@ class PoseEstimationBaseline(nn.Module):
         graph_constructor = get_graph_constructor(self.gc_config, scoremaps=scoremaps, features=features,
                                                   joints_gt=keypoints_gt, factor_list=factors, masks=masks,
                                                   device=scoremaps.device, testing=not self.training, heatmaps=heatmaps,
-                                                  tagmaps=tags)
+                                                  tagmaps=tags, num_joints=self.num_joints)
 
         x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, batch_index, node_persons, joint_tags = graph_constructor.construct_graph()
 
@@ -176,7 +181,7 @@ class PoseEstimationBaseline(nn.Module):
         image = img[0].cpu().permute(1, 2, 0).numpy()  # prepair for transformation
 
         base_size, center, scale = get_multi_scale_size(
-            image, 512, 1.0, min(scales)
+            image, config.DATASET.INPUT_SIZE, 1.0, min(scales)
         )
         # how the fuck to i transform them?
         if keypoints is not None:

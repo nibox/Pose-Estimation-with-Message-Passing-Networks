@@ -86,6 +86,74 @@ class MPLayer(MessagePassing):
         return aggr_out
 
 
+class HierarchUpdateMlp(torch.nn.Module):
+
+    def __init__(self, node_dim, num_joints):
+        super().__init__()
+
+        self.node_dim = node_dim
+        self.num_joints = num_joints
+        assert self.num_joints in [17, 14]
+        if self.num_joints == 17:
+            self.first_layer = nn.ModuleList([nn.Linear(node_dim * 5, node_dim//2)] +
+                                             [nn.Linear(node_dim * 2, node_dim//2) for _ in range(6)])
+        else:
+            self.first_layer = nn.ModuleList([nn.Linear(node_dim * 2, node_dim//2)] +
+                                             [nn.Linear(node_dim * 2, node_dim//2) for _ in range(6)])
+
+        self.second_layer = nn.ModuleList([nn.Linear(2 * node_dim//2, node_dim//2) for _ in range(6)])
+        self.final = nn.Linear(6 * node_dim//2, node_dim)
+        self.relu = nn.ReLU(inplace=True)
+
+
+    def forward(self, update):
+        # update.shape: N x F x D
+        # 'nose','eye_l','eye_r','ear_l','ear_r', 'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
+        # 'hip_l','hip_r','kne_l','kne_r','ank_l','ank_r'
+        num_nodes = update.shape[0]
+        if self.num_joints == 17:
+            order_1 = [(0, 1, 2, 3, 4), (5, 6), (7, 9), (8, 10), (11, 12), (13, 15), (14, 16)]
+            order_2 = [(0, 1), (1, 2), (1, 3), (1, 4), (4, 5), (4, 6)]
+        else:
+            order_1 = [(0, 1), (2, 3), (4, 6), (5, 7), (8, 9), (10, 12), (11, 13)]
+            order_2 = [(0, 1), (1, 2), (1, 3), (1, 4), (4, 5), (4, 6)]
+
+        out_1 = torch.zeros(num_nodes, 7, self.node_dim//2, device=update.device, dtype=torch.float32)
+        out_2 = torch.zeros(num_nodes, 6, self.node_dim//2, device=update.device, dtype=torch.float32)
+        for i, types in enumerate(order_1):
+            out_1[:, i] = self.relu(self.first_layer[i](update[:, types].view(num_nodes, -1)))
+        for i, types in enumerate(order_2):
+            out_2[:, i] = self.relu(self.second_layer[i](out_1[:, types].view(num_nodes, -1)))
+
+        return self.relu(self.final(out_2.reshape(num_nodes, -1)))
+
+
+class HierarchUpdateCnn(torch.nn.Module):
+
+    def __init__(self, node_dim):
+        super().__init__()
+
+        self.head_layer = nn.Linear(node_dim  * 4, node_dim//2)
+        self.conv_1 = nn.Conv1d(node_dim, node_dim // 2, 2, 2)
+        self.conv_2 = nn.Conv1d(node_dim // 2, node_dim // 2, 2, 2)
+        self.final = nn.Linear(5 * node_dim // 2, node_dim)
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, update):
+        # update.shape: N x F x D
+        # 'nose','eye_l','eye_r','ear_l','ear_r', 'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
+        # 'hip_l','hip_r','kne_l','kne_r','ank_l','ank_r'
+        num_nodes = update.shape[0]
+        update = update.permute(0, 2, 1)
+        order_1 = [5, 6, 7, 9, 8, 10, 11, 12, 13, 15, 14, 16]
+        order_2 = [0, 1, 0, 2, 0, 3, 3, 4, 3, 5]
+        out_1 = self.relu(self.conv_1(update[:, :, order_1]))
+        head = self.relu(self.head_layer(update[:, :, :4].reshape(num_nodes, -1)))
+        update = torch.cat([head[:, :, None], out_1], dim=2)
+        update = self.relu(self.conv_2(update[:, :,order_2]))
+        return self.relu(self.final(update.reshape(num_nodes, -1)))
+
+
 class TypeAwareMPNLayer(MessagePassing):
 
     # todo with or without inital feature skip connection
@@ -115,7 +183,7 @@ class TypeAwareMPNLayer(MessagePassing):
         if update_type == "mlp":
             self.update_mlp = nn.Sequential(nn.Linear(node_feature_dim * num_types, node_feature_dim), nn.ReLU(inplace=True))
         elif update_type == "hierarch_mlp":
-            self.update_mlp = HierarchUpdateMlp(node_feature_dim)
+            self.update_mlp = HierarchUpdateMlp(node_feature_dim, num_types)
         elif update_type == "hierarch_cnn":
             self.update_mlp = HierarchUpdateCnn(node_feature_dim)
         else:
