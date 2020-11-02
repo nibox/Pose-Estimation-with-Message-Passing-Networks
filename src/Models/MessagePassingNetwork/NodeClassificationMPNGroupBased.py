@@ -25,14 +25,22 @@ class NodeClassificationMPNGroupBased(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
         self.use_skip_connections = config.SKIP
+        self.node_summary = config.NODE_TYPE_SUMMARY
         if config.AGGR_TYPE == "agnostic":
             self.mpn_node_cls = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
                                       aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP,
                                         edge_mlp=config.EDGE_MLP)
         elif config.AGGR_TYPE == "per_type":
+            num_types = None
+            if self.node_summary == "per_body_part":
+                num_types = 6
+            elif self.node_summary == "not":
+                num_types = 17
+            elif self.node_summary == "left_right":
+                num_types = 9
             self.mpn_node_cls = TypeAwareMPNLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
                                         aggr=config.AGGR, skip=config.SKIP,
-                                        edge_mlp=config.EDGE_MLP)
+                                        edge_mlp=config.EDGE_MLP, num_types=num_types)
 
         if config.LATE_FUSION_POS:
             self.edge_embedding = LateFusionEdgeMLP(config)
@@ -92,7 +100,7 @@ class NodeClassificationMPNGroupBased(torch.nn.Module):
         preds_class.append(self.classification(node_features))
 
 
-        return preds_edge, preds_node, preds_class, node_features, edge_features
+        return preds_edge, preds_node, preds_class
 
 
 def get_sub_graphs(node_cat, edge_index):

@@ -226,17 +226,17 @@ class PoseEstimationBaseline(nn.Module):
         graph_constructor = get_graph_constructor(self.gc_config, scoremaps=scoremaps, features=features,
                                                   joints_gt=keypoints, factor_list=factors, masks=None,
                                                   device=scoremaps.device, testing=not self.training,
-                                                  heatmaps=None, tagmaps=tags)
+                                                  heatmaps=None, tagmaps=tags, num_joints=self.num_joints)
 
         x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, batch_index, node_persons, _ = graph_constructor.construct_graph()
 
-        edge_pred, node_pred, class_pred, _ = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
+        edge_pred, node_pred, class_pred, tag_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
                                                     edge_labels=edge_labels
                                                     , batch_index=batch_index, node_mask=label_mask_node,
                                                     node_types=joint_det[:, 2])
 
         output = {}
-        output["preds"] = {"edge": edge_pred, "node": node_pred, "class": class_pred}
+        output["preds"] = {"edge": edge_pred, "node": node_pred, "class": class_pred, "tag": tag_pred}
         output["graph"] = {"nodes": joint_det, "detector_scores": joint_scores, "edge_index": edge_index,
                            "tags": tags}
         output["labels"] = {"edge": edge_labels, "node": node_labels, "class": class_labels}
@@ -284,7 +284,7 @@ def multi_scale_inference_hourglass(model, img, scales, device, config, keypoint
                                                                      model.feature_gather,
                                                                      with_flip=config.TEST.FLIP_TEST,
                                                                      project2image=config.TEST.PROJECT2IMAGE,
-                                                                     size_projected=base_size,
+                                                                     size_projected=base_size
                                                                      )
 
         final_heatmaps, tags_list, final_features = aggregate_results_mpn_hourglass(
@@ -299,7 +299,7 @@ def multi_scale_inference_hourglass(model, img, scales, device, config, keypoint
     graph_constructor = get_graph_constructor(model.gc_config, scoremaps=scoremaps, features=features,
                                               joints_gt=keypoints, factor_list=factors, masks=None,
                                               device=scoremaps.device, testing=not model.training,
-                                              heatmaps=None, tagmaps=tags)
+                                              heatmaps=None, tagmaps=tags, num_joints=model.num_joints)
 
     x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, batch_index, node_persons, _ = graph_constructor.construct_graph()
 
@@ -367,7 +367,7 @@ def _get_multi_stage_outputs(
 
         heatmaps_avg = 0
         num_heatmaps = 0
-        outputs_flip, features_flip = model(torch.flip(image, [3]))
+        outputs_flip, _ = model(torch.flip(image, [3]))
         """
         if flip_kernel is not None:
             features_flip = flip_kernel(torch.flip(features_flip, [3]))

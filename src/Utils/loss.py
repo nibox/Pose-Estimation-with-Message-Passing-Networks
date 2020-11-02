@@ -195,18 +195,24 @@ class MultiLossFactory(nn.Module):
                 heatmaps_pred = preds_heatmaps[idx][:, :self.num_joints]
 
                 heatmaps_loss = self.heatmaps_loss[idx](
-                    heatmaps_pred, heatmap_labels[idx], masks[idx]
+                    heatmaps_pred, heatmap_labels[idx], heatmap_masks[idx]
                 )
                 heatmaps_loss = heatmaps_loss * self.heatmaps_loss_factor[idx]
                 heatmap_loss += heatmaps_loss.mean()  # average over batch
 
-        edge_class_loss = 0.0
+
+        edge_loss = 0.0
         for i in range(len(preds_edges)):
-            edge_class_loss += self.classification_loss(preds_edges[i], edge_labels, "mean", edge_masks)
+            edge_loss += self.classification_loss(preds_edges[i], edge_labels[i], "mean", edge_masks[i])
+        edge_loss /= len(preds_edges)
+        if torch.isnan(edge_loss):
+            edge_loss = 0.0
 
         logging = {"heatmap": heatmap_loss.cpu().item(),
-                   "edge": edge_class_loss.cpu().item()}
-        return heatmap_loss + edge_class_loss, logging
+
+                   "edge": edge_loss.cpu().item() if isinstance(edge_loss, torch.Tensor) else edge_loss,
+                   }
+        return heatmap_loss + edge_loss, logging
 
 
 class BackgroundClassMultiLossFactory(nn.Module):
@@ -425,6 +431,111 @@ class TagMultiLossFactory(nn.Module):
 
         return loss, logging
 
+class PureTagMultiLossFactory(nn.Module):
+
+    def __init__(self, config):
+        super().__init__()
+        # init check
+
+        self.num_joints = config.MODEL.HRNET.NUM_JOINTS
+        self.num_stages = config.MODEL.HRNET.LOSS.NUM_STAGES
+        self.loss_weights = config.MODEL.LOSS.LOSS_WEIGHTS
+        self.sync_tags = config.MODEL.LOSS.SYNC_TAGS
+        assert len(self.loss_weights) == 1
+
+        self.heatmaps_loss = \
+            nn.ModuleList(
+                [
+                    HeatmapLoss()
+                    if with_heatmaps_loss else None
+                    for with_heatmaps_loss in config.MODEL.HRNET.LOSS.WITH_HEATMAPS_LOSS
+                ]
+            )
+        self.heatmaps_loss_factor = config.MODEL.HRNET.LOSS.HEATMAPS_LOSS_FACTOR
+
+        self.ae_loss = \
+            nn.ModuleList(
+                [
+                    AELoss(config.MODEL.HRNET.LOSS.AE_LOSS_TYPE) if with_ae_loss else None
+                    for with_ae_loss in config.TRAIN.WITH_AE_LOSS
+                ]
+            )
+        self.push_loss_factor = config.MODEL.HRNET.LOSS.PUSH_LOSS_FACTOR
+        self.pull_loss_factor = config.MODEL.HRNET.LOSS.PULL_LOSS_FACTOR
+
+        self.tag_loss = NodeAELoss(config.MODEL.HRNET.LOSS.AE_LOSS_TYPE)
+
+
+    def forward(self, outputs, labels, masks, graph):
+
+        preds_heatmaps, heatmap_labels, heatmap_masks = outputs["heatmap"], labels["heatmap"], masks["heatmap"]
+        tag_labels = labels["tag"]
+        preds_tags, edge_labels, edge_masks = outputs["tag"], labels["edge"], masks["edge"]
+        batch_index = labels["batch_index"]
+        node_person = labels["person"]
+        joint_det = graph["nodes"]
+        preds_nodes, node_labels, node_masks = outputs["node"], labels["node"], masks["node"]
+
+
+        heatmap_loss = 0.0
+        ae_loss = 0.0
+        for idx in range(len(preds_heatmaps)):
+            if self.heatmaps_loss[idx]:
+                heatmaps_pred = preds_heatmaps[idx][:, :self.num_joints]
+
+                heatmaps_loss = self.heatmaps_loss[idx](
+                    heatmaps_pred, heatmap_labels[idx], heatmap_masks[idx]
+                )
+                heatmaps_loss = heatmaps_loss * self.heatmaps_loss_factor[idx]
+                heatmap_loss += heatmaps_loss.mean()  # average over batch
+
+            if self.ae_loss[idx]:
+                tags_pred = preds_heatmaps[idx][:, self.num_joints:]
+                batch_size = tags_pred.size()[0]
+                tags_pred = tags_pred.contiguous().view(batch_size, -1, 1)
+
+                push_loss, pull_loss = self.ae_loss[idx](
+                    tags_pred, tag_labels[idx]
+                )
+                push_loss = push_loss * self.push_loss_factor[idx]
+                pull_loss = pull_loss * self.pull_loss_factor[idx]
+
+                ae_loss += push_loss.mean() + pull_loss.mean()
+
+        if self.sync_tags:
+            assert len(preds_tags) == 1
+            heatmap_tags = preds_heatmaps[0][:, self.num_joints:]
+            heatmap_tags = torch.nn.functional.interpolate(
+                heatmap_tags,
+                size=(preds_heatmaps[1].shape[2], preds_heatmaps[1].shape[3]),
+                mode='bilinear',
+                align_corners=False
+            )
+            heatmap_tags = heatmap_tags[batch_index, joint_det[:, 2], joint_det[:, 1], joint_det[:, 0]]
+            batch_index = torch.stack([batch_index, batch_index])
+            node_person = torch.stack([node_person, node_person])
+            node_labels = torch.stack([node_labels, node_labels])
+            preds_tags[-1] = torch.stack([preds_tags[-1], heatmap_tags])
+
+
+        tag_loss = 0
+        for i in range(len(preds_tags)):
+            if (node_labels == 1.0).sum() > 0.0:
+                push, pull = self.tag_loss(preds_tags[i][node_labels == 1.0], node_person[node_labels == 1.0],
+                                           batch_index[node_labels == 1.0])
+                tag_loss += push.mean() + pull.mean()
+
+        logging = {"heatmap": heatmap_loss.cpu().item(),
+                   "tag_loss": ae_loss.cpu().item() if isinstance(ae_loss, torch.Tensor) else ae_loss,
+                   "tag": tag_loss.cpu().item() if isinstance(tag_loss, torch.Tensor) else tag_loss,
+                   }
+        tag_loss *= self.loss_weights[0]
+
+        loss = tag_loss * self.loss_weights[0] + heatmap_loss + ae_loss
+        logging["loss"] = loss.cpu().item()
+
+        return loss, logging
+
 
 class ClassMultiLossFactory(nn.Module):
 
@@ -597,7 +708,7 @@ class MPNLossFactory(nn.Module):
 
         loss = 0.0
         for i in range(len(preds_edges)):
-            loss += self.classification_loss(preds_edges[i], edge_labels, "mean", masks)
+            loss += self.classification_loss(preds_edges[i], edge_labels[i], "mean", masks[i])
         loss = loss / len(preds_edges)
 
         return loss, {}

@@ -22,10 +22,10 @@ def main():
 
     config_dir = "hybrid_class_agnostic_end2end"
     # config_dir = "train"
-    config_name = "model_56_1_0"
+    config_name = "model_56_1_0_6_0"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
-    eval_writer = EvalWriter(config, fname="eval_10_full_with_refine_without_masking.txt")
+    eval_writer = EvalWriter(config, fname="eval_single_scale.txt")
 
     heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
     joint_generator = [JointsGenerator(30, 17, 128, True),

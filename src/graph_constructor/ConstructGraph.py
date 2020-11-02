@@ -66,7 +66,6 @@ class NaiveGraphConstructor:
                                                                   threshold=self.detect_threshold,
                                                                   pool_kernel=self.pool_kernel_size,
                                                                   hybrid_k=self.hybrid_k)
-            joint_tags = self.tagmaps[batch, joint_det[:, 2], joint_det[:, 1], joint_det[:, 0]]
 
             # ##############cheating#################
             # extend joint_det with joints_gt in order to have a perfect matching at train time
@@ -79,25 +78,13 @@ class NaiveGraphConstructor:
                 clamp_max = max(self.scoremaps.shape[2], self.scoremaps.shape[3]) - 1
                 joints_gt_loc = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0,
                                                                                                             clamp_max)
-                joints_gt_loc = torch.cat([joints_gt_loc, joint_idx_gt.unsqueeze(1)], 1)
-
-                joint_det = NaiveGraphConstructor.remove_ambigiuous_det(joint_det, joints_gt_loc, self.inclusion_radius)
-
-                person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
-                tmp = self.joints_gt[batch, person_idx_gt, joint_idx_gt, :2].round().long().clamp(0, clamp_max)
-                joints_gt_position = torch.cat([tmp, joint_idx_gt.unsqueeze(1)], 1)
-                unique_elements = torch.eq(joints_gt_position[:, :2].unsqueeze(1), joint_det[:, :2])
-                unique_elements = unique_elements[:, :, 0] & unique_elements[:, :, 1]
-                unique_elements = unique_elements.sum(dim=0)
-                joint_det = torch.cat([joint_det[unique_elements == 0], joints_gt_position], 0)
-                joint_scores = self.scoremaps[batch][joint_det[:, 2], joint_det[:, 1], joint_det[:, 0]]
-                if self.no_false_positives:
-                    if len(joints_gt_position) >= 2:
-                        # idea is that for images without present gt joint (happens due to crop and masking), i use
-                        # the detected joints as dummy input but because there are not gt joint the labels are all
-                        # inactive and the loss of the image should be masked out. It is a bit hacky but it works
-                        joint_det = joints_gt_position
-                        joint_scores = torch.ones(len(joint_det), dtype=torch.float, device=joint_det.device)
+                joints_gt_position = torch.cat([joints_gt_loc, joint_idx_gt.unsqueeze(1)], 1)
+                if len(joints_gt_loc) >= 2:
+                    # idea is that for images without present gt joint (happens due to crop and masking), i use
+                    # the detected joints as dummy input but because there are not gt joint the labels are all
+                    # inactive and the loss of the image should be masked out. It is a bit hacky but it works
+                    joint_det = joints_gt_position
+                    joint_scores = torch.ones(len(joint_det), dtype=torch.float, device=joint_det.device)
             elif self.edge_label_method == 7 and not self.testing:
                 person_idx_gt, joint_idx_gt = self.joints_gt[batch, :, :, 2].nonzero(as_tuple=True)
                 clamp_max = max(self.scoremaps.shape[2], self.scoremaps.shape[3]) - 1
@@ -110,8 +97,10 @@ class NaiveGraphConstructor:
                 joint_scores = self.scoremaps[batch][joint_det[:, 2], joint_det[:, 1], joint_det[:, 0]]
                 # joint_scores[-len(joints_gt_position):] = 1.0
 
-            x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch], self.mpn_graph_type,
-                                                                 joint_scores, self.edge_features_to_use)
+            x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.tagmaps[batch].squeeze(), self.features[batch],
+                                                                 self.mpn_graph_type, joint_scores,
+                                                                 self.edge_features_to_use)
+            joint_tags = self.tagmaps[batch, joint_det[:, 2], joint_det[:, 1], joint_det[:, 0]]
 
             # sol maps nodes to gt joints/  gt joints to nodes and connectivity maps between gt joints
             edge_labels = None
@@ -124,7 +113,8 @@ class NaiveGraphConstructor:
             class_mask = None
             if self.use_gt:
                 if self.edge_label_method == 1:
-                    edge_labels = self._construct_edge_labels_1(joint_det, self.joints_gt[batch], edge_index)
+                    edge_labels, label_mask = self._construct_edge_labels_1(joint_det, self.joints_gt[batch],
+                                                                self.factor_list[batch], edge_index)
                 elif self.edge_label_method == 2:
                     edge_labels = self._construct_edge_labels_2(joint_det, self.joints_gt[batch], edge_index)
                 label_mask = torch.ones_like(edge_labels, device=self.device, dtype=torch.float)
@@ -135,10 +125,10 @@ class NaiveGraphConstructor:
                 label_mask_node = torch.ones(joint_det.shape[0], dtype=torch.float, device=self.device)
 
                 if self.edge_label_method == 3:
-                    edge_labels = self._construct_edge_labels_3(joint_det, self.joints_gt[batch], edge_index)
-                    label_mask = torch.ones_like(edge_labels, device=self.device, dtype=torch.float)
+                    edge_labels, node_persons, label_mask = self._construct_edge_labels_3(joint_det, self.joints_gt[batch],
+                                                                                          self.factor_list[batch], edge_index)
                 elif self.edge_label_method == 4:
-                    edge_labels, node_labels, label_mask = self._construct_edge_labels_4(joint_det.detach(),
+                    edge_labels, node_labels, node_persons, label_mask = self._construct_edge_labels_4(joint_det.detach(),
                                                                                          self.joints_gt[batch],
                                                                                          self.factor_list[batch],
                                                                                          edge_index.detach())
@@ -206,8 +196,8 @@ class NaiveGraphConstructor:
                 joint_scores = joint_scores[idx_to_take]
                 knn = True
                 if knn:
-                    x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, self.features[batch], "knn",
-                                                                         joint_scores)
+                    x, edge_attr, edge_index = self._construct_mpn_graph(joint_det, None, self.features[batch], "knn",
+                                                                         joint_scores, )
                     edge_labels, node_labels, label_mask = self._construct_edge_labels_4(joint_det.detach(),
                                                                                          self.joints_gt[batch],
                                                                                          self.factor_list[batch],
@@ -242,13 +232,13 @@ class NaiveGraphConstructor:
         if self.joints_gt is not None:
             assert edge_labels_list[0] is not None
             edge_labels_list = torch.cat(edge_labels_list, 0)
-            node_label_list = torch.cat(node_label_list, 0)
+            node_label_list = torch.cat(node_label_list, 0) if self.edge_label_method in [4, 6, 7] else None
             label_mask_list = torch.cat(label_mask_list, 0)
-            label_mask_node_list = torch.cat(label_mask_node_list, 0)
+            label_mask_node_list = torch.cat(label_mask_node_list, 0) if self.edge_label_method in [4, 6, 7] else None
             class_mask_list = torch.cat(class_mask_list, 0) if self.edge_label_method in [6, 7] else None
             node_class_list = torch.cat(node_class_list, 0) if self.edge_label_method in [6, 7] else None
             keypoint_positions = None
-            node_persons_list = torch.cat(node_persons_list, 0) if self.edge_label_method in [6, 7] else None
+            node_persons_list = torch.cat(node_persons_list, 0) if self.edge_label_method in [4, 6, 7] else None
 
         else:
             edge_labels_list, node_label_list, label_mask_list, label_mask_node_list, class_mask_list = None, None, None, None, None
@@ -258,9 +248,10 @@ class NaiveGraphConstructor:
         return x_list, edge_attr_list, edge_index_list, edge_labels_list, node_label_list, node_class_list, keypoint_positions, \
                joint_det_list, label_mask_list, label_mask_node_list, class_mask_list, joint_score_list, batch_index, node_persons_list, joint_tag_list
 
-    def _construct_mpn_graph(self, joint_det, features, graph_type, joint_scores, edge_features_to_use):
+    def _construct_mpn_graph(self, joint_det, tag_maps, features, graph_type, joint_scores, edge_features_to_use):
         """
 
+        :param tag_maps:
         :param joint_scores:
         :param joint_det: Shape: (Num_dets, 3) x, y, type,
         :param features: Shape: (C, H, W)
@@ -337,6 +328,13 @@ class NaiveGraphConstructor:
         elif {"position", "angle", "connection_type"} == set(edge_features_to_use):
             edge_attr = torch.cat([edge_attr_x[:, None], edge_attr_y[:, None], edge_attr_theta[:, None], connection_label_2.float()],
                                   dim=1)
+        elif {"ae"} == set(edge_features_to_use):
+            joint_tags = tag_maps[joint_type, joint_y, joint_x]
+            edge_attr = torch.unsqueeze(joint_tags[edge_index[1]] - joint_tags[edge_index[0]], 1).norm(p=None, dim=1, keepdim=True)
+        elif {"ae_normed"} == set(edge_features_to_use):
+            joint_tags = tag_maps[joint_type, joint_y, joint_x]
+            edge_attr = torch.unsqueeze(joint_tags[edge_index[1]] - joint_tags[edge_index[0]], 1).norm(p=None, dim=1, keepdim=True).round() \
+                        - joint_scores[edge_index[0], None]
         else:
             raise NotImplementedError
 
@@ -454,61 +452,46 @@ class NaiveGraphConstructor:
         removed_idx = joints_to_remove.int().nonzero(as_tuple=True)[0]
         return removed_idx
 
-    def _construct_edge_labels_1(self, joint_det, joints_gt, edge_index):
-
-        num_joints_det = len(joint_det)
-
+    def _construct_edge_labels_1(self, joint_det, joints_gt, factors, edge_index):
         person_idx_gt, joint_idx_gt = joints_gt[:, :, 2].nonzero(as_tuple=True)
         num_joints_gt = len(person_idx_gt)
-        num_edges = edge_index.shape[1]  # num_joints_det * num_joints_det - num_joints_det
 
-        joints_position_gt = joints_gt[:, :, :2]
-        joints_position_gt = joints_position_gt.view(-1, 1, 2).round().float()  # !!! cast to long !!! and then to float
-        distances = torch.norm(joint_det[:, :2] - joints_position_gt, dim=2)
-        distances = distances.view(30, self.num_joints, num_joints_det)  # todo include ref to max number of people
-        # set the distances of joint pairse of different types to high cost s.t. they are not matched
-        for jt in range(self.num_joints):
-            distances[:, jt, joint_det[:, 2] != jt] = 1000000.0
-        cost_mat = distances[person_idx_gt, joint_idx_gt].detach().cpu().numpy()
-        sol = linear_sum_assignment(cost_mat)
-        cost = np.sum(cost_mat[sol[0], sol[1]])
+        clamp_max = max(self.scoremaps.shape[2], self.scoremaps.shape[3]) - 1
+        distance = (joints_gt[person_idx_gt, joint_idx_gt, :2].unsqueeze(1).round().float().clamp(0,
+                                                                                                  clamp_max) - joint_det[
+                                                                                                               :,
+                                                                                                               :2].float()).pow(
+            2).sum(dim=2)
+        factor_per_joint = factors[person_idx_gt, joint_idx_gt]
+        similarity = torch.exp(-distance / factor_per_joint[:, None])
 
-        sol_torch = torch.stack(list(map(torch.from_numpy, sol)), dim=1).to(joint_det.device).T
-        edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol_torch)
+        different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
+        similarity[different_type] = 0.0
+        similarity[similarity < self.node_matching_radius] = 0.0  # 0.1 worked well for threshold + knn graph
 
-        if self.include_neighbouring_keypoints:
-            source_nodes_part_of_body = edge_index[0, edge_labels == 1]
-            target_nodes_part_of_body = edge_index[1, edge_labels == 1]
+        cost_mat = similarity.cpu().numpy()
+        sol = linear_sum_assignment(cost_mat, maximize=True)
+        row, col = sol
+        # remove mappings with cost 0.0
+        valid_match = cost_mat[row, col] != 0.0
+        if num_joints_gt >= 2:  # in this case there are no detected joints and we should have a perfect matching
+            assert valid_match.sum() == len(valid_match)
+        row = row[valid_match]
+        col = col[valid_match]
+        person_idx_gt_1 = person_idx_gt[row]
 
-            distances = torch.norm(joint_det[:, :2].unsqueeze(1).float() - joint_det[:, :2].float(), dim=2)
-            # set distances of joint pairs of different type to some high value
-            type_det = torch.logical_not(torch.eq(joint_det[:, 2].unsqueeze(1), joint_det[:, 2]))
-            distances[type_det] = 1000.0
-            distances[:, source_nodes_part_of_body] = 1000.0
-            distances[distances >= self.inclusion_radius] = 0.0
-            distances = distances != 0
-            # remove ambiguous cases here
-            distances_tmp = distances[source_nodes_part_of_body.unique(sorted=True)]
-            mult_assignments = distances_tmp.sum(dim=0)
-            distances = distances[source_nodes_part_of_body]
-            distances[:, mult_assignments > 1] = False
+        row_1 = np.arange(0, len(row), dtype=np.int64)
+        row_1, col_1 = torch.from_numpy(row_1).to(self.device), torch.from_numpy(col).to(self.device)
 
-            target_idxs, source_idxs = distances.long().nonzero(as_tuple=True)
-            new_target_nodes = target_nodes_part_of_body[target_idxs]
-            # at this point i have new edges from new canditates to old keypoints and label constructing
-            # but i would have to remvoe duplicates edges from edge_index
-            # so goal is to identifiy the indices of these duplicates
-            edge_to_label_1 = torch.stack([source_idxs, new_target_nodes])
-            edge_to_label_2 = torch.stack([new_target_nodes, source_idxs])
-            edge_to_label = torch.cat([edge_to_label_1, edge_to_label_2], 1)
-            edge_comparision = torch.eq(edge_index.T.unsqueeze(1), edge_to_label.T)
-            edge_comparision = edge_comparision[:, :, 0] & edge_comparision[:, :, 1]
-            duplicate_edges = edge_comparision.sum(dim=1)
-            edge_labels_2 = torch.zeros(num_edges, device=joint_det.device)
-            edge_labels_2[duplicate_edges == 1] = 1.0
+        sol = row_1, col_1
 
-            edge_labels += edge_labels_2.to(joint_det.device)
-        return edge_labels
+        edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt_1, joint_det, edge_index, sol)
+        if num_joints_gt >= 2:
+            label_mask_edge = torch.ones_like(edge_labels, dtype=torch.float32, device=self.device)
+        else:
+            label_mask_edge = torch.zeros_like(edge_labels, dtype=torch.float32, device=self.device)
+
+        return edge_labels, label_mask_edge
 
     def _construct_edge_labels_2(self, joint_det, joints_gt, edge_index):
         assert self.use_gt
@@ -550,37 +533,76 @@ class NaiveGraphConstructor:
         edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol)
         return edge_labels
 
-    def _construct_edge_labels_3(self, joint_det, joints_gt, edge_index):
+    def _construct_edge_labels_3(self, joint_det, joints_gt, factors, edge_index):
         assert not self.use_gt
         num_joints_det = len(joint_det)
-
         person_idx_gt, joint_idx_gt = joints_gt[:, :, 2].nonzero(as_tuple=True)
         num_joints_gt = len(person_idx_gt)
 
-        distance = torch.norm(
-            joints_gt[person_idx_gt, joint_idx_gt, :2].unsqueeze(1).round().float().clamp(0, 127) - joint_det[:,
-                                                                                                    :2].float(), dim=2)
-        # set distance between joints of different type to some high value
-        different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
-        distance[different_type] = 10000.0
-        distance[distance >= self.matching_radius] = 10000.0
-        if self.include_neighbouring_keypoints:
-            raise NotImplementedError
-        else:
-            cost_mat = distance.cpu().numpy()
-            sol = linear_sum_assignment(cost_mat)
-            row, col = sol
-            # remove mappings with cost 10000.0
-            valid_match = cost_mat[row, col] != 10000.0
-            row = row[valid_match]
-            col = col[valid_match]
-            person_idx_gt = person_idx_gt[row]
-            row = np.arange(0, len(row), dtype=np.int64)
-            row, col = torch.from_numpy(row).to(self.device), torch.from_numpy(col).to(self.device)
-            sol = row, col
+        clamp_max = max(self.scoremaps.shape[2], self.scoremaps.shape[3])
+        distance = (joints_gt[person_idx_gt, joint_idx_gt, :2].unsqueeze(1).round().float().clamp(0,
+                                                                                                  clamp_max) - joint_det[
+                                                                                                               :,
+                                                                                                               :2].float()).pow(
+            2).sum(dim=2)
+        factor_per_joint = factors[person_idx_gt, joint_idx_gt]
+        similarity = torch.exp(-distance / factor_per_joint[:, None])
 
-        edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt, joint_det, edge_index, sol)
-        return edge_labels
+        different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
+        similarity[different_type] = 0.0
+        similarity[similarity < self.matching_radius] = 0.0  # 0.1 worked well for threshold + knn graph
+
+        cost_mat = similarity.cpu().numpy()
+        sol = linear_sum_assignment(cost_mat, maximize=True)
+        row, col = sol
+        # remove mappings with cost 0.0
+        valid_match = cost_mat[row, col] != 0.0
+        row = row[valid_match]
+        col = col[valid_match]
+        person_idx_gt_1 = person_idx_gt[row]
+
+        row_1 = np.arange(0, len(row), dtype=np.int64)
+        row_1, col_1 = torch.from_numpy(row_1).to(self.device), torch.from_numpy(col).to(self.device)
+
+        ambiguous_dets = []
+        if self.include_neighbouring_keypoints:
+            # use inclusion radius to filter more aggressively
+            cost_mat[cost_mat < self.inclusion_radius] = 0.0
+            # remove already chosen keypoints from next selection
+            cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), col] = 0.0
+            # "remove" ambiguous cases
+            # identify them
+            ambiguous_dets = (cost_mat != 0.0).sum(axis=0) > 1.0
+            # remove them
+            cost_mat[np.arange(0, num_joints_gt).reshape(-1, 1), ambiguous_dets] = 0.0
+            row_2, col_2 = np.nonzero(cost_mat)
+            assert (set(list(row_2)).issubset(set(list(row))))
+
+            # some gt joints have no match and have to be removed for the next step
+            # create translation table for new indices in order to translate row_2
+            mapping = np.zeros(num_joints_gt, dtype=np.int64) - 1
+            mapping[row] = np.arange(0, len(row), dtype=np.int64)
+            row_2 = mapping[row_2]
+            assert (row_2 == -1).sum() == 0
+            row_2, col_2 = torch.from_numpy(row_2).to(self.device), torch.from_numpy(col_2).to(self.device)
+
+            row_1 = torch.cat([row_1, row_2], dim=0)
+            col_1 = torch.cat([col_1, col_2], dim=0)
+
+        sol = row_1, col_1
+        node_labels = torch.zeros(joint_det.shape[0], dtype=torch.float32, device=self.device)
+        node_labels[col_1] = 1.0
+
+        edge_labels = NaiveGraphConstructor.match_cc(person_idx_gt_1, joint_det, edge_index, sol)
+        joint_det_idx = torch.arange(0, len(joint_det), dtype=torch.int64, device=self.device)
+        label_mask = NaiveGraphConstructor.create_loss_mask(joint_det_idx[ambiguous_dets], edge_index)
+        label_mask *= subgraph_mask(node_labels == 1.0, edge_index)  # apply loss only to gt nodes
+
+
+        # node clusters
+        node_persons = torch.zeros(num_joints_det, dtype=torch.long, device=self.device) - 1
+        node_persons[col_1] = person_idx_gt_1[row_1].long()
+        return edge_labels, node_persons, label_mask
 
     def _construct_edge_labels_4(self, joint_det, joints_gt, factors, edge_index):
         assert not self.use_gt
@@ -646,12 +668,10 @@ class NaiveGraphConstructor:
         joint_det_idx = torch.arange(0, len(joint_det), dtype=torch.int64, device=self.device)
         label_mask = NaiveGraphConstructor.create_loss_mask(joint_det_idx[ambiguous_dets], edge_index)
 
-        ############
-        # small hack to test node labels
-        # joint_det[col, 2] = joint_idx_gt[row]
-        # joint_det[col, :2] = joints_gt[person_idx_gt[row], joint_idx_gt[row], :2].round().long()
-        ###########
-        return edge_labels, node_labels, label_mask
+        # node clusters
+        node_persons = torch.zeros(num_joints_det, dtype=torch.long, device=self.device) - 1
+        node_persons[col_1] = person_idx_gt_1[row_1].long()
+        return edge_labels, node_labels, node_persons, label_mask
 
     def _construct_edge_labels_5(self, joint_det, joints_gt, factors, edge_index):
         assert not self.use_gt

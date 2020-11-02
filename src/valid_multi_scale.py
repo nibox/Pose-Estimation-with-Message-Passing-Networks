@@ -132,28 +132,28 @@ def main():
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
-            ann = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+            ann = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info, config.DATASET.INPUT_SIZE,
                               int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
                               min(config.TEST.SCALE_FACTOR), config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD,
                               preds_classes, config.TEST.WITH_REFINE, joint_scores, False)
-            ann_filter = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+            ann_filter = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,config.DATASET.INPUT_SIZE,
                               int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
                               min(config.TEST.SCALE_FACTOR), config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD,
                               preds_classes, config.TEST.WITH_REFINE, joint_scores, True)
-            ann_bone = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+            ann_bone = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,config.DATASET.INPUT_SIZE,
                                    int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
                                    min(config.TEST.SCALE_FACTOR), config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD,
                                    preds_baseline_class_one_hot, config.TEST.WITH_REFINE, joint_scores, False)
-            ann_w_refine = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+            ann_w_refine = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,config.DATASET.INPUT_SIZE,
                                        int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
                                        min(config.TEST.SCALE_FACTOR), False, config.MODEL.MPN.NODE_THRESHOLD,
                                        preds_classes, True, joint_scores, False)
-            ann_w_adjust = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+            ann_w_adjust = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,config.DATASET.INPUT_SIZE,
                                        int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
                                        min(config.TEST.SCALE_FACTOR), True, config.MODEL.MPN.NODE_THRESHOLD,
                                        preds_classes, False, joint_scores, False)
             ann_w_adjust_refine = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges,
-                                              img_info, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+                                              img_info,config.DATASET.INPUT_SIZE, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
                                               scaling_type, min(config.TEST.SCALE_FACTOR), True,
                                               config.MODEL.MPN.NODE_THRESHOLD, preds_classes, True, joint_scores, False)
 
@@ -187,16 +187,16 @@ def main():
         eval_writer.close()
 
 
-def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_info, img_id, cc_method, scaling_type,
+def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_info, input_size, img_id, cc_method, scaling_type,
                 min_scale, adjustment, th, preds_classes, with_refine, score_map_scores, with_filter):
     if (score_map_scores > 0.1).sum() < 1:
         return None
     true_positive_idx = joint_scores > th
     edge_index, pred = subgraph(true_positive_idx, edge_index, pred)
     if edge_index.shape[1] != 0:
-        pred[joint_det[edge_index[0, :], 2] == joint_det[
-            edge_index[1, :], 2]] = 0.0  # set edge predictions of same types to zero
-        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, preds_classes, cc_method)
+        #pred[joint_det[edge_index[0, :], 2] == joint_det[
+        #    edge_index[1, :], 2]] = 0.0  # set edge predictions of same types to zero
+        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, preds_classes, cc_method, 17)
     else:
         persons_pred = np.zeros([1, 17, 3])
     # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
@@ -217,7 +217,7 @@ def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_
         persons_pred = refine(scoremaps, tags, persons_pred)
     if adjustment:
         persons_pred = adjust(persons_pred, scoremaps)
-    persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]), scaling_type=scaling_type,
+    persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]), input_size, scaling_type=scaling_type,
                                            min_scale=min_scale)
 
     ann = gen_ann_format(persons_pred_orig, img_id)

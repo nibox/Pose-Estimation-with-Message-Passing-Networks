@@ -30,7 +30,7 @@ def main():
 
     config_dir = "hourglass"
     # config_dir = "train"
-    config_name = "model_70_2"
+    config_name = "model_70"
     # file_name = "t"
     # config_name = sys.argv[1]
     file_name = "eval_single_scale_flip"
@@ -204,7 +204,7 @@ def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_
     if edge_index.shape[1] != 0:
         pred[joint_det[edge_index[0, :], 2] == joint_det[
             edge_index[1, :], 2]] = 0.0  # set edge predictions of same types to zero
-        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, preds_classes, cc_method)
+        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, preds_classes, cc_method, 17)
     else:
         persons_pred = np.zeros([1, 17, 3])
     # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
@@ -226,7 +226,7 @@ def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_
         tags = tags.cpu().numpy()
         scoremaps = scoremaps.cpu().numpy()
         persons_pred = refine(scoremaps, tags, persons_pred)
-    persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]), scaling_type=scaling_type,
+    persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]), 512, scaling_type=scaling_type,
                                            min_scale=min_scale)
 
     ann = gen_ann_format(persons_pred_orig, img_id)

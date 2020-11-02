@@ -4,7 +4,7 @@ import pickle
 from config import get_config, update_config
 from torch_geometric.utils import recall, accuracy, precision, f1_score, subgraph
 from Utils.transforms import transforms_hr_train
-from Utils.loss import MPNLossFactory, MultiLossFactory, ClassMPNLossFactory
+from Utils.loss import *
 from Utils.Utils import Logger, subgraph_mask, calc_metrics
 from Models import get_cached_model
 from data import CocoKeypoints_hr, HeatmapGenerator, JointsGenerator
@@ -51,9 +51,9 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
         keypoints = keypoints.to(kwargs["device"])
         factors = factors.to(kwargs["device"])
 
-        _, output = model(imgs, keypoints, masks[-1], factors)
+        _, output = model(imgs, keypoints, masks, factors)
 
-        if isinstance(loss_func, (MultiLossFactory, MPNLossFactory)):
+        if isinstance(loss_func, (MultiLossFactory, MPNLossFactory, TagMultiLossFactory)):
             loss, _ = loss_func(output["preds"], output["labels"], output["masks"])
         elif isinstance(loss_func, ClassMPNLossFactory):
             # adapt labels and mask to reduced graph
@@ -62,6 +62,24 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             for i in range(len(output["preds"]["node"])):
                 true_positive_idx = output["preds"]["node"][i].sigmoid() > 1.0
                 true_positive_idx[output["labels"]["node"]== 1.0] = True
+                mask = subgraph_mask(true_positive_idx, output["graph"]["edge_index"])
+                loss_edge_labels.append(output["labels"]["edge"])
+                loss_masks.append(output["masks"]["edge"] * mask.float())
+
+            output["labels"]["edge"] = loss_edge_labels
+            output["masks"]["edge"] = loss_masks
+            loss, logging = loss_func(output["preds"], output["labels"], output["masks"])
+
+            #
+            default_pred = torch.zeros(output["graph"]["edge_index"].shape[1],
+                                       dtype=torch.float, device=output["graph"]["edge_index"].device) - 1.0
+            default_pred[mask] = output["preds"]["edge"][-1][mask].detach()
+        elif isinstance(loss_func, BackgroundClassMultiLossFactory):
+            # adapt labels and mask to reduced graph
+            loss_masks = []
+            loss_edge_labels = []
+            for i in range(len(output["preds"]["node"])):
+                true_positive_idx = output["labels"]["node"] == 1.0
                 mask = subgraph_mask(true_positive_idx, output["graph"]["edge_index"])
                 loss_edge_labels.append(output["labels"]["edge"])
                 loss_masks.append(output["masks"]["edge"] * mask.float())
@@ -104,7 +122,7 @@ def main():
 
     ##########################################################
     config_dir = "hybrid_class_agnostic_end2end"
-    config_name = "model_56_1_0_9"
+    config_name = "model_56_1_0_6_0_7_4_2"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
 
@@ -121,6 +139,10 @@ def main():
         loss_func = MPNLossFactory(config)
     elif config.MODEL.LOSS.NAME == "node_edge_loss":
         loss_func = ClassMPNLossFactory(config)
+    elif config.MODEL.LOSS.NAME == "node_with_background_edge_loss":
+        loss_func = BackgroundClassMultiLossFactory(config)
+    elif config.MODEL.LOSS.NAME == "tag_loss":
+        loss_func = TagMultiLossFactory(config)
     else:
         raise NotImplementedError
     model.to(device)
@@ -148,11 +170,17 @@ def main():
             result_nodes = torch.where(result_nodes < 0.5, torch.zeros_like(result_nodes),
                                        torch.ones_like(result_nodes))
         else:
-            result_nodes = None
+            if preds_classes is not None:
+                result_nodes = preds_classes[-1].argmax(dim=1).squeeze() != 18
+            else:
+                result_nodes = None
         result_classes = preds_classes.argmax(dim=1).squeeze() if preds_classes is not None else None
 
-        result_edges = preds_edges.sigmoid().squeeze()
-        result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
+        if preds_edges is not None:
+            result_edges = preds_edges.sigmoid().squeeze()
+            result_edges = torch.where(result_edges < 0.5, torch.zeros_like(result_edges), torch.ones_like(result_edges))
+        else:
+                result_edges = None
 
         node_metrics = calc_metrics(result_nodes, node_labels, node_mask)
         class_metrics = calc_metrics(result_classes, class_labels, class_mask, 17)

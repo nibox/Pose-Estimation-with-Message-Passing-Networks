@@ -50,12 +50,6 @@ def gen_ann_format(pred, scores, image_id=0):
     return ans
 
 
-def eval_single_img(coco, dt, image_id, tmp_dir="tmp"):
-    ann = [gen_ann_format(dt, image_id)]
-    stats = coco_eval(coco, ann, [image_id], log=False)
-    return stats[:2]
-
-
 def coco_eval(coco, dt, image_ids, tmp_dir="tmp", log=True):
     """
     from https://github.com/princeton-vl/pose-ae-train
@@ -86,7 +80,7 @@ def main():
 
     config = get_hrnet_config()
     config = update_config(config, f"../experiments/hrnet/w32_512_adam_lr1e-3.yaml")
-    eval_writer = EvalWriter(config, fname="hrnet_multiscale_flip_ochuman.txt")
+    eval_writer = EvalWriter(config, fname="hourglass_multiscale_flip_ochuman.txt")
 
     parser = HeatmapParser(config)
     transforms, _ = transforms_to_tensor(config)

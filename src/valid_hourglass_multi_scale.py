@@ -136,7 +136,7 @@ def main():
 
 
 def perd_to_ann(grouped, scores, img_info, img_id, scaling_type, min_scale):
-    persons_pred_orig = reverse_affine_map(grouped.copy(), (img_info["width"], img_info["height"]), scaling_type=scaling_type,
+    persons_pred_orig = reverse_affine_map(grouped.copy(), (img_info["width"], img_info["height"]), 512, scaling_type=scaling_type,
                                            min_scale=min_scale)
 
     ann = gen_ann_format(persons_pred_orig, scores, img_id)

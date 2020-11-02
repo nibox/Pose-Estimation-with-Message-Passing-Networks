@@ -130,7 +130,11 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
         output["labels"]["tag"] = ae_targets
 
         if isinstance(loss_func, (MultiLossFactory, MPNLossFactory)):
-            loss, _ = loss_func(output["preds"], output["labels"], output["masks"])
+            output["masks"]["edge"] = [output["masks"]["edge"] for _ in range(len(output["preds"]["edge"]))]
+            output["labels"]["edge"] = [output["labels"]["edge"] for _ in range(len(output["preds"]["edge"]))]
+            loss, logging = loss_func(output["preds"], output["labels"], output["masks"])
+        elif isinstance(loss_func, PureTagMultiLossFactory):
+            loss, logging = loss_func(output["preds"], output["labels"], output["masks"], output["graph"])
         elif isinstance(loss_func, (ClassMultiLossFactory, ClassMPNLossFactory, TagMultiLossFactory)):
             edge_masks = []
             edge_labels = []
@@ -189,6 +193,7 @@ def main():
 
     ##########################################################
     config_name = sys.argv[1]
+    # config_name = "hybrid_class_agnostic_end2end_crowd_pose/model_80_2"  # sys.argv[1]
     config = get_config()
     config = update_config(config, f"../experiments/{config_name}.yaml")
 
@@ -225,6 +230,8 @@ def main():
             loss_func = BackgroundClassMultiLossFactory(config)
         elif config.MODEL.LOSS.NAME == "tag_loss":
             loss_func = TagMultiLossFactory(config)
+        elif config.MODEL.LOSS.NAME == "pure_tag_loss":
+            loss_func = PureTagMultiLossFactory(config)
         else:
             raise NotImplementedError
     else:
@@ -234,6 +241,8 @@ def main():
             loss_func = MPNLossFactory(config)
         elif config.MODEL.LOSS.NAME == "node_edge_loss":
             loss_func = ClassMPNLossFactory(config)
+        elif config.MODEL.LOSS.NAME == "pure_tag_loss":
+            loss_func = PureTagMultiLossFactory(config)
         else:
             raise NotImplementedError
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, config.TRAIN.LR_STEP, config.TRAIN.LR_FACTOR)
@@ -365,8 +374,14 @@ def main():
 
                 preds, labels, masks = output["preds"], output["labels"], output["masks"]
                 if isinstance(loss_func, (MultiLossFactory, MPNLossFactory, TagMultiLossFactory)):
+                    output["masks"]["edge"] = [output["masks"]["edge"] for _ in range(len(output["preds"]["edge"]))]
+                    output["labels"]["edge"] = [output["labels"]["edge"] for _ in range(len(output["preds"]["edge"]))]
                     loss, logging = loss_func(preds, labels, masks)
                     loss_mask = masks["edge"]
+                elif isinstance(loss_func, PureTagMultiLossFactory):
+                    loss, logging = loss_func(preds, labels, masks, output["graph"])
+                    loss_mask = masks["edge"]
+
                 elif isinstance(loss_func, (ClassMultiLossFactory, ClassMPNLossFactory)):
                     loss_mask = masks["edge"].detach()
                     edge_masks = []

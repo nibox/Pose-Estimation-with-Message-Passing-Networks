@@ -76,9 +76,7 @@ def main():
     model = get_upper_bound_model(config, device=device)
     model.eval()
 
-    train_ids, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))
-    ids = np.concatenate([train_ids, valid_ids])
-    valid_ids = np.random.choice(valid_ids, 100, replace=False)
+    _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))
 
     heatmap_generator = [HeatmapGenerator(128, 17, 2), HeatmapGenerator(256, 17, 2)]
     transforms, _ = transforms_hr_eval(config)

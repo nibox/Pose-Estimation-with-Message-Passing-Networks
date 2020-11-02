@@ -14,7 +14,7 @@ from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, JointsGen
 from Utils import pred_to_person_debug, pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics, subgraph_mask, one_hot_encode, topk_accuracy
 from Models.PoseEstimation import get_pose_model  #, get_pose_with_ref_model
 from Utils.transformations import reverse_affine_map
-from Utils.transforms import transforms_hg_eval, transforms_hr_eval
+from Utils.transforms import transforms_to_tensor
 
 
 def mpn_match_by_tag(joint_det, tag_k, scores, params):
@@ -106,56 +106,26 @@ def mpn_match_by_tag(joint_det, tag_k, scores, params):
 
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
-    dataset_path = "../../storage/user/kistern/coco"
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     ######################################
 
     config_dir = "hybrid_class_agnostic_end2end"
-    # config_dir = "node_classification_from_scratch"
-    # config_dir = "regression_mini"
-    # config_dir = "train"
-    # config_dir = "node_classification_from_scratch"
     config_name = "model_56_1_0_6_0_16_1"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
-    eval_writer = EvalWriter(config, fname="runtime_test.txt")
+    eval_writer = EvalWriter(config, fname="eval_single_scale.txt")
 
-    if config.TEST.SPLIT == "mini":
-        train_ids, valid_ids = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))
-        assert len(set(train_ids).intersection(set(valid_ids))) == 0
 
-        transforms = transforms_hg_eval(config)
-        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="train",
-                                    img_ids=valid_ids, transforms=transforms)
-    elif config.TEST.SPLIT == "mini_real":
-        train_ids, valid_ids = pickle.load(open("tmp/mini_real_train_valid_split_1.p", "rb"))
-        assert len(set(train_ids).intersection(set(valid_ids))) == 0
-        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="val", img_ids=valid_ids)
-    elif config.TEST.SPLIT == "princeton":
-        train_ids, valid_ids = pickle.load(open("tmp/princeton_split.p", "rb"))
-        assert len(set(train_ids).intersection(set(valid_ids))) == 0
-        transforms = transforms_hg_eval(config)
-        eval_set = CocoKeypoints_hg(dataset_path, mini=True, seed=0, mode="train", img_ids=valid_ids,
-                                    transforms=transforms, mask_crowds=False)
-    elif config.TEST.SPLIT == "coco_17_mini":
-        _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
-        heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
-        joint_generator = [JointsGenerator(30, 17, 128, True),
-                           JointsGenerator(30, 17, 256, True)]
-        transforms, _ = transforms_hr_eval(config)
-        eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
-                                    transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
-                                    joint_generator=joint_generator)
-    else:
-        raise NotImplementedError
+    heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
+    joint_generator = [JointsGenerator(30, 17, 128, True),
+                       JointsGenerator(30, 17, 256, True)]
+    transforms, _ = transforms_to_tensor(config)
+    scaling_type = "short_with_resize" if config.TEST.PROJECT2IMAGE else "short"
+    eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=False, seed=0, mode="val", img_ids=None, year=17,
+                                transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
+                                filter_empty=False, joint_generator=joint_generator)
 
-    """
-    if config.MODEL.WITH_LOCATION_REFINE:
-        model = get_pose_with_ref_model(config, device)
-    else:
-        model = get_pose_model(config, device)
-    # """
     model = get_pose_model(config, device)
     state_dict = torch.load(config.MODEL.PRETRAINED)
     model.load_state_dict(state_dict["model_state_dict"])
@@ -167,34 +137,23 @@ def main():
     # baseline : predicting full connections
     # baseline: upper bound
 
-    # eval model
-    eval_node = {"acc": [], "prec": [], "rec": [], "f1": []}
-    eval_edge = {"acc": [], "prec": [], "rec": [], "f1": []}
-    eval_edge_masked = {"acc": [], "prec": [], "rec": [], "f1": []}
-    eval_node_per_type = {i: {"acc": [], "prec": [], "rec": [], "f1": []} for i in range(17)}
-    eval_roc_auc = {"node": {"pred": [], "label": [], "class": []}, "edge": None}
-    eval_classes_baseline_acc = []
-    eval_classes_acc = []
-    eval_classes_top2_acc = []
-    eval_joint_error_types = {"errors": [], "groups": [], "num_free_joints": []}
-    def merge_dicts(dict_1, dict_2):
-        for key in dict_1.keys():
-            dict_1[key].append(dict_2[key])
-        return dict_1
-
     anns = []
     avg_time = []
     eval_ids = []
-    imgs_fully_det = []
+    num_iter = len(eval_set)
     with torch.no_grad():
-        for i in tqdm(range(len(eval_set))):
+        for i in tqdm(range(num_iter)):
             eval_ids.append(eval_set.img_ids[i])
 
             img, _, masks, keypoints, factors, _ = eval_set[i]
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
-            scoremaps, output = model(img, keypoints, masks, factors, with_logits=True)
+            if keypoints.sum() == 0.0:
+                keypoints = None
+                factors = None
+
+            scoremaps, output = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, config, keypoints, factors)
             preds_nodes, preds_tags, preds_classes = output["preds"]["node"], output["preds"]["tag"], output["preds"]["class"]
             node_labels, class_labels = output["labels"]["node"],  output["labels"]["class"]
             joint_det = output["graph"]["nodes"]
@@ -205,31 +164,9 @@ def main():
             preds_nodes = preds_nodes[-1].sigmoid().squeeze()
             preds_tags = preds_tags[-1]
 
-            preds_classes_gt = one_hot_encode(class_labels, 17, torch.float) if class_labels is not None else None
-            # preds_classes[node_labels == 1.0] = preds_classes_gt[node_labels == 1.0]
-            preds_baseline_class = joint_det[:, 2]
-            preds_baseline_class_one_hot = one_hot_encode(preds_baseline_class, 17, torch.float)
-            # preds_baseline_class_one_hot[node_labels!=1.0] = preds_classes[node_labels!=1.0]
-            # preds_classes[node_labels==1.0] = preds_baseline_class_one_hot[node_labels==1.0]
-
-            result_nodes = torch.where(preds_nodes < config.MODEL.MPN.NODE_THRESHOLD, torch.zeros_like(preds_nodes), torch.ones_like(preds_nodes))
-            n, _, _, _ = num_non_detected_points(joint_det.cpu(), keypoints[0].cpu(), factors[0].cpu())
-
-            eval_roc_auc["node"]["pred"] += list(preds_nodes.cpu().numpy())
-            eval_roc_auc["node"]["label"] += list(node_labels.cpu().numpy())
-            eval_roc_auc["node"]["class"] += list(preds_classes.argmax(dim=1).cpu().numpy())
-
-
-            eval_node = merge_dicts(eval_node, calc_metrics(result_nodes, node_labels))
-            if preds_classes is not None:
-                eval_classes_baseline_acc.append(calc_metrics(preds_baseline_class, class_labels, node_labels, 17)["acc"])
-                eval_classes_acc.append(calc_metrics(preds_classes.argmax(dim=1), class_labels, node_labels, 17)["acc"])
-                eval_classes_top2_acc.append(topk_accuracy(preds_classes, class_labels, 2, node_labels))
-
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
-
             t1 = time.time()
-            ann = perd_to_ann(scoremaps[0], preds_tags, joint_det, joint_scores, img_info, int(eval_set.img_ids[i]), config.DATASET.SCALING_TYPE, preds_classes,
+            ann = perd_to_ann(scoremaps[0], preds_tags, joint_det, joint_scores, img_info, int(eval_set.img_ids[i]), scaling_type, preds_classes,
                               tags[0])
             t2 = time.time()
             avg_time.append(t2-t1)
@@ -242,11 +179,6 @@ def main():
         print(f"Average time: {np.mean(avg_time)}")
         eval_writer.eval_coco(eval_set.coco, anns, np.array(eval_ids), "General Evaluation", "kpt_det.json")
 
-        eval_writer.eval_metrics(eval_node, "Node metrics")
-        eval_writer.eval_metric(eval_classes_baseline_acc, "Type classification using backbone detections as baseline")
-        eval_writer.eval_metric(eval_classes_acc, "Type classification")
-        eval_writer.eval_metric(eval_classes_top2_acc, "Type classification top 2")
-        eval_writer.eval_roc_auc(eval_roc_auc, "Roc Auc scores")
         eval_writer.close()
 
 

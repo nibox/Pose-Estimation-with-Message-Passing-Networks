@@ -148,6 +148,12 @@ def main():
         transforms, _ = transforms_hr_eval(config)
         eval_set = CrowdPoseKeypoints(config.DATASET.ROOT, mini=True, seed=0, mode="val", transforms=transforms,
                                      heatmap_generator=heatmap_generator, joint_generator=joint_generator)
+    elif config.UB.SPLIT == "crowd_pose_test":
+        heatmap_generator = [HeatmapGenerator(128, 14, 2), HeatmapGenerator(256, 14, 2)]
+        joint_generator = [JointsGenerator(30, 14, 128, True), JointsGenerator(30, 14, 256, True)]
+        transforms, _ = transforms_hr_eval(config)
+        eval_set = CrowdPoseKeypoints(config.DATASET.ROOT, mini=True, seed=0, mode="test", transforms=transforms,
+                                      heatmap_generator=heatmap_generator, joint_generator=joint_generator)
     else:
         raise NotImplementedError
 
@@ -210,7 +216,7 @@ def main():
                 persons_pred_cc = np.zeros([1, 17, 3])
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
-            persons_pred_orig_cc = reverse_affine_map(persons_pred_cc.copy(), (img_info["width"], img_info["height"]),
+            persons_pred_orig_cc = reverse_affine_map(persons_pred_cc.copy(), (img_info["height"], img_info["width"]),
                                                       config.DATASET.INPUT_SIZE, scaling_type=config.DATASET.SCALING_TYPE)
 
             ann_cc = gen_ann_format(persons_pred_orig_cc, eval_set.img_ids[i])

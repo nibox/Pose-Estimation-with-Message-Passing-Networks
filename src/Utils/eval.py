@@ -9,19 +9,36 @@ class EvalWriter(object):
     def __init__(self, config, fname=None):
         th = int(config.MODEL.MPN.NODE_THRESHOLD * 100)
         self.dir = config.LOG_DIR
+        self.dataset = config.DATASET.DATASET
+        self.num_joints = config.DATASET.NUM_JOINTS
+        assert self.dataset in ["coco", "crowd_pose"]
         if fname is None:
             self.f = open(config.LOG_DIR + f"/eval_{th:g}.txt", "w")
         else:
             self.f = open(config.LOG_DIR + "/" + f"{fname}", "w")
     def eval_coco(self, coco, anns, ids, description, dt_file_name="dt.json"):
         print(description)
-        stats = coco_eval(coco, anns, ids, tmp_dir=self.dir, dt_file_name=dt_file_name)
-        self.f.write(description + "\n")
-        self.f.write(f"AP       : {stats[0]: 3f} \n")
-        self.f.write(f"AP    0.5: {stats[1]: 3f} \n")
-        self.f.write(f"AP   0.75: {stats[2]: 3f} \n")
-        self.f.write(f"AP medium: {stats[3]: 3f} \n")
-        self.f.write(f"AP  large: {stats[4]: 3f} \n")
+        if self.dataset == "coco":
+            stats = coco_eval(coco, anns, ids, tmp_dir=self.dir, dt_file_name=dt_file_name)
+            self.f.write(description + "\n")
+            self.f.write(f"AP       : {stats[0]: 3f} \n")
+            self.f.write(f"AP    0.5: {stats[1]: 3f} \n")
+            self.f.write(f"AP   0.75: {stats[2]: 3f} \n")
+            self.f.write(f"AP medium: {stats[3]: 3f} \n")
+            self.f.write(f"AP  large: {stats[4]: 3f} \n")
+        else:
+            stats = crowd_pose_eval(coco, anns, ids, tmp_dir=self.dir, dt_file_name=dt_file_name)
+            self.f.write(description + "\n")
+            self.f.write(f"AP         : {stats[0]: 3f} \n")
+            self.f.write(f"AP      0.5: {stats[1]: 3f} \n")
+            self.f.write(f"AP     0.75: {stats[2]: 3f} \n")
+            self.f.write(f"AR         : {stats[5]: 3f} \n")
+            self.f.write(f"AR      0.5: {stats[6]: 3f} \n")
+            self.f.write(f"AR     0.75: {stats[7]: 3f} \n")
+            self.f.write(f"AP     easy: {stats[8]: 3f} \n")
+            self.f.write(f"AR   medium: {stats[9]: 3f} \n")
+            self.f.write(f"AR     hard: {stats[10]: 3f} \n")
+
 
     def eval_metrics(self, eval_dict, descirption):
         for k in eval_dict.keys():
@@ -39,15 +56,20 @@ class EvalWriter(object):
         self.f.write(str(value) + "\n")
 
     def eval_part_metrics(self, eval_dict, description):
-        part_labels = ['nose','eye_l','eye_r','ear_l','ear_r',
-                       'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
-                       'hip_l','hip_r','kne_l','kne_r','ank_l','ank_r']
-        for i in range(17):
+        if self.dataset == "coco":
+            part_labels = ['nose','eye_l','eye_r','ear_l','ear_r',
+                           'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
+                           'hip_l','hip_r','kne_l','kne_r','ank_l','ank_r']
+        else:
+            part_labels = [
+                           'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
+                           'hip_l','hip_r','kne_l','kne_r','ank_l','ank_r', "head_1", "head_2"]
+        for i in range(self.num_joints):
             for k in eval_dict[i].keys():
                 eval_dict[i][k] = np.mean(eval_dict[i][k])
         print(description)
         self.f.write(description + " \n")
-        for i in range(17):
+        for i in range(self.num_joints):
             string = f"{part_labels[i]} acc: {eval_dict[i]['acc']:3f} prec: {eval_dict[i]['prec']:3f} rec: {eval_dict[i]['rec']:3f} f1: {eval_dict[i]['f1']:3f}"
             print(string)
             self.f.write(string + "\n")
@@ -80,7 +102,7 @@ class EvalWriter(object):
         part_labels = ['nose','eye_l','eye_r','ear_l','ear_r',
                        'sho_l','sho_r','elb_l','elb_r','wri_l','wri_r',
                        'hip_l','hip_r','kne_l','kne_r','ank_l','ank_r']
-        if eval_dict["node"] is not None:
+        if eval_dict["node"] is not None or len(eval_dict["node"]) != 0:
             pred = np.array(eval_dict["node"]["pred"])
             label = np.array(eval_dict["node"]["label"]).astype(np.int)
             score = roc_auc_score(label, pred)
@@ -89,7 +111,7 @@ class EvalWriter(object):
             self.f.write(string + "\n")
 
             classes = np.array(eval_dict["node"]["class"])
-            for i in range(17):
+            for i in range(self.num_joints):
                 mask = classes == i
                 class_score = roc_auc_score(label[mask], pred[mask])
                 string = f"{part_labels[i]}  roc_auc: {class_score}"
@@ -105,7 +127,7 @@ class EvalWriter(object):
         self.f.close()
 
 
-def coco_eval(coco, dt, image_ids, tmp_dir="tmp", dt_file_name="dt.json", log=True):
+def coco_eval(coco, dt, image_ids, tmp_dir="tmp", dt_file_name="dt.json"):
     """
     from https://github.com/princeton-vl/pose-ae-train
     Evaluate the result with COCO API
@@ -127,6 +149,27 @@ def coco_eval(coco, dt, image_ids, tmp_dir="tmp", dt_file_name="dt.json", log=Tr
     return coco_eval.stats
 
 
+def crowd_pose_eval(coco, dt, image_ids, tmp_dir="tmp", dt_file_name="dt.json"):
+    """
+    from https://github.com/princeton-vl/pose-ae-train
+    Evaluate the result with COCO API
+    """
+    from crowdposetools.cocoeval import COCOeval
+
+    import json
+    with open(tmp_dir + f'/{dt_file_name}', 'w') as f:
+        json.dump(sum(dt, []), f)
+
+    # load coco
+    coco_dets = coco.loadRes(tmp_dir + f'/{dt_file_name}')
+    coco_eval = COCOeval(coco, coco_dets, "keypoints")
+    coco_eval.params.imgIds = image_ids
+    coco_eval.params.catIds = [1]
+    coco_eval.evaluate()
+    coco_eval.accumulate()
+    coco_eval.summarize()
+    return coco_eval.stats
+
 def gen_ann_format(pred, image_id=0):
     """
     from https://github.com/princeton-vl/pose-ae-train
@@ -135,11 +178,12 @@ def gen_ann_format(pred, image_id=0):
     ans = []
     for i in range(len(pred)):
         person = pred[i]
-        # some score is used, not sure how it is used for evaluation.
         # todo what does the score do?
         # how are missing joints handled ?
         tmp = {'image_id': int(image_id), "category_id": 1, "keypoints": [], "score": 1.0}
         score = 0.0
+        score = float(person[person[:, 2] > 0.09, 2].mean())
+
         for j in range(len(person)):
             tmp["keypoints"] += [float(person[j, 0]), float(person[j, 1]), float(person[j, 2])]
             score += float(person[j, 2])

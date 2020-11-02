@@ -1,5 +1,6 @@
 import torch
 from .layers import _make_mlp, MPLayer
+from .utils import sum_node_types
 
 
 class ClassificationMPNSimple(torch.nn.Module):
@@ -24,6 +25,7 @@ class ClassificationMPNSimple(torch.nn.Module):
 
     def forward(self, x, edge_attr, edge_index, **kwargs):
 
+        node_types = sum_node_types("not", kwargs["node_types"])
         node_features = self.node_embedding(x)
         edge_features = self.edge_embedding(edge_attr)
 
@@ -36,15 +38,15 @@ class ClassificationMPNSimple(torch.nn.Module):
             if self.use_skip_connections:
                 node_features = torch.cat([node_features_initial, node_features], dim=1)
                 edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
-            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index)
+            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index, node_types=node_types)
         preds_node.append(self.node_classification(node_features).squeeze())
 
         for i in range(self.edge_steps):
             if self.use_skip_connections:
                 node_features = torch.cat([node_features_initial, node_features], dim=1)
                 edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
-            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index)
+            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index, node_types=node_types)
 
         preds_edge.append(self.edge_classification(edge_features).squeeze())
 
-        return preds_edge, preds_node, None
+        return preds_edge, preds_node, None, [None]

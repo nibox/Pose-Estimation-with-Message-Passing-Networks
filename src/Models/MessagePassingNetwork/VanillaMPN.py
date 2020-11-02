@@ -3,7 +3,8 @@ import torch.nn as nn
 from torch_geometric.data import Data
 from torch_geometric.nn import MessagePassing
 from torch_geometric.utils import add_self_loops, degree
-from .layers import _make_mlp
+from .layers import _make_mlp, MPLayer
+from .utils import sum_node_types
 
 
 class PerInvMLP(nn.Module):
@@ -79,21 +80,22 @@ class VanillaMPN(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
         self.use_skip_connections = config.SKIP
-        self.mpn = VanillaMPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
+        self.mpn_node_cls = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
                                   aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP)
 
         self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, bn=config.BN,
                                         end_with_relu=config.NODE_EMB.END_WITH_RELU)
         self.node_embedding = _make_mlp(config.NODE_INPUT_DIM, config.NODE_EMB.OUTPUT_SIZES, bn=config.BN,
                                         end_with_relu=config.NODE_EMB.END_WITH_RELU)
-        self.classification = _make_mlp(config.EDGE_FEATURE_DIM, config.CLASS.OUTPUT_SIZES, bn=config.BN)
+        self.edge_classification = _make_mlp(config.EDGE_FEATURE_DIM, config.EDGE_CLASS.OUTPUT_SIZES, bn=config.BN)
 
         self.aux_loss_steps = config.AUX_LOSS_STEPS
 
-        self.steps = config.STEPS
+        self.edge_steps = config.STEPS
 
     def forward(self, x, edge_attr, edge_index, **kwargs):
 
+        node_types = sum_node_types("not", kwargs["node_types"])
         node_features = self.node_embedding(x)
         edge_features = self.edge_embedding(edge_attr)
 
@@ -101,13 +103,15 @@ class VanillaMPN(torch.nn.Module):
         edge_features_initial = edge_features
 
         preds_edge = []
-        for i in range(self.steps):
+        for i in range(self.edge_steps):
             if self.use_skip_connections:
                 node_features = torch.cat([node_features_initial, node_features], dim=1)
                 edge_features = torch.cat([edge_features_initial, edge_features], dim=1)
+            node_features, edge_features = self.mpn_node_cls(node_features, edge_features, edge_index,
+                                                             node_types=node_types)
+            if i >= self.edge_steps - self.aux_loss_steps - 1:
+                preds_edge.append(self.edge_classification(edge_features).squeeze())
 
-            node_features, edge_features = self.mpn(node_features, edge_features, edge_index)
-            if i >= self.steps - self.aux_loss_steps - 1:
-                preds_edge.append(self.classification(edge_features).squeeze())
 
-        return preds_edge, None
+        return preds_edge, [None], None, [None]
+

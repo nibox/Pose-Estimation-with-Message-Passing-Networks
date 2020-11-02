@@ -175,7 +175,8 @@ class TypeAwareMPNLayer(MessagePassing):
                                           )
 
         elif edge_mlp == "per_type":
-            self.mlp_edge = TypeAwareEdgeUpdate(node_feature_dim * node_factor, edge_feature_dim * node_factor, edge_feature_hidden)
+            self.mlp_edge = TypeAwareEdgeUpdate(node_feature_dim * node_factor, edge_feature_dim * node_factor, edge_feature_hidden,
+                                                self.num_types)
 
         self.mlp_node = TypeAwareNodeUpdate(node_feature_dim * node_factor + edge_feature_dim, node_feature_dim)
 
@@ -267,15 +268,16 @@ class TypeAwareNodeUpdate(nn.Module):
 
 class TypeAwareEdgeUpdate(nn.Module):
 
-    def __init__(self, node_feature_dim, edge_feature_dim, output_dim):
+    def __init__(self, node_feature_dim, edge_feature_dim, output_dim, num_joints):
         super().__init__()
-        self.layer_1 = nn.ModuleList([nn.Linear(node_feature_dim, output_dim) for i in range(17)])
-        self.layer_2 = nn.ModuleList([nn.Linear(node_feature_dim, output_dim) for i in range(17)])
+        self.layer_1 = nn.ModuleList([nn.Linear(node_feature_dim, output_dim) for i in range(num_joints)])
+        self.layer_2 = nn.ModuleList([nn.Linear(node_feature_dim, output_dim) for i in range(num_joints)])
         self.edge_layer = nn.Linear(edge_feature_dim, output_dim)
         self.out = nn.Sequential(nn.ReLU(inplace=True),
                                  nn.Linear(3 * output_dim, output_dim),
                                  nn.ReLU(inplace=True))
         self.output_dim = output_dim
+        self.num_joints = num_joints
 
     def forward(self, nodes_1, nodes_2, edges, node_types_1, node_types_2):
         num_nodes = nodes_1.shape[0]
@@ -283,10 +285,10 @@ class TypeAwareEdgeUpdate(nn.Module):
 
         tmp_1 = torch.zeros(num_nodes, self.output_dim, dtype=torch.float32, device=device)
         tmp_2 = torch.zeros(num_nodes, self.output_dim, dtype=torch.float32, device=device)
-        for i in range(17):
+        for i in range(self.num_joints):
             types_1 = node_types_1 == i
             tmp_1[types_1] = self.layer_1[i](nodes_1[types_1])
-        for i in range(17):
+        for i in range(self.num_joints):
             types_2 = node_types_2 == i
             tmp_2[types_2] = self.layer_2[i](nodes_2[types_2])
         edges = self.edge_layer(edges)

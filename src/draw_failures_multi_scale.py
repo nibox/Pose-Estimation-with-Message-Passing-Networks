@@ -49,6 +49,7 @@ def main():
     # baseline: upper bound
 
     # eval model
+    scaling_type = "short_with_resize" if config.TEST.PROJECT2IMAGE else "short"
 
     num_iter = 50
     with torch.no_grad():
@@ -62,9 +63,11 @@ def main():
 
             if keypoints.sum() == 0.0:
                 keypoints = None
+                factors = None
 
-            scoremaps, output = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, config)
+            scoremaps, output = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, config, keypoints, factors)
             preds_nodes, preds_edges, preds_classes = output["preds"]["node"], output["preds"]["edge"], output["preds"]["class"]
+            node_labels, edge_labels, class_labels = output["labels"]["node"], output["labels"]["edge"], output["labels"]["class"]
             joint_det, edge_index = output["graph"]["nodes"], output["graph"]["edge_index"]
             joint_scores = output["graph"]["detector_scores"]
 
@@ -77,38 +80,54 @@ def main():
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
-            true_positive_idx = preds_nodes > 0.1
-            edge_index, pred = subgraph(true_positive_idx, edge_index, preds_edges)
-            if edge_index.shape[1] != 0:
-                persons_pred, _, _ = pred_to_person(joint_det, preds_nodes, edge_index, pred, preds_classes, "GAEC")
+            persons_pred = compute_poses(edge_index, joint_det, preds_classes, preds_edges, preds_nodes, scoremaps)
+            if keypoints is not None:
+                # preds_baseline_class = joint_det[:, 2]
+                class_labels_one_hot = one_hot_encode(class_labels, 17, torch.float)
+                persons_pred_gt = compute_poses(edge_index, joint_det, class_labels_one_hot, edge_labels, node_labels, scoremaps)
             else:
-                persons_pred = np.zeros([1, 17, 3])
-            # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
-            persons_pred = adjust(persons_pred, scoremaps[0])
+                persons_pred_gt = None
 
             img = transforms_inv(img.cpu().squeeze())
             img = np.array(img)
             joint_det = joint_det.cpu().numpy()
             persons_pred = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]),
-                                                   scaling_type="short_with_resize",
-                                                   min_scale=0.5)
+                                                   scaling_type=scaling_type,
+                                                   min_scale=min(config.TEST.SCALE_FACTOR))
             joint_det = reverse_affine_map_points(joint_det.copy(), (img_info["width"], img_info["height"]),
-                                              scaling_type="short_with_resize",
-                                              min_scale=0.5)
+                                              scaling_type=scaling_type,
+                                              min_scale=min(config.TEST.SCALE_FACTOR))
             draw_poses(img.copy(), persons_pred, f"{output_dir}/{i}_{img_id}_pred.png", output_size=512)
             # draw_poses(img, person_label, f"{output_dir}/{i}_{img_id}_gt_labels.png", output_size=output_size)
             if keypoints is not None:
                 keypoints = keypoints[0].cpu().numpy()
                 keypoints = keypoints[keypoints[:, :, 2].sum(axis=1) != 0]
-                keypoints, factors = multiscale_keypoints(keypoints, factors, img, 512, 1.0, 0.5)
-                keypoints = keypoints.astype(np.float32)
+                keypoints, factors = multiscale_keypoints(keypoints[None], factors, img, 512, 1.0, min(config.TEST.SCALE_FACTOR),
+                                                          config.TEST.PROJECT2IMAGE)
+                keypoints = keypoints.astype(np.float32).squeeze()
 
                 keypoints = reverse_affine_map(keypoints.copy(), (img_info["width"], img_info["height"]),
-                                               scaling_type="short_with_resize",
-                                               min_scale=0.5)
+                                               scaling_type=scaling_type,
+                                               min_scale=min(config.TEST.SCALE_FACTOR))
+                persons_pred_gt = reverse_affine_map(persons_pred_gt.copy(), (img_info["width"], img_info["height"]),
+                                                  scaling_type=scaling_type,
+                                                  min_scale=min(config.TEST.SCALE_FACTOR))
+                draw_poses(img.copy(), persons_pred_gt, f"{output_dir}/{i}_{img_id}_pred_gt.png", output_size=512)
 
                 draw_poses(img.copy(), keypoints, f"{output_dir}/{i}_{img_id}_gt.png", output_size=512)
                 draw_detection(img.copy(), joint_det.copy(), keypoints, fname=f"{output_dir}/{i}_{img_id}_det.png", output_size=512)
+
+
+def compute_poses(edge_index, joint_det, preds_classes, preds_edges, preds_nodes, scoremaps):
+    true_positive_idx = preds_nodes > 0.1
+    edge_index, pred = subgraph(true_positive_idx, edge_index, preds_edges)
+    if edge_index.shape[1] != 0:
+        persons_pred, _, _ = pred_to_person(joint_det, preds_nodes, edge_index, pred, preds_classes, "GAEC")
+    else:
+        persons_pred = np.zeros([1, 17, 3])
+    # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
+    persons_pred = adjust(persons_pred, scoremaps[0])
+    return persons_pred
 
 
 def perd_to_person(scoremaps, joint_det, joint_scores, edge_index, pred, cc_method, th, preds_classes, score_map_scores):

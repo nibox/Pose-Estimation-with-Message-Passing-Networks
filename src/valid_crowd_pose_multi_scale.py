@@ -87,7 +87,7 @@ def main():
             joint_scores = output["graph"]["detector_scores"]
             tags = output["graph"]["tags"]
 
-            preds_nodes = preds_nodes[-1].sigmoid() if preds_nodes[-1] is not None else joint_det[:, 2]
+            preds_nodes = preds_nodes[-1].sigmoid() if preds_nodes[-1] is not None else joint_scores
             preds_edges = preds_edges[-1].sigmoid().squeeze() if preds_edges[-1] is not None else None
             preds_classes = preds_classes[-1].softmax(dim=1) if preds_classes is not None else None
             preds_baseline_class = joint_det[:, 2]
@@ -125,7 +125,7 @@ def main():
             ann = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, (img.shape[2], img.shape[3]), config.DATASET.INPUT_SIZE,
                               int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD, scaling_type,
                               min(config.TEST.SCALE_FACTOR), config.TEST.ADJUST, config.MODEL.MPN.NODE_THRESHOLD,
-                              preds_classes, config.TEST.WITH_REFINE, joint_scores, False)
+                              preds_classes, config.TEST.WITH_REFINE, joint_scores, False, config.TEST.REFINE_COMP)
 
             if ann is not None:
                 anns.append(ann)
@@ -143,17 +143,20 @@ def main():
 
 
 def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, image_shape, input_size, img_id, cc_method, scaling_type,
-                min_scale, adjustment, th, preds_classes, with_refine, score_map_scores, with_filter):
+                min_scale, adjustment, th, preds_classes, with_refine, score_map_scores, with_filter, refine_comparision):
     if (score_map_scores > 0.1).sum() < 1:
         return None
+    assert not (refine_comparision and with_refine)
     true_positive_idx = joint_scores > th
+    if refine_comparision:
+        true_positive_idx = true_positive_idx & (score_map_scores > th)
     edge_index, pred = subgraph(true_positive_idx, edge_index, pred)
     if edge_index.shape[1] != 0:
         pred[joint_det[edge_index[0, :], 2] == joint_det[
            edge_index[1, :], 2]] = 0.0  # set edge predictions of same types to zero
         persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, preds_classes, cc_method, 14)
     else:
-        persons_pred = np.zeros([1, 17, 3])
+        persons_pred = np.zeros([1, 14, 3])
     # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
     if len(persons_pred.shape) == 1:  # this means none persons were detected
         return None

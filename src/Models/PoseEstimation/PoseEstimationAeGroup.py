@@ -116,7 +116,7 @@ class PoseEstimationAeGroup(nn.Module):
                 )
             ]
         )
-        image = img[0].cpu().permute(1, 2, 0).numpy() # prepair for transformation
+        image = img[0].cpu().permute(1, 2, 0).numpy()  # prepair for transformation
 
         base_size, center, scale = get_multi_scale_size(
             image, config.DATASET.INPUT_SIZE, 1.0, min(scales)

@@ -13,8 +13,11 @@ from .NodeClassificationMPNFPConstrained import NodeClassificationMPNFPConstrain
 from .NodeClassificationMPNWithBackground import NodeClassificationMPNWithBackground
 from .NodeClassificationMPNTypeConstrained import NodeClassificationMPNTypeConstrained
 from .NodeClassificationMPNGroupBased import NodeClassificationMPNGroupBased
+from .NodeClassificationMPNGroupBasedHierach import NodeClassificationMPNGroupBasedHierach
 from .NodeClassificationMPNSelftAttention import NodeClassificationMPNSelfAttention
 from .NodeClassificationMPNTag import NodeClassificationMPNTag
+from .MPNTag import MPNTag
+from .LogisticEdgeClassifier import LogisticEdgeClassifier
 
 # from .NaiveRefinement import NaiveRefinement
 # from .NaiveRefinementBaseline import NaiveRefinementBaseline
@@ -50,17 +53,16 @@ def get_mpn_model(config, **kwargs):
         return NodeClassificationMPNTypeConstrained(config)
     elif config.NAME == "NodeClassificationMPNTag":
         return NodeClassificationMPNTag(config)
+    elif config.NAME == "MPNTag":
+        return MPNTag(config)
+    elif config.NAME == "LogisticEdgeClassifier":
+        return LogisticEdgeClassifier(config)
     elif config.NAME == "NodeClassificationMPNGroupBased":
         return NodeClassificationMPNGroupBased(config)
+    elif config.NAME == "NodeClassificationMPNGroupBasedHierach":
+        return NodeClassificationMPNGroupBasedHierach(config)
     elif config.NAME == "JointTypeClassification":
         return JointTypeClassification(config)
     else:
         raise NotImplementedError
 
-"""
-def get_refinement_model(config):
-    if config.NAME == "NaiveRefinement":
-        return NaiveRefinement(config)
-    elif config.NAME == "NaiveRefinementBaseline":
-        return NaiveRefinementBaseline(config)
-# """

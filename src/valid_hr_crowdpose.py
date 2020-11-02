@@ -68,7 +68,6 @@ def coco_eval(coco, dt, image_ids, tmp_dir="tmp", log=True):
     coco_eval = COCOeval(coco, coco_dets, "keypoints")
     coco_eval.params.imgIds = image_ids
     coco_eval.params.catIds = [1]
-    coco_eval.params.useSegm = None
     coco_eval.evaluate()
     coco_eval.accumulate()
     coco_eval.summarize()
@@ -99,8 +98,6 @@ def main():
     model.eval()
 
     anns = []
-    anns_with_people = []
-    imgs_with_people = []
 
     eval_ids = []
     num_iter = len(eval_set)
@@ -110,25 +107,15 @@ def main():
 
             img, _, masks, keypoints, factors, _ = eval_set[i]
             img = img.to(device)[None]
-            masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
             heatmaps, tags = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, device, config)
 
-            grouped, scores = parser.parse(heatmaps, tags, adjust=True, refine=True)
-
-            img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
-
+            grouped, scores = parser.parse(heatmaps, tags, adjust=True, refine=False)
 
             if len(grouped[0]) != 0:
                 ann, debug_tmp = perd_to_ann(grouped[0], scores, (img.shape[2], img.shape[3]), int(eval_set.img_ids[i]), config.DATASET.INPUT_SIZE, "short_with_resize",
                                   min(config.TEST.SCALE_FACTOR))
                 anns.append(ann)
-                if keypoints.sum() != 0:
-                    anns_with_people.append(ann)
-
-            if keypoints.sum() != 0:
-                imgs_with_people.append(int(eval_set.img_ids[i]))
-
 
         eval_writer.eval_coco(eval_set.coco, anns, np.array(eval_ids), "General Evaluation")
         eval_writer.close()

@@ -30,7 +30,7 @@ def main():
 
     config_dir = "hourglass"
     config_name = "model_70"
-    file_name = "test"
+    file_name = "ochuman_single_scale_flip_confirmation"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
     eval_writer = EvalWriter(config, fname=f"{file_name}.txt")
@@ -38,7 +38,7 @@ def main():
     transforms, _ = transforms_to_tensor(config)
     eval_set = OCHumans('../../storage/user/kistern/OCHuman', seed=0, mode="val",
                         transforms=transforms, mask_crowds=False)
-    # scaling_type = "long_with" if config.TEST.PROJECT2IMAGE else "long"
+    # scaling_type = "long_with_multiscale" if config.TEST.PROJECT2IMAGE else "long"
     scaling_type = "long"
 
     model = get_pose_model(config, device)
@@ -132,13 +132,13 @@ def main():
 def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_info, img_id, cc_method, scaling_type,
                 min_scale, adjustment, th, preds_classes, with_refine, score_map_scores, with_filter):
     if (score_map_scores > 0.1).sum() < 1:
-        return None
+       return None
     true_positive_idx = joint_scores > th
     edge_index, pred = subgraph(true_positive_idx, edge_index, pred)
     if edge_index.shape[1] != 0:
         pred[joint_det[edge_index[0, :], 2] == joint_det[
             edge_index[1, :], 2]] = 0.0  # set edge predictions of same types to zero
-        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, preds_classes, cc_method)
+        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, preds_classes, cc_method, 17)
     else:
         persons_pred = np.zeros([1, 17, 3])
     # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
@@ -148,7 +148,7 @@ def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_
 
     if with_filter:
         max_scores = persons_pred[:, :, 2].max(axis=1)
-        keep = max_scores > 0.30
+        keep = max_scores > 0.25
         persons_pred = persons_pred[keep]
         if persons_pred.shape[0] == 0:
             return None
@@ -160,7 +160,7 @@ def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_
         tags = tags.cpu().numpy()
         scoremaps = scoremaps.cpu().numpy()
         persons_pred = refine(scoremaps, tags, persons_pred)
-    persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]), scaling_type=scaling_type,
+    persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]), 512, scaling_type=scaling_type,
                                            min_scale=min_scale)
 
     ann = gen_ann_format(persons_pred_orig, img_id)
