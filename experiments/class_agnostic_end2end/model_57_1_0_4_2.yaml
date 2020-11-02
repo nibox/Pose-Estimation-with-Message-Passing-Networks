@@ -9,11 +9,11 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.0
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real_node/57_1_0"
+LOG_DIR: "../log/PoseEstimationBaseline/Real_node/57_1_0_4_2"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/57_1_0/pose_estimation_3.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/57_1_0_4_2/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -139,14 +139,14 @@ MODEL:
     CHEAT: False
     USE_GT: False
     USE_NEIGHBOURS: False
-    POOL_KERNEL_SIZE: 3 # 3
-    EDGE_LABEL_METHOD: 6
-    MASK_CROWDS: True # True
+    EDGE_LABEL_METHOD: 7
+    MASK_CROWDS: True
     DETECT_THRESHOLD: 0.1
     MATCHING_RADIUS: 0.5
     INCLUSION_RADIUS: 0.75
     GRAPH_TYPE: knn
     CC_METHOD: GAEC
+    NODE_DROPOUT: 0.2
     NORM_NODE_DISTANCE: True
   LOSS:
     NAME: node_edge_loss
@@ -161,7 +161,6 @@ TEST:
   NUM_EVAL: 500
   SPLIT: coco_17_mini
   ADJUST: True
-  FLIP_TEST: False
 
 TRAIN:
   SPLIT: coco_17_full
@@ -170,16 +169,16 @@ TRAIN:
   KP_W_DECAY: 0.0001
   LR_FACTOR: 0.1
   LR_STEP:
-    - 20 # prev on 10, 20 not sure if it will change it or if the original steps are part of the state_dict
+    - 10 # prev on 10, 20 not sure if it will change it or if the original steps are part of the state_dict
     - 30
   BATCH_SIZE: 8
-  START_EPOCH: 25
-  END_EPOCH: 35
-  END_TO_END: True
+  START_EPOCH: 0
+  END_EPOCH: 11
+  END_TO_END: True # True
   USE_LABEL_MASK: True
   USE_BATCH_INDEX: False
   LOSS_REDUCTION: mean
   FREEZE_BN: True
-  KP_FREEZE_MODE: nothing
-  CONTINUE: "../log/PoseEstimationBaseline/Real_node/57_1_0/pose_estimation_3.pth"
+  KP_FREEZE_MODE: nothing # nothing
+  CONTINUE: ""
 

@@ -9,11 +9,11 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.0
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real_node/57_1_0"
+LOG_DIR: "../log/PoseEstimationBaseline/Real/30_2"
 
 MODEL:
   KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/57_1_0/pose_estimation_3.pth"
+  PRETRAINED: "../log/PoseEstimationBaseline/Real/30_2/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -87,73 +87,50 @@ MODEL:
     NUM_JOINTS: 17
     PRETRAINED: '../PretrainedModels/pose_higher_hrnet_w32_512.pth'
     TAG_PER_JOINT: True
-    FEATURE_FUSION: small
+    FEATURE_FUSION: avg
   MPN:
-    NAME: NodeClassificationMPN
+    NAME: VanillaMPN
     STEPS: 10
-    NODE_STEPS: 0
     NODE_INPUT_DIM: 128
     EDGE_INPUT_DIM: 17 + 2
     NODE_FEATURE_DIM: 64
     EDGE_FEATURE_DIM: 64
     EDGE_FEATURE_HIDDEN: 64
     NODE_EMB:
-      BN: True
-      END_WITH_RELU: False
+      END_WITH_RELU: True
       OUTPUT_SIZES:
         - 128
         - 64
         - 64
     EDGE_EMB:
-      BN: True
-      END_WITH_RELU: False
+      END_WITH_RELU: True
       OUTPUT_SIZES:
         - 32
         - 64
         - 64
         - 64
-    EDGE_CLASS:
-      BN: True
-      OUTPUT_SIZES:
-        - 64
-        - 32
-        - 1
-    NODE_CLASS:
-      BN: True
-      OUTPUT_SIZES:
-        - 64
-        - 32
-        - 1
     CLASS:
-      BN: True
       OUTPUT_SIZES:
         - 64
         - 32
-        - 17
+        - 1
     BN: False
     AGGR: max
-    SKIP: True
-    NODE_THRESHOLD: 0.1
+    SKIP: False
   GC:
     NAME: naive_graph_constructor
     CHEAT: False
     USE_GT: False
-    USE_NEIGHBOURS: False
-    POOL_KERNEL_SIZE: 3 # 3
-    EDGE_LABEL_METHOD: 6
-    MASK_CROWDS: True # True
-    DETECT_THRESHOLD: 0.1
-    MATCHING_RADIUS: 0.5
+    USE_NEIGHBOURS: True
+    EDGE_LABEL_METHOD: 4
+    MASK_CROWDS: True
+    DETECT_THRESHOLD: 2.0
+    MATCHING_RADIUS: 0.1
     INCLUSION_RADIUS: 0.75
-    GRAPH_TYPE: knn
+    GRAPH_TYPE: score_based
     CC_METHOD: GAEC
     NORM_NODE_DISTANCE: True
   LOSS:
-    NAME: node_edge_loss
-    LOSS_WEIGHTS:
-      - 1.0
-      - 1.0
-      - 1.0
     USE_FOCAL: True
     FOCAL_GAMMA: 2.0
     FOCAL_ALPHA: 1.0
@@ -161,25 +138,20 @@ TEST:
   NUM_EVAL: 500
   SPLIT: coco_17_mini
   ADJUST: True
-  FLIP_TEST: False
 
 TRAIN:
-  SPLIT: coco_17_full
+  SPLIT: coco_17_mini
   LR: 3e-4
-  KP_LR: 1e-6
-  KP_W_DECAY: 0.0001
   LR_FACTOR: 0.1
   LR_STEP:
-    - 20 # prev on 10, 20 not sure if it will change it or if the original steps are part of the state_dict
-    - 30
+    - 60
+    - 150
   BATCH_SIZE: 8
-  START_EPOCH: 25
-  END_EPOCH: 35
-  END_TO_END: True
+  START_EPOCH: 0
+  END_EPOCH: 100
+  END_TO_END: False
   USE_LABEL_MASK: True
   USE_BATCH_INDEX: False
   LOSS_REDUCTION: mean
   FREEZE_BN: True
-  KP_FREEZE_MODE: nothing
-  CONTINUE: "../log/PoseEstimationBaseline/Real_node/57_1_0/pose_estimation_3.pth"
-
+  CONTINUE: ""

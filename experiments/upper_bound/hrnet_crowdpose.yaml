@@ -1,21 +1,25 @@
+AUTO_RESUME: True
+DATA_DIR: ''
+GPUS: (0,)
+LOG_DIR: "../log/PoseEstimationBaseline/hrnet"
+OUTPUT_DIR: output
+PRINT_FREQ: 100
 DATASET:
-  ROOT: '../../storage/user/kistern/coco'
+  SIGMA: 2
+  DATASET: crowd_pose
+  FLIP: 0.0
+  INPUT_SIZE: 512
+  OUTPUT_SIZE: [128, 256]
   MAX_NUM_PEOPLE: 30
-  SCALING_TYPE: short
-  # training data augmentation
-  MAX_ROTATION : 0
-  MIN_SCALE : 1.0
-  MAX_SCALE : 1.0
-  MAX_TRANSLATE : 40
-  FLIP : 0.0
-
+  MAX_ROTATION: 0
+  MAX_SCALE: 1.0
+  SCALING_TYPE: 'short'
+  MAX_TRANSLATE: 40
+  MIN_SCALE: 1.0
+  NUM_JOINTS: 14
+  ROOT: '../../storage/user/kistern/crowd_pose'
 MODEL:
-  HG:
-    NAME: hourglass
-    PRETRAINED: "../PretrainedModels/pretrained/checkpoint.pth.tar"
-    NSTACK: 4
-    INPUT_DIM: 256
-    OUTPUT_DIM: 68
+  KP: hrnet
   HRNET:
     LOSS:
       NUM_STAGES: 2
@@ -37,8 +41,8 @@ MODEL:
         - 4
         - 4
         NUM_CHANNELS:
-        - 32
-        - 64
+        - 48
+        - 96
         FUSE_METHOD: SUM
       STAGE3:
         NUM_MODULES: 4
@@ -49,9 +53,9 @@ MODEL:
         - 4
         - 4
         NUM_CHANNELS:
-        - 32
-        - 64
-        - 128
+        - 48
+        - 96
+        - 192
         FUSE_METHOD: SUM
       STAGE4:
         NUM_MODULES: 3
@@ -63,29 +67,25 @@ MODEL:
         - 4
         - 4
         NUM_CHANNELS:
-        - 32
-        - 64
-        - 128
-        - 256
+        - 48
+        - 96
+        - 192
+        - 384
         FUSE_METHOD: SUM
       DECONV:
         NUM_DECONVS: 1
         NUM_CHANNELS:
-        - 32
+        - 48
         KERNEL_SIZE:
         - 4
         NUM_BASIC_BLOCKS: 4
         CAT_OUTPUT:
         - True
     NAME: pose_higher_hrnet
-    NUM_JOINTS: 17
-    PRETRAINED: '../PretrainedModels/pose_higher_hrnet_w32_512.pth'
-    # PRETRAINED: '../PretrainedModels/pose_higher_hrnet_w32_512_without_ae_120.pth.tar'
+    NUM_JOINTS: 14
+    PRETRAINED: '../PretrainedModels/pose_higher_hrnet_w48_640_crowdpose.pth.tar'
     TAG_PER_JOINT: True
-    INPUT_SIZE: 512
-    OUTPUT_SIZE:
-      - 128
-      - 256
+    FEATURE_FUSION: small
   GC:
     NAME: naive_graph_constructor
     CHEAT: False
@@ -101,10 +101,7 @@ MODEL:
     IMAGE_CENTRIC_SAMPLING: False
     NODE_MATCHING_RADIUS: 0.5
     NODE_INCLUSION_RADIUS: 0.7
-UB:
-  KP: hrnet
-  GC: NaiveGraphConstructor
-  NUM_EVAL: 500
-  SPLIT: coco_17_mini
-  ADJUST: True
-
+TEST:
+  FLIP_TEST: True
+  SCALE_FACTOR: [0.5, 1.0, 2.0]
+  PROJECT2IMAGE: True

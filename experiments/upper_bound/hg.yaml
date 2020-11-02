@@ -2,6 +2,12 @@ DATASET:
   ROOT: '../../storage/user/kistern/coco'
   MAX_NUM_PEOPLE: 30
   SCALING_TYPE: long
+  OUTPUT_SIZE: [128, 128, 128, 128]
+  MAX_ROTATION : 0
+  MIN_SCALE : 1.0
+  MAX_SCALE : 1.0
+  MAX_TRANSLATE : 0
+  FLIP : 0.0
 
 MODEL:
   HG:
@@ -81,20 +87,21 @@ MODEL:
     NAME: naive_graph_constructor
     CHEAT: False
     USE_GT: False
-    USE_NEIGHBOURS: True
-    EDGE_LABEL_METHOD: 4
+    USE_NEIGHBOURS: False
+    EDGE_LABEL_METHOD: 6
     MASK_CROWDS: True
-    DETECT_THRESHOLD: 2.0
-    MATCHING_RADIUS: 0.1
+    DETECT_THRESHOLD: 0.1
+    MATCHING_RADIUS: 0.01
     INCLUSION_RADIUS: 0.75
-    GRAPH_TYPE: score_based
+    GRAPH_TYPE: knn
     CC_METHOD: GAEC
 UB:
-  SPLIT: mini
+  SPLIT: princeton
   KP: hourglass
   GC: NaiveGraphConstructor
-  NUM_EVAL: 10
+  NUM_EVAL: 500
   ADJUST: True
+  REFINE: True
 TEST:
   NUM_EVAL: 500
   SPLIT: mini

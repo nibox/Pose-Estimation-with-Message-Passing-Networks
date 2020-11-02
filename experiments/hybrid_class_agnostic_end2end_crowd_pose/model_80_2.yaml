@@ -1,19 +1,21 @@
 DATASET:
-  ROOT: '../../storage/user/kistern/coco'
+  ROOT: '../../storage/user/kistern/crowd_pose'
   MAX_NUM_PEOPLE: 30
   SCALING_TYPE: short  # short for training
   # training data augmentation
   MAX_ROTATION : 0
-  MIN_SCALE : 1.0
-  MAX_SCALE : 1.0
+  MIN_SCALE : 0.75
+  MAX_SCALE : 1.5
   MAX_TRANSLATE : 40
   FLIP : 0.0
+  NUM_JOINTS: 14
+  DATASET: crowd_pose
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real_node/57_1_0"
+LOG_DIR: "../log/PoseEstimationBaseline/Real_node/80_2"
 
 MODEL:
-  KP: hrnet
-  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/57_1_0/pose_estimation_3.pth"
+  KP: mmpose_hrnet
+  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/80_2/pose_estimation.pth"
   AUX_STEPS: 1
   KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
@@ -84,16 +86,17 @@ MODEL:
         CAT_OUTPUT:
         - True
     NAME: pose_higher_hrnet
-    NUM_JOINTS: 17
-    PRETRAINED: '../PretrainedModels/pose_higher_hrnet_w32_512.pth'
+    NUM_JOINTS: 14
+    PRETRAINED: '../PretrainedModels/higher_hrnet32_crowdpose.pth'
     TAG_PER_JOINT: True
     FEATURE_FUSION: small
   MPN:
-    NAME: NodeClassificationMPN
+    NAME: ClassificationMPNSimple
+    NUM_JOINTS: 14
     STEPS: 10
     NODE_STEPS: 0
     NODE_INPUT_DIM: 128
-    EDGE_INPUT_DIM: 17 + 2
+    EDGE_INPUT_DIM: 14 + 2
     NODE_FEATURE_DIM: 64
     EDGE_FEATURE_DIM: 64
     EDGE_FEATURE_HIDDEN: 64
@@ -124,24 +127,18 @@ MODEL:
         - 64
         - 32
         - 1
-    CLASS:
-      BN: True
-      OUTPUT_SIZES:
-        - 64
-        - 32
-        - 17
     BN: False
     AGGR: max
     SKIP: True
-    NODE_THRESHOLD: 0.1
+    NODE_THRESHOLD: 0.1  # not important here
   GC:
     NAME: naive_graph_constructor
     CHEAT: False
     USE_GT: False
     USE_NEIGHBOURS: False
-    POOL_KERNEL_SIZE: 3 # 3
-    EDGE_LABEL_METHOD: 6
-    MASK_CROWDS: True # True
+    POOL_KERNEL_SIZE: 5 # 3
+    EDGE_LABEL_METHOD: 4
+    MASK_CROWDS: False # True
     DETECT_THRESHOLD: 0.1
     MATCHING_RADIUS: 0.5
     INCLUSION_RADIUS: 0.75
@@ -153,33 +150,36 @@ MODEL:
     LOSS_WEIGHTS:
       - 1.0
       - 1.0
-      - 1.0
     USE_FOCAL: True
     FOCAL_GAMMA: 2.0
     FOCAL_ALPHA: 1.0
 TEST:
   NUM_EVAL: 500
-  SPLIT: coco_17_mini
+  SPLIT: crowd_pose
   ADJUST: True
-  FLIP_TEST: False
+  FLIP_TEST: True
+  WITH_REFINE: False
+  SCALE_FACTOR: [1.0]
+  PROJECT2IMAGE: True
+  REFINE_COMP: False
 
 TRAIN:
-  SPLIT: coco_17_full
+  SPLIT: crowd_pose
   LR: 3e-4
   KP_LR: 1e-6
   KP_W_DECAY: 0.0001
   LR_FACTOR: 0.1
   LR_STEP:
-    - 20 # prev on 10, 20 not sure if it will change it or if the original steps are part of the state_dict
-    - 30
+    - 55
+    - 100
   BATCH_SIZE: 8
-  START_EPOCH: 25
-  END_EPOCH: 35
+  START_EPOCH: 0
+  END_EPOCH: 60
   END_TO_END: True
   USE_LABEL_MASK: True
   USE_BATCH_INDEX: False
   LOSS_REDUCTION: mean
   FREEZE_BN: True
   KP_FREEZE_MODE: nothing
-  CONTINUE: "../log/PoseEstimationBaseline/Real_node/57_1_0/pose_estimation_3.pth"
+  CONTINUE: ""
 
