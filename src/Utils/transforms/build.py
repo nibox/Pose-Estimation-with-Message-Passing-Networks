@@ -25,7 +25,7 @@ def transforms_hr_train(config):
     flip = config.DATASET.FLIP
     scale_type = config.DATASET.SCALING_TYPE
 
-    coco_flip_index = T.FLIP_CONFIG["COCO"]
+    coco_flip_index = T.FLIP_CONFIG["COCO"] if config.DATASET.DATASET == "coco" else T.FLIP_CONFIG["CROWDPOSE"]
 
     transforms = T.Compose(
         [
@@ -62,6 +62,7 @@ def transforms_hg_eval(config):
     flip = config.DATASET.FLIP
     scale_type = config.DATASET.SCALING_TYPE
 
+    coco_flip_index = T.FLIP_CONFIG["COCO"] if config.DATASET.DATASET == "coco" else T.FLIP_CONFIG["CROWDPOSE"]
     transforms = T.Compose(
         [
             T.RandomAffineTransform(
@@ -73,6 +74,7 @@ def transforms_hg_eval(config):
                 scale_type,
                 max_translate
             ),
+            T.RandomHorizontalFlip(coco_flip_index, output_size, flip),
             T.ToTensor()
         ]
     )

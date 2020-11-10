@@ -333,8 +333,12 @@ class NaiveGraphConstructor:
             edge_attr = torch.unsqueeze(joint_tags[edge_index[1]] - joint_tags[edge_index[0]], 1).norm(p=None, dim=1, keepdim=True)
         elif {"ae_normed"} == set(edge_features_to_use):
             joint_tags = tag_maps[joint_type, joint_y, joint_x]
-            edge_attr = torch.unsqueeze(joint_tags[edge_index[1]] - joint_tags[edge_index[0]], 1).norm(p=None, dim=1, keepdim=True).round() \
+            edge_attr = (joint_tags[edge_index[1]] - joint_tags[edge_index[0]]).norm(p=None, dim=1, keepdim=True).round() * 100\
                         - joint_scores[edge_index[0], None]
+        elif {"ae_tracking_1"} == set(edge_features_to_use):
+            joint_tags = tag_maps[joint_type, joint_y, joint_x]
+            edge_attr = -(joint_tags[edge_index[1]] - joint_tags[edge_index[0]]).norm(p=None, dim=1,
+                                                                                     keepdim=True) + 1
         else:
             raise NotImplementedError
 

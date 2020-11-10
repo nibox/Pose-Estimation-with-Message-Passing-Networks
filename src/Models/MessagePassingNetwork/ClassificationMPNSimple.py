@@ -1,5 +1,5 @@
 import torch
-from .layers import _make_mlp, MPLayer
+from .layers import _make_mlp, MPLayer, TypeAwareMPNLayer
 from .utils import sum_node_types
 
 
@@ -8,8 +8,23 @@ class ClassificationMPNSimple(torch.nn.Module):
     def __init__(self, config):
         super().__init__()
         self.use_skip_connections = config.SKIP
-        self.mpn_node_cls = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
-                                    aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP)
+        self.node_summary = config.NODE_TYPE_SUMMARY
+        if config.AGGR_TYPE == "agnostic":
+            self.mpn_node_cls = MPLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
+                                        aggr=config.AGGR, skip=config.SKIP, use_node_update_mlp=config.USE_NODE_UPDATE_MLP,
+                                        edge_mlp=config.EDGE_MLP)
+        elif config.AGGR_TYPE == "per_type":
+            num_types = None
+            if self.node_summary == "per_body_part":
+                num_types = 6
+            elif self.node_summary == "not":
+                num_types = config.NUM_JOINTS
+            elif self.node_summary == "left_right":
+                num_types = 9
+            self.mpn_node_cls = TypeAwareMPNLayer(config.NODE_FEATURE_DIM, config.EDGE_FEATURE_DIM, config.EDGE_FEATURE_HIDDEN,
+                                                  aggr=config.AGGR, skip=config.SKIP,
+                                                  edge_mlp=config.EDGE_MLP, num_types=num_types, aggr_sub=config.AGGR_SUB,
+                                                  update_type=config.UPDATE_TYPE)
 
         self.edge_embedding = _make_mlp(config.EDGE_INPUT_DIM, config.EDGE_EMB.OUTPUT_SIZES, bn=config.EDGE_EMB.BN,
                                         end_with_relu=config.NODE_EMB.END_WITH_RELU)
@@ -21,7 +36,6 @@ class ClassificationMPNSimple(torch.nn.Module):
 
         self.node_steps = config.STEPS
         self.edge_steps = config.EDGE_STEPS
-        self.node_threshold = config.NODE_THRESHOLD
 
     def forward(self, x, edge_attr, edge_index, **kwargs):
 

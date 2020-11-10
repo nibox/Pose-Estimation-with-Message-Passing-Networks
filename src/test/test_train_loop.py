@@ -15,9 +15,9 @@ def load_data(config, batch_size, device):
     train_ids, _ = pickle.load(open(tv_split_name, "rb"))
     train_ids = np.random.choice(train_ids, batch_size, replace=False)
     transforms, _ = transforms_hr_train(config)
-    heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
-    joints_generator = [JointsGenerator(30, 17, 128, True),
-                        JointsGenerator(30, 17, 256, True)
+    heatmap_generator = [HeatmapGenerator(160, 17), HeatmapGenerator(320, 17)]
+    joints_generator = [JointsGenerator(30, 17, 320, True),
+                        JointsGenerator(30, 17, 320, True)
                         ]
     train = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=train_ids, year=17,
                              transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=True,
@@ -161,7 +161,7 @@ def main():
 
         loss, preds, labels, masks, logging = update_model(batch)
 
-        preds_nodes, preds_edges, preds_classes = preds["node"][-1], preds["edge"][-1], preds["class"][-1]
+        preds_nodes, preds_edges, preds_classes = preds["node"][-1], preds["edge"][-1], preds["class"]
         node_labels, edge_labels, class_labels = labels["node"], labels["edge"][-1], labels["class"]
         node_mask, edge_mask, class_mask = masks["node"], masks["edge"][-1], masks["class"]
 
@@ -174,7 +174,7 @@ def main():
                 result_nodes = preds_classes[-1].argmax(dim=1).squeeze() != 18
             else:
                 result_nodes = None
-        result_classes = preds_classes.argmax(dim=1).squeeze() if preds_classes is not None else None
+        result_classes = preds_classes[-1].argmax(dim=1).squeeze() if preds_classes is not None else None
 
         if preds_edges is not None:
             result_edges = preds_edges.sigmoid().squeeze()

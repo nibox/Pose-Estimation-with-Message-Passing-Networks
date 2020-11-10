@@ -63,14 +63,15 @@ def create_train_validation_split(config):
     elif config.TRAIN.SPLIT == "coco_17_full":
         train_ids, _ = pickle.load(open("tmp/coco_17_full_split.p", "rb"))  # mini_train_valid_split_4 old one
         _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
+        output_sizes = config.DATASET.OUTPUT_SIZE
         if config.DATASET.HEAT_GENERATOR == "default":
-            heatmap_generator = [HeatmapGenerator(128, 17, config.DATASET.SIGMA),
-                                 HeatmapGenerator(256, 17, config.DATASET.SIGMA)]
+            heatmap_generator = [HeatmapGenerator(output_sizes[0], 17, config.DATASET.SIGMA),
+                                 HeatmapGenerator(output_sizes[1], 17, config.DATASET.SIGMA)]
         elif config.DATASET.HEAT_GENERATOR == "scale_aware":
             heatmap_generator = [ScaleAwareHeatmapGenerator(128, 17, config.DATASET.SIGMA),
                                  ScaleAwareHeatmapGenerator(256, 17, config.DATASET.SIGMA)]
-        joints_generator = [JointsGenerator(30, 17, 128, True),
-                            JointsGenerator(30, 17, 256, True)]
+        joints_generator = [JointsGenerator(30, 17, output_sizes[0], True),
+                            JointsGenerator(30, 17, output_sizes[1], True)]
         transforms, _ = transforms_hr_train(config)
         train = CocoKeypoints_hr(config.DATASET.ROOT, mini=False, seed=0, mode="train", img_ids=train_ids, year=17,
                                  transforms=transforms, heatmap_generator=heatmap_generator,
@@ -89,7 +90,7 @@ def create_train_validation_split(config):
         joints_generator = [JointsGenerator(30, 14, output_sizes[0], True),
                             JointsGenerator(30, 14, output_sizes[1], True)]
         transforms, _ = transforms_hr_train(config)
-        train = CrowdPoseKeypoints(config.DATASET.ROOT, mini=False, seed=0, mode="train", transforms=transforms,
+        train = CrowdPoseKeypoints(config.DATASET.ROOT, mini=False, seed=0, mode="trainval", transforms=transforms,
                                    heatmap_generator=heatmap_generator, joint_generator=joints_generator)
         valid = CrowdPoseKeypoints(config.DATASET.ROOT, mini=True, seed=0, mode="val", transforms=transforms,
                                    heatmap_generator=heatmap_generator, joint_generator=joints_generator)

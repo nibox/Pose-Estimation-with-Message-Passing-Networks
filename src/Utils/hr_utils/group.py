@@ -320,13 +320,16 @@ class HeatmapParser(object):
 
         return keypoints
 
-    def parse(self, det, tag, adjust=True, refine=True):
+    def parse(self, det, tag, adjust=True, refine=True, scoring="default"):
         ans = self.match(**self.top_k(det, tag))
 
         if adjust:
             ans = self.adjust(ans, det)
 
-        scores = [i[:, 2].mean() for i in ans[0]]
+        if scoring == "default":
+            scores = [i[:, 2].mean() for i in ans[0]]
+        elif scoring == "mean":
+            scores = [i[i[:, 2] > 0.009, 2].mean() for i in ans[0]]
 
         if refine:
             ans = ans[0]

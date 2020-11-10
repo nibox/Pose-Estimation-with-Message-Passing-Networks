@@ -18,6 +18,8 @@ from .NodeClassificationMPNSelftAttention import NodeClassificationMPNSelfAttent
 from .NodeClassificationMPNTag import NodeClassificationMPNTag
 from .MPNTag import MPNTag
 from .LogisticEdgeClassifier import LogisticEdgeClassifier
+from .TagThreshold import TagThreshold
+from .PlainTag import PlainTag
 
 # from .NaiveRefinement import NaiveRefinement
 # from .NaiveRefinementBaseline import NaiveRefinementBaseline
@@ -63,6 +65,10 @@ def get_mpn_model(config, **kwargs):
         return NodeClassificationMPNGroupBasedHierach(config)
     elif config.NAME == "JointTypeClassification":
         return JointTypeClassification(config)
+    elif config.NAME == "TagThreshold":
+        return TagThreshold(config)
+    elif config.NAME == "PlainTag":
+        return PlainTag(config)
     else:
         raise NotImplementedError
 

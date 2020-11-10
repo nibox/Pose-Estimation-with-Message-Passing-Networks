@@ -23,6 +23,9 @@ FLIP_CONFIG = {
     'COCO': [
         0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15
     ],
+    'CROWDPOSE': [
+        1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 12, 13
+    ]
 }
 
 
@@ -94,7 +97,7 @@ class RandomHorizontalFlip(object):
                 mask[i] = mask[i][:, ::-1] - np.zeros_like(mask[i])
                 joints[i] = joints[i][:, self.flip_index]
                 joints[i][:, :, 0] = _output_size - joints[i][:, :, 0] - 1
-                factors[i] = factors[i][self.flip_index]
+            factors = factors[:, self.flip_index]
 
         return image, mask, joints, factors
 
@@ -486,7 +489,10 @@ class RandomAffineTransform(object):
             joints[i][:, :, 0:2] = self._affine_joints(
                 joints[i][:, :, 0:2], mat_output
             )
-        factors = self._affine_factors(factors, mat_output)
+
+        f_mat = self._get_affine_matrix(
+            center, scale, (_output_size, _output_size), 0)
+        factors = self._affine_factors(factors, f_mat)
 
         mat_input = self._get_affine_matrix(
             center, scale, (self.input_size, self.input_size), aug_rot

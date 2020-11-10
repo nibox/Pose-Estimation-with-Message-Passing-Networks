@@ -148,6 +148,10 @@ def coco_eval(coco, dt, image_ids, tmp_dir="tmp", dt_file_name="dt.json"):
     coco_eval.summarize()
     return coco_eval.stats
 
+def create_results_json(dt, dir, name):
+    import json
+    with open(dir + '/' + name, 'w') as f:
+        json.dump(sum(dt, []), f)
 
 def crowd_pose_eval(coco, dt, image_ids, tmp_dir="tmp", dt_file_name="dt.json"):
     """
@@ -187,6 +191,45 @@ def gen_ann_format(pred, image_id=0):
         for j in range(len(person)):
             tmp["keypoints"] += [float(person[j, 0]), float(person[j, 1]), float(person[j, 2])]
             score += float(person[j, 2])
+        tmp["score"] = score #/ 17.0
+        ans.append(tmp)
+    return ans
+
+def gen_ann_format_correct(pred, image_id=0):
+    """
+    from https://github.com/princeton-vl/pose-ae-train
+    Generate the json-style data for the output
+    """
+    ans = []
+    for i in range(len(pred)):
+        person = pred[i]
+        # todo what does the score do?
+        # how are missing joints handled ?
+        tmp = {'image_id': int(image_id), "category_id": 1, "keypoints": [], "score": 1.0}
+        score = 0.0
+
+        for j in range(len(person)):
+            tmp["keypoints"] += [float(person[j, 0]), float(person[j, 1]), float(person[j, 2])]
+            score += float(person[j, 2])
+        tmp["score"] = score #/ 17.0
+        ans.append(tmp)
+    return ans
+
+def gen_ann_format_mean(pred, image_id=0):
+    """
+    from https://github.com/princeton-vl/pose-ae-train
+    Generate the json-style data for the output
+    """
+    ans = []
+    for i in range(len(pred)):
+        person = pred[i]
+        # todo what does the score do?
+        # how are missing joints handled ?
+        tmp = {'image_id': int(image_id), "category_id": 1, "keypoints": [], "score": 1.0}
+        score = float(person[person[:, 2] > 0.09, 2].mean())
+
+        for j in range(len(person)):
+            tmp["keypoints"] += [float(person[j, 0]), float(person[j, 1]), float(person[j, 2])]
         tmp["score"] = score #/ 17.0
         ans.append(tmp)
     return ans

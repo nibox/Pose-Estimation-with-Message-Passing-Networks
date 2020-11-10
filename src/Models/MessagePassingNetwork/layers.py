@@ -221,7 +221,7 @@ class TypeAwareMPNLayer(MessagePassing):
 
         if self.aggr in ["add", "max", "mean"] and self.aggr_sub == "None":
             return self.aggr_vanilla(inputs, index, source_type, num_nodes, target_nodes, edge_attr)
-        elif self.aggr_sub == "node_edge_attn":
+        elif self.aggr_sub in ["node_edge_attn", "node_edge_attn_per_type"]:
             return self.aggr_node_attn(inputs, index, source_type, num_nodes, target_nodes, edge_attr)
 
 
@@ -238,9 +238,10 @@ class TypeAwareMPNLayer(MessagePassing):
         updates = torch.zeros(num_nodes, self.num_types, feature_dim, dtype=torch.float32, device=inputs.device)
         attn_scores = self.attn_net(edge_attr)
         for i in range(self.num_types):
+            attn_index = 0 if self.aggr_sub == "node_edge_attn" else i
             types = source_type==i
-            attn = scatter_softmax(attn_scores[types], index[types], dim=0)
-            updates[:, i] = scatter(inputs[types] * attn, index[types], dim=0, reduce="add", dim_size=num_nodes)
+            attn = scatter_softmax(attn_scores[types, attn_index], index[types], dim=0)
+            updates[:, i] = scatter(inputs[types] * attn[:, None], index[types], dim=0, reduce="add", dim_size=num_nodes)
         return updates
 
     def update(self, aggr_out):

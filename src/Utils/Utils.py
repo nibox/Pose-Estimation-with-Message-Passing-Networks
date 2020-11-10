@@ -410,6 +410,8 @@ def draw_edges_conf(img, joint_det, person_labels, node_labels, edge_index, pred
         raise NotImplementedError
 
 
+
+
 def draw_clusters(img: [torch.tensor, np.array], joints, joint_classes, joint_connections, fname=None,
                   output_size=128.0):
     """
@@ -487,17 +489,30 @@ def draw_clusters(img: [torch.tensor, np.array], joints, joint_classes, joint_co
         raise NotImplementedError
 
 
-def pred_to_person(joint_det, joint_scores, edge_index, pred, class_pred, cc_method, num_joints, score_for_poses=None):
+def pred_to_person(joint_det, joint_scores, edge_index, pred, class_pred, cc_method, num_joints, score_for_poses=None,
+                   allow_single_joint_persons=False):
     test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
     if cc_method != "threshold":
         sol = cluster_graph(test_graph, cc_method, complete=False)
         sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
     else:
-        sparse_sol = edge_index[:, pred > 0.5]
-    persons_pred, mutants, person_labels = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol,
-                                                                    class_pred, num_joints, score_for_poses)  # might crash
+        sparse_sol = edge_index[:, pred > 0.8]
+    persons_pred, mutants, person_labels = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol, class_pred,
+                                                                    num_joints, score_for_poses, allow_single_joint_persons)  # might crash
     return persons_pred, mutants, person_labels
 
+def pred_to_person_ae(joint_det, joint_scores, edge_index, pred, class_pred, cc_method, num_joints, score_for_poses=None,
+                   allow_single_joint_persons=False):
+    if edge_index.shape[1] != 0:
+        test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
+        sol = cluster_graph(test_graph, cc_method, complete=False)
+        sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
+    else:
+        # each joint is a cluster
+        sparse_sol = [[], []]
+    persons_pred, mutants, person_labels = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol, class_pred,
+                                                                    num_joints, score_for_poses, allow_single_joint_persons)  # might crash
+    return persons_pred, mutants, person_labels
 
 def pred_to_person_debug(joint_det, joint_scores, edge_index, edge_pred, class_pred, node_labels, cc_method, num_joints):
     test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=edge_pred)
@@ -529,8 +544,10 @@ def pred_to_person_labels(joint_det, edge_index, edge_attr, cc_method="GAEC"):
     return person_labels
 
 
-def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred, num_joints, scores_for_poses=None):
+def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred, num_joints, scores_for_poses=None,
+                             allow_single_joint_persons=False):
     """
+    :param allow_single_joint_persons:
     :param class_pred:
     :param joints: (N, 2) vector of joints
     :param joint_connections: (2, E) array/tensor that indicates which joint are connected thus belong to the same person
@@ -585,12 +602,12 @@ def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred
                 keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
                 # keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
                 persons.append(keypoints)
-        elif len(person_joints) == 1 and False:
+        elif len(person_joints) == 1 and allow_single_joint_persons:
 
             keypoints = np.zeros([num_joints, 3])
             joint_type = person_joints[:, 2]
             person_score = person_scores[0]
-            if person_score < 0.5:
+            if person_score < 0.1:
                  continue
 
             keypoints[joint_type, 2] = person_score
@@ -751,6 +768,27 @@ def num_non_detected_points(joint_det, keypoints, factors, min_num_joints=1):
 
     return num_missed_detections, num_joints_gt, num_det_persons, num_persons
 
+
+def adjust_joints(ans, det):
+    assert len(ans.shape) == 2 and ans.shape[1] == 3
+    for i, joint in enumerate(ans):
+        y, x = joint[0], joint[1]# joint[0:2]
+        joint_id = int(joint[2])
+        xx, yy = int(x), int(y)
+        # print(batch_id, joint_id, det[batch_id].shape)
+        tmp = det[joint_id]
+        if tmp[xx, min(yy + 1, tmp.shape[1] - 1)] > tmp[xx, max(yy - 1, 0)]:
+            y += 0.25
+        else:
+            y -= 0.25
+
+        if tmp[min(xx + 1, tmp.shape[0] - 1), yy] > tmp[max(0, xx - 1), yy]:
+            x += 0.25
+        else:
+            x -= 0.25
+        ans[i, 1] = x + 0.5
+        ans[i, 0] = y + 0.5
+    return ans
 
 def adjust(ans, det):
     for people_id, i in enumerate(ans):
