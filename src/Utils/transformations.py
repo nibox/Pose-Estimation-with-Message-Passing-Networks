@@ -36,6 +36,7 @@ def reverse_affine_map(keypoints, img_size_orig, input_size, scaling_type, min_s
         keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], inv_mat)
         return keypoints
     elif scaling_type == "long":
+        assert input_size == 512
         gt_width = img_size_orig[0]
         gt_height = img_size_orig[1]
         scale = max(gt_height, gt_width) / 200
@@ -47,12 +48,9 @@ def reverse_affine_map(keypoints, img_size_orig, input_size, scaling_type, min_s
         inv_mat = np.linalg.pinv(mat)[:2]  # might this lead to numerical errors?
         keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2] * 4, inv_mat)
         return keypoints
-        """
-        mat = get_affine_transform(np.array((gt_width / 2, gt_height / 2)), scale, (128, 128), inv=True)
-        keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], mat)
-        return keypoints
-        # """
+
     elif scaling_type == "long_with_multiscale":
+        assert input_size == 512
         # """
         gt_width = img_size_orig[0]
         gt_height = img_size_orig[1]
@@ -65,17 +63,7 @@ def reverse_affine_map(keypoints, img_size_orig, input_size, scaling_type, min_s
         inv_mat = np.linalg.pinv(mat)[:2]  # might this lead to numerical errors?
         keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2] * 4, inv_mat)
         return keypoints
-        # """
-        """
-        h, w = img_size_orig[1], img_size_orig[0]
-        center = np.array([int(w / 2.0), int(h / 2.0)])
-        scale = max(h, w) / 200
 
-        inp_res = int((1 * 512 + 63) // 64 * 64)
-        inv_mat = get_affine_transform(center, scale, (int(inp_res), int(inp_res)), inv=True)
-        keypoints[:, :, :2] = kpt_affine(keypoints[:, :, :2], inv_mat)
-        return keypoints
-        # """
     else:
         raise NotImplementedError
 
@@ -119,6 +107,7 @@ def reverse_affine_map_points(points, img_size_orig, scaling_type, min_scale=1.0
         inv_mat = get_affine_transform(center, scale, (int(resized_img[0]), int(resized_img[1])), inv=True)
         points[:, :2] = kpt_affine(points[:, :2], inv_mat)
         return points
+
     elif scaling_type == "long":
         gt_width = img_size_orig[0]
         gt_height = img_size_orig[1]
@@ -137,21 +126,6 @@ def reverse_affine_map_points(points, img_size_orig, scaling_type, min_scale=1.0
     inv_mat = np.linalg.pinv(mat)[:2]  # might this lead to numerical errors?
     points[:, :2] = kpt_affine(points[:, :2], inv_mat)
     return points
-
-class NormalizeInverse(torchvision.transforms.Normalize):
-    """
-    Undoes the normalization and returns the reconstructed images in the input domain.
-    """
-
-    def __init__(self, mean, std):
-        mean = torch.as_tensor(mean)
-        std = torch.as_tensor(std)
-        std_inv = 1 / (std + 1e-7)
-        mean_inv = -mean * std_inv
-        super().__init__(mean=mean_inv, std=std_inv)
-
-    def __call__(self, tensor):
-        return super().__call__(tensor.clone())
 
 
 def kpt_affine(kpt, mat):
@@ -237,6 +211,7 @@ def get_affine_transform(center, scale, output_size, inv=False):
 
 
     return trans
+
 
 def get_multi_scale_size(img_h, img_w, input_size, current_scale, min_scale):
     h, w = img_h, img_w  # image.shape

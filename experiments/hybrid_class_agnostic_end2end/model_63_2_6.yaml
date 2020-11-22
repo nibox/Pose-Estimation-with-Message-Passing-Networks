@@ -1,23 +1,22 @@
 DATASET:
   ROOT: '../../storage/user/kistern/coco'
   MAX_NUM_PEOPLE: 30
-  SCALING_TYPE: long  # short for training
+  SCALING_TYPE: short  # short for training
   # training data augmentation
-  MAX_ROTATION : 0
+  MAX_ROTATION : 30
   MIN_SCALE : 0.75
-  MAX_SCALE : 1.25
+  MAX_SCALE : 1.5
   MAX_TRANSLATE : 40
-  FLIP : 0.0
-  OUTPUT_SIZE: [128, 128, 128, 128]
+  FLIP : 0.5
   NUM_JOINTS: 17
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real_node/70"
+LOG_DIR: "../log/PoseEstimationBaseline/Real_node/63_2_6"
 
 MODEL:
-  KP: hourglass
-  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/70/pose_estimation_correct.pth"
+  KP: hrnet
+  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/63_2_6/pose_estimation.pth"
   AUX_STEPS: 1
-  KP_OUTPUT_DIM: 256 # 256 for hg, 32 for HR
+  KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
     NAME: hourglass
     PRETRAINED: "../PretrainedModels/pretrained/checkpoint.pth.tar"
@@ -91,100 +90,65 @@ MODEL:
     TAG_PER_JOINT: True
     FEATURE_FUSION: small
   MPN:
-    NAME: NodeClassificationMPN
+    NAME: LogisticEdgeClassifier
     STEPS: 10
-    NODE_STEPS: 0
-    NODE_INPUT_DIM: 128
-    EDGE_INPUT_DIM: 17 + 2
-    NODE_FEATURE_DIM: 64
-    EDGE_FEATURE_DIM: 64
-    EDGE_FEATURE_HIDDEN: 64
-    NODE_EMB:
-      BN: True
-      END_WITH_RELU: False
-      OUTPUT_SIZES:
-        - 128
-        - 64
-        - 64
-    EDGE_EMB:
-      BN: True
-      END_WITH_RELU: False
-      OUTPUT_SIZES:
-        - 32
-        - 64
-        - 64
-        - 64
+    EDGE_INPUT_DIM: 1
+    EDGE_FEATURE_DIM: 17 + 2 + 1
     EDGE_CLASS:
       BN: True
       OUTPUT_SIZES:
-        - 64
-        - 32
         - 1
-    NODE_CLASS:
-      BN: True
-      OUTPUT_SIZES:
-        - 64
-        - 32
-        - 1
-    CLASS:
-      BN: True
-      OUTPUT_SIZES:
-        - 64
-        - 32
-        - 17
     BN: False
-    AGGR: max
-    SKIP: True
     NODE_THRESHOLD: 1.0
   GC:
     NAME: naive_graph_constructor
     CHEAT: False
-    USE_GT: False
+    USE_GT: True # Trained with true
     USE_NEIGHBOURS: False
-    POOL_KERNEL_SIZE: 3
-    EDGE_LABEL_METHOD: 6
+    POOL_KERNEL_SIZE: 3 # 3
+    EDGE_LABEL_METHOD: 1  # 1
     MASK_CROWDS: True # True
     DETECT_THRESHOLD: 0.1
     MATCHING_RADIUS: 0.5
     INCLUSION_RADIUS: 0.75
-    GRAPH_TYPE: knn
+    GRAPH_TYPE: fully
     CC_METHOD: GAEC
     NORM_NODE_DISTANCE: True
+    EDGE_FEATURES_TO_USE:
+      - ae_normed
+      - position
+      - connection_type
   LOSS:
-    NAME: node_edge_loss
+    NAME: edge_loss
+    SYNC_TAGS: False
     LOSS_WEIGHTS:
       - 1.0
-      - 1.0
-      - 1.0
-    USE_FOCAL: True
-    FOCAL_GAMMA: 2.0
-    FOCAL_ALPHA: 1.0
 TEST:
   NUM_EVAL: 500
-  SPLIT: test-dev2017
+  SPLIT: coco_17_mini
   ADJUST: True
-  FLIP_TEST: False
+  FLIP_TEST: True
   WITH_REFINE: True
-  SCALE_FACTOR: [1.0]
-  PROJECT2IMAGE: False
+  SCALE_FACTOR: [1]
+  PROJECT2IMAGE: True
 
 TRAIN:
-  SPLIT: coco_hourglass
+  SPLIT: coco_17_full
   LR: 3e-4
   KP_LR: 1e-6
-  KP_W_DECAY: 0.0001
+  W_DECAY: 0.0001
   LR_FACTOR: 0.1
   LR_STEP:
-    - 10 # prev on 10, 20 not sure if it will change it or if the original steps are part of the state_dict
-    - 30
+    - 55
+    - 100
   BATCH_SIZE: 8
   START_EPOCH: 0
-  END_EPOCH: 11
+  END_EPOCH: 5
   END_TO_END: True
   USE_LABEL_MASK: True
+  WITH_AE_LOSS: [True, False]
   USE_BATCH_INDEX: False
   LOSS_REDUCTION: mean
   FREEZE_BN: True
-  KP_FREEZE_MODE: stem
-  CONTINUE: ""
+  KP_FREEZE_MODE: nothing
 

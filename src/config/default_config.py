@@ -206,6 +206,7 @@ _C.TEST.FLIP_TEST = True
 _C.TEST.FLIP_AND_REARANGE = True
 _C.TEST.PROJECT2IMAGE = True
 _C.TEST.WITH_POSE_FILTER = False
+_C.TEST.SCORING = "correct"
 
 # train
 _C.TRAIN = CN()
@@ -242,6 +243,12 @@ def get_config():
 def update_config(cfg, config_file):
     cfg.defrost()
     cfg.merge_from_file(config_file)
+    cfg.freeze()
+    return cfg
+
+def update_config_command(cfg, opts):
+    cfg.defrost()
+    cfg.merge_from_list(opts)
     cfg.freeze()
     return cfg
 

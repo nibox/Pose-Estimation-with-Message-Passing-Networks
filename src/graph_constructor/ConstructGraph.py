@@ -336,9 +336,20 @@ class NaiveGraphConstructor:
             edge_attr = (joint_tags[edge_index[1]] - joint_tags[edge_index[0]]).norm(p=None, dim=1, keepdim=True).round() * 100\
                         - joint_scores[edge_index[0], None]
         elif {"ae_tracking_1"} == set(edge_features_to_use):
+            t_a = 1.8425  # based on "features for multi-target multi-camera tracking and re-identification"
             joint_tags = tag_maps[joint_type, joint_y, joint_x]
-            edge_attr = -(joint_tags[edge_index[1]] - joint_tags[edge_index[0]]).norm(p=None, dim=1,
-                                                                                     keepdim=True) + 1
+            if len(joint_tags.shape) == 1:
+                joint_tags = joint_tags[:, None]
+            distance = (joint_tags[edge_index[1]] - joint_tags[edge_index[0]]).norm(p=None, dim=1,
+                                                                                     keepdim=True)
+            edge_attr = torch.div(t_a - distance, t_a)
+        elif {"position", "connection_type", "ae_normed"} == set(edge_features_to_use):
+            joint_tags = tag_maps[joint_type, joint_y, joint_x]
+            if len(joint_tags.shape) == 1:
+                joint_tags = joint_tags[:, None]
+            distance = (joint_tags[edge_index[1]] - joint_tags[edge_index[0]]).norm(p=None, dim=1, keepdim=True)
+            edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1), connection_label_2.float(), distance],
+                                  dim=1)
         else:
             raise NotImplementedError
 

@@ -101,6 +101,7 @@ class RandomHorizontalFlip(object):
 
         return image, mask, joints, factors
 
+# todo REMOVE
 class OCHumanTransform(object):
     def __init__(self,
                  input_size,
@@ -334,7 +335,7 @@ class HRNetEvalTransform(object):
 
         return image, mask, joints, factors
 
-
+# todo REMOVE
 class HRNetMineTransformation(object):
     def __init__(self,
                  input_size,

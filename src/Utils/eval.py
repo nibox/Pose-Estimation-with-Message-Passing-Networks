@@ -186,7 +186,10 @@ def gen_ann_format(pred, image_id=0):
         # how are missing joints handled ?
         tmp = {'image_id': int(image_id), "category_id": 1, "keypoints": [], "score": 1.0}
         score = 0.0
-        score = float(person[person[:, 2] > 0.09, 2].mean())
+        if (person[:, 2] > 0.09).sum() > 0:
+            score = float(person[person[:, 2] > 0.09, 2].mean())
+        else:
+            score = 0.0
 
         for j in range(len(person)):
             tmp["keypoints"] += [float(person[j, 0]), float(person[j, 1]), float(person[j, 2])]
@@ -226,7 +229,10 @@ def gen_ann_format_mean(pred, image_id=0):
         # todo what does the score do?
         # how are missing joints handled ?
         tmp = {'image_id': int(image_id), "category_id": 1, "keypoints": [], "score": 1.0}
-        score = float(person[person[:, 2] > 0.09, 2].mean())
+        if (person[:, 2] > 0.09).sum() > 0:
+            score = float(person[person[:, 2] > 0.09, 2].mean())
+        else:
+            score = 0.0
 
         for j in range(len(person)):
             tmp["keypoints"] += [float(person[j, 0]), float(person[j, 1]), float(person[j, 2])]

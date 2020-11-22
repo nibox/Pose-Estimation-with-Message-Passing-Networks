@@ -66,35 +66,11 @@ class PoseEstimationBaseline(nn.Module):
         self.num_aux_steps = config.MODEL.AUX_STEPS
         self.scoremap_mode = config.MODEL.HRNET.SCOREMAP_MODE
         self.num_joints = config.DATASET.NUM_JOINTS
-        """
-        self.with_flip_kernel = config.MODEL.WITH_FLIP_KERNEL
-        self.pool = nn.MaxPool2d(2, 2)  # used for self attention model
-        if self.with_flip_kernel:
-            # train kernel to rearange features
-            self.flip_kernel = nn.Conv2d(input_feature_size, input_feature_size, 1)
-        else:
-            self.flip_kernel = None
-        # """
 
     def forward(self, imgs: torch.Tensor, keypoints_gt=None, masks=None, factors=None, heatmaps=None,
                 with_logits=True) -> torch.tensor:
         if self.gc_config.MASK_CROWDS:
             assert masks is not None
-        """
-        flip = torch.rand(1) > 0.5
-        if self.with_flip_kernel and flip:
-            imgs = torch.flip(imgs, [3])
-            bb_output = self.backbone(imgs)
-            scoremaps, features, tags = self.process_output(bb_output, self.scoremap_mode)
-
-            flip_index = FLIP_CONFIG["COCO"]
-            scoremaps = torch.flip(scoremaps, [3])
-            scoremaps = scoremaps[:, flip_index]
-            features = self.flip_kernel(torch.flip(features, [3]))
-            for idx in range(len(bb_output[0])):
-                bb_output[0][idx] = torch.flip(bb_output[0][idx], [3])
-                bb_output[0][idx][:, :17] = bb_output[0][idx][:, flip_index]
-        # """
 
         bb_output = self.backbone(imgs)
         scoremaps, features, tags = self.process_output(bb_output, self.scoremap_mode)
@@ -167,23 +143,32 @@ class PoseEstimationBaseline(nn.Module):
     def test(self, test=True):
         pass
 
-    def multi_scale_inference(self, img, scales, config, keypoints=None, factors=None):
+    def multi_scale_inference(self, img, device, config, keypoints=None, factors=None):
         assert img.shape[0] == 1  # batch size of 1
-        transforms = torchvision.transforms.Compose(
-            [
-                torchvision.transforms.ToTensor(),
-                torchvision.transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406],
-                    std=[0.229, 0.224, 0.225]
-                )
-            ]
-        )
+        use_hrnet = True if config.MODEL.KP in ["hrnet", "mmpose_hrnet"] else False
+
+        if use_hrnet:
+            transforms = [torchvision.transforms.ToTensor(),
+                          torchvision.transforms.Normalize(
+                            mean=[0.485, 0.456, 0.406],
+                            std=[0.229, 0.224, 0.225])
+                         ]
+        else:
+            transforms = [torchvision.transforms.ToTensor()]
+        transforms = torchvision.transforms.Compose(transforms)
+
         image = img[0].cpu().permute(1, 2, 0).numpy()  # prepair for transformation
 
-        base_size, center, scale = get_multi_scale_size(
-            image, config.DATASET.INPUT_SIZE, 1.0, min(scales)
-        )
-        # how the fuck to i transform them?
+        if use_hrnet:
+            base_size, center, scale = get_multi_scale_size(
+                image, config.DATASET.INPUT_SIZE, 1.0, min(config.TEST.SCALE_FACTOR)
+            )
+        else:
+            assert config.DATASET.INPUT_SIZE == 512
+            base_size, center, scale = get_multi_scale_size_hourglass(
+                image, 512, 1.0, min(config.TEST.SCALE_FACTOR)
+            )
+
         if keypoints is not None:
             assert factors is not None
             keypoints = keypoints.cpu().numpy()
@@ -192,36 +177,54 @@ class PoseEstimationBaseline(nn.Module):
             non_zero = keypoints[0, :, :, 2].sum(axis=1) != 0
             keypoints = keypoints[:, non_zero]
             factors = factors[:, non_zero]
-            keypoints, factors = multiscale_keypoints(keypoints, factors, image, 512, 1.0, min(scales),
-                                                      config.TEST.PROJECT2IMAGE)
-            keypoints = torch.from_numpy(keypoints).cuda()
-            factors = torch.from_numpy(factors).cuda()
+            if use_hrnet:
+                keypoints, factors = multiscale_keypoints(keypoints, factors, image, config.DATASET.INPUT_SIZE, 1.0, min(config.TEST.SCALE_FACTOR),
+                                                          config.TEST.PROJECT2IMAGE)
+            else:
+                keypoints, factors = multiscale_keypoints_hourglass(keypoints, factors, image, 512, 1.0,
+                                                                    min(config.TEST.SCALE_FACTOR),  # hack!! parameters
+                                                                    config.TEST.PROJECT2IMAGE)
+            keypoints = torch.from_numpy(keypoints).to(device)
+            factors = torch.from_numpy(factors).to(device)
         final_heatmaps = None
         final_features = None
         tags_list = []
-        for idx, s in enumerate(sorted(scales, reverse=True)):
-            input_size = 512
-            image_resized, center, scale = resize_align_multi_scale(
-                image, input_size, s, min(scales)
-            )
+        for idx, s in enumerate(sorted(config.TEST.SCALE_FACTOR, reverse=True)):
+            input_size = config.DATASET.INPUT_SIZE
+            if use_hrnet:
+                image_resized, center, scale = resize_align_multi_scale(
+                    image, input_size, s, min(config.TEST.SCALE_FACTOR)
+                )
+            else:
+                image_resized, center, scale = resize_align_multi_scale_hourglass(
+                    image, input_size, s, min(config.TEST.SCALE_FACTOR)
+                )
             image_resized = transforms(image_resized)
-            image_resized = image_resized[None].cuda()
+            image_resized = image_resized[None].to(device)
 
-            outputs, heatmaps, tags, features = _get_multi_stage_outputs(config, self.backbone, image_resized,
-                                                                         self.feature_gather,
-                                                                         with_flip=config.TEST.FLIP_TEST,
-                                                                         project2image=config.TEST.PROJECT2IMAGE,
-                                                                         size_projected=base_size,
-                                                                         )
+            if use_hrnet:
+                outputs, heatmaps, tags, features = _get_multi_stage_outputs(config, self.backbone, image_resized,
+                                                                             self.feature_gather,
+                                                                             with_flip=config.TEST.FLIP_TEST,
+                                                                             project2image=config.TEST.PROJECT2IMAGE,
+                                                                             size_projected=base_size,
+                                                                             )
+            else:
+                outputs, heatmaps, tags, features = _get_multi_stage_outputs_hourglass(config, self.backbone,
+                                                                                       image_resized,
+                                                                                       self.feature_gather,
+                                                                                       with_flip=config.TEST.FLIP_TEST,
+                                                                                       project2image=config.TEST.PROJECT2IMAGE,
+                                                                                       size_projected=base_size
+                                                                                       )
 
             final_heatmaps, tags_list, final_features = aggregate_results_mpn(
                 config, s, final_heatmaps, tags_list, final_features, heatmaps, tags, features
             )
-        scoremaps = final_heatmaps / float(len(scales))
-        features = final_features / float(len(scales))
+        scoremaps = final_heatmaps / float(len(config.TEST.SCALE_FACTOR))
+        features = final_features / float(len(config.TEST.SCALE_FACTOR))
         tags = torch.cat(tags_list, dim=4)
 
-        # features = self.feature_gather(features)  # or average after this
 
         graph_constructor = get_graph_constructor(self.gc_config, scoremaps=scoremaps, features=features,
                                                   joints_gt=keypoints, factor_list=factors, masks=None,
@@ -244,7 +247,7 @@ class PoseEstimationBaseline(nn.Module):
         return scoremaps, output
 
 
-def multi_scale_inference_hourglass(model, img, scales, device, config, keypoints=None, factors=None):
+def multi_scale_inference_hourglass(model, img, device, config, keypoints=None, factors=None):
 
     assert img.shape[0] == 1  # batch size of 1
     transforms = torchvision.transforms.Compose(
@@ -255,7 +258,7 @@ def multi_scale_inference_hourglass(model, img, scales, device, config, keypoint
     image = img[0].cpu().permute(1, 2, 0).numpy()  # prepair for transformation
 
     base_size, center, scale = get_multi_scale_size_hourglass(
-        image, 512, 1.0, min(scales)
+        image, 512, 1.0, min(config.TEST.SCALE_FACTOR)
     )
     if keypoints is not None:
         assert factors is not None
@@ -265,17 +268,17 @@ def multi_scale_inference_hourglass(model, img, scales, device, config, keypoint
         non_zero = keypoints[0, :, :, 2].sum(axis=1) != 0
         keypoints = keypoints[:, non_zero]
         factors = factors[:, non_zero]
-        keypoints, factors = multiscale_keypoints_hourglass(keypoints, factors, image, 512, 1.0, min(scales),  # hack!! parameters
+        keypoints, factors = multiscale_keypoints_hourglass(keypoints, factors, image, 512, 1.0, min(config.TEST.SCALE_FACTOR),  # hack!! parameters
                                                   config.TEST.PROJECT2IMAGE)
         keypoints = torch.from_numpy(keypoints).to(device)
         factors = torch.from_numpy(factors).to(device)
     final_heatmaps = None
     final_features = None
     tags_list = []
-    for idx, s in enumerate(sorted(scales, reverse=True)):
+    for idx, s in enumerate(sorted(config.TEST.SCALE_FACTOR, reverse=True)):
         input_size = 512
         image_resized, center, scale = resize_align_multi_scale_hourglass(
-            image, input_size, s, min(scales)
+            image, input_size, s, min(config.TEST.SCALE_FACTOR)
         )
         image_resized = transforms(image_resized)
         image_resized = image_resized[None].to(device)
@@ -290,8 +293,8 @@ def multi_scale_inference_hourglass(model, img, scales, device, config, keypoint
         final_heatmaps, tags_list, final_features = aggregate_results_mpn_hourglass(
             config, s, final_heatmaps, tags_list, final_features, heatmaps, tags, features
         )
-    scoremaps = final_heatmaps / float(len(scales))
-    features = final_features / float(len(scales))
+    scoremaps = final_heatmaps / float(len(config.TEST.SCALE_FACTOR))
+    features = final_features / float(len(config.TEST.SCALE_FACTOR))
     tags = torch.cat(tags_list, dim=4)
 
     # features = self.feature_gather(features)  # or average after this

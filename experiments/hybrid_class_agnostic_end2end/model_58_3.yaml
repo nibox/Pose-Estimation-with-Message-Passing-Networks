@@ -1,23 +1,21 @@
 DATASET:
   ROOT: '../../storage/user/kistern/coco'
   MAX_NUM_PEOPLE: 30
-  SCALING_TYPE: long  # short for training
+  SCALING_TYPE: short  # short for training
   # training data augmentation
-  MAX_ROTATION : 0
+  MAX_ROTATION : 30
   MIN_SCALE : 0.75
-  MAX_SCALE : 1.25
+  MAX_SCALE : 1.5
   MAX_TRANSLATE : 40
-  FLIP : 0.0
-  OUTPUT_SIZE: [128, 128, 128, 128]
-  NUM_JOINTS: 17
+  FLIP : 0.5
 
-LOG_DIR: "../log/PoseEstimationBaseline/Real_node/70"
+LOG_DIR: "../log/PoseEstimationBaseline/Real_node/58_3"
 
 MODEL:
-  KP: hourglass
-  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/70/pose_estimation_correct.pth"
+  KP: hrnet
+  PRETRAINED: "../log/PoseEstimationBaseline/Real_node/58_3/pose_estimation.pth"
   AUX_STEPS: 1
-  KP_OUTPUT_DIM: 256 # 256 for hg, 32 for HR
+  KP_OUTPUT_DIM: 32 # 256 for hg, 32 for HR
   HG:
     NAME: hourglass
     PRETRAINED: "../PretrainedModels/pretrained/checkpoint.pth.tar"
@@ -135,15 +133,15 @@ MODEL:
     BN: False
     AGGR: max
     SKIP: True
-    NODE_THRESHOLD: 1.0
+    NODE_THRESHOLD: 0.1
   GC:
     NAME: naive_graph_constructor
     CHEAT: False
     USE_GT: False
     USE_NEIGHBOURS: False
-    POOL_KERNEL_SIZE: 3
+    POOL_KERNEL_SIZE: 5 # 3
     EDGE_LABEL_METHOD: 6
-    MASK_CROWDS: True # True
+    MASK_CROWDS: False # True
     DETECT_THRESHOLD: 0.1
     MATCHING_RADIUS: 0.5
     INCLUSION_RADIUS: 0.75
@@ -161,15 +159,15 @@ MODEL:
     FOCAL_ALPHA: 1.0
 TEST:
   NUM_EVAL: 500
-  SPLIT: test-dev2017
+  SPLIT: coco_17_mini
   ADJUST: True
-  FLIP_TEST: False
+  FLIP_TEST: True
   WITH_REFINE: True
-  SCALE_FACTOR: [1.0]
-  PROJECT2IMAGE: False
+  SCALE_FACTOR: [1]
+  PROJECT2IMAGE: True
 
 TRAIN:
-  SPLIT: coco_hourglass
+  SPLIT: coco_17_full
   LR: 3e-4
   KP_LR: 1e-6
   KP_W_DECAY: 0.0001
@@ -185,6 +183,6 @@ TRAIN:
   USE_BATCH_INDEX: False
   LOSS_REDUCTION: mean
   FREEZE_BN: True
-  KP_FREEZE_MODE: stem
+  KP_FREEZE_MODE: nothing
   CONTINUE: ""
 

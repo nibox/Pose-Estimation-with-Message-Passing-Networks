@@ -139,15 +139,15 @@ MODEL:
     AGGR: add   # not used here
     AGGR_SUB: node_edge_attn
     SKIP: True
-    NODE_THRESHOLD: 0.1
+    NODE_THRESHOLD: 1.0
   GC:
     NAME: naive_graph_constructor
     CHEAT: False
     USE_GT: False
     USE_NEIGHBOURS: False
-    POOL_KERNEL_SIZE: 5 # 3
+    POOL_KERNEL_SIZE: 3 # 3
     EDGE_LABEL_METHOD: 6
-    MASK_CROWDS: False # True
+    MASK_CROWDS: True # True
     DETECT_THRESHOLD: 0.1
     MATCHING_RADIUS: 0.5
     INCLUSION_RADIUS: 0.75
@@ -165,11 +165,11 @@ MODEL:
     FOCAL_ALPHA: 1.0
 TEST:
   NUM_EVAL: 500
-  SPLIT: coco_17_mini
+  SPLIT: crowd_pose_test
   ADJUST: True
-  FLIP_TEST: True
+  FLIP_TEST: False
   WITH_REFINE: True
-  SCALE_FACTOR: [2.0, 1.0, 0.5]
+  SCALE_FACTOR: [1.0]
   PROJECT2IMAGE: True
 
 TRAIN:

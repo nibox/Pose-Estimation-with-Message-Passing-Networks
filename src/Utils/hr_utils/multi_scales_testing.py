@@ -184,7 +184,13 @@ def aggregate_results_mpn(
     elif cfg.TEST.PROJECT2IMAGE:
         final_features += features_avg
     else:
-        raise NotImplementedError
+        final_features += torch.nn.functional.interpolate(
+            features_avg,
+            size=(final_features.size(2), final_features.size(3)),
+            mode='bilinear',
+            align_corners=False
+        )
+
 
     return final_heatmaps, tags_list, final_features
 

@@ -177,6 +177,9 @@ class TypeAwareMPNLayer(MessagePassing):
         elif edge_mlp == "per_type":
             self.mlp_edge = TypeAwareEdgeUpdate(node_feature_dim * node_factor, edge_feature_dim * node_factor, edge_feature_hidden,
                                                 self.num_types)
+        elif edge_mlp == "per_type_2":
+            self.mlp_edge = TypeAwareEdgeUpdate2(node_feature_dim * node_factor, edge_feature_dim * node_factor, edge_feature_hidden,
+                                                self.num_types)
 
         self.mlp_node = TypeAwareNodeUpdate(node_feature_dim * node_factor + edge_feature_dim, node_feature_dim)
 
@@ -194,6 +197,9 @@ class TypeAwareMPNLayer(MessagePassing):
         if self.aggr_sub == "node_edge_attn":
             # self.attn_net = nn.Sequential(nn.Linear(edge_feature_dim, 1), nn.LeakyReLU(negative_slope=0.2, inplace=True))
             self.attn_net = nn.Sequential(nn.Linear(edge_feature_dim, 1))
+        elif self.aggr_sub == "node_edge_attn_per_type":
+            # self.attn_net = nn.Sequential(nn.Linear(edge_feature_dim, 1), nn.LeakyReLU(negative_slope=0.2, inplace=True))
+            self.attn_net = nn.Sequential(nn.Linear(edge_feature_dim, 17))
         else:
             self.attn_net = None
 

@@ -8,6 +8,8 @@ from torch_geometric.utils import dense_to_sparse, precision, recall, accuracy, 
 from scipy.optimize import linear_sum_assignment
 from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
 from Utils.dataset_utils import Graph
+from Utils.eval import gen_ann_format, gen_ann_format_mean, gen_ann_format_correct
+from Utils.transformations import reverse_affine_map
 
 
 def non_maximum_suppression(scoremap, threshold=0.05, pool_kernel=None):
@@ -351,65 +353,83 @@ def draw_poses_fp(img: [torch.tensor, np.array], persons, debug_flags, fname=Non
     else:
         raise NotImplementedError
 
-def draw_edges_conf(img, joint_det, person_labels, node_labels, edge_index, preds_edges, fname=None, output_size=128.0):
+"""
+def draw_edges_conf(img, joint_det, person_labels, preds_nodes, edge_index, preds_edges, fname=None, output_size=128.0):
     # filter nodes using the node labels -> subgraph
     # for node in nodes
     # draw node in color of cluster
     # get all connections and draw them in color of confidence
-    tp_idx = node_labels > 0.5
-    mask = subgraph_mask(node_labels > 0.5, edge_index)
-    edge_index, _ = subgraph(torch.from_numpy(tp_idx), torch.from_numpy(edge_index), None, relabel_nodes=True)
-    edge_index = edge_index.numpy()
-    joint_det = joint_det[tp_idx]
-    person_labels = person_labels[tp_idx]
-    preds_edges = preds_edges[mask]
+    preds_nodes = preds_nodes
+    edge_index = edge_index
+    joint_det = joint_det
+    person_labels = person_labels
+    preds_edges = preds_edges
+    num_persons = person_labels.max() + 1
+    types_to_draw = [0]
 
     img = to_numpy(img)
     if img.dtype != np.uint8:
         img = img * 255.0
         img = img.astype(np.uint8)
     img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
-    colors_joints = np.linspace(0, 179, person_labels.max() + 1, dtype=np.float)
+    # colors_joints = np.linspace(0, 179, person_labels.max() + 1, dtype=np.float)
     colors_edges = [0, 20, int(234/2), 50] #np.linspace(0, 179, 3, dtype=np.float)
 
-    for i in range(len(joint_det)):
-        scale = 512.0 / output_size
-        x, y = int(joint_det[i, 0] * scale), int(joint_det[i, 1] * scale)
-        cluster = person_labels[i]
+    scale = 512.0 / output_size
+    for i in range(num_persons):
+        person = person_labels == i
+        num_nodes_in_cluster = len(joint_det[person])
+        if num_nodes_in_cluster < 2:
+            # skipp cluster with less than two joints
+            continue
+        for joint_type in types_to_draw:
+            # select the highest scoring joint for this type for this person
+            tmp_img = img.copy()
+            type_joints =joint_det[:, 2] == joint_type
+            tmp_scores = preds_nodes.copy()
+            tmp_scores[np.logical_not(type_joints & person)] = -1.0
+            joint_idx = np.argmax(tmp_scores)
+            focus_point = joint_det[joint_idx]
 
-        color = (colors_joints[cluster], 255, 255)
-        cv2.circle(img, (x, y), 2, color, -1)
-        # draw connections
-        edges = edge_index[0] == i
-        sub_preds_edges = preds_edges[edges]
-        target_node_idxs = edge_index[1, edges]
-        for j in range(len(target_node_idxs)):
-            x_t, y_t = int(joint_det[j, 0] * scale), int(joint_det[j, 1] * scale)
-            conf = sub_preds_edges[j]
-            if conf < 0.33:
-                conf_class = 0
-            elif 0.33 <= conf < 0.5:
-                conf_class = 1
-            elif 0.5 <= conf < 0.66:
-                conf_class = 2
-            elif conf > 0.66:
-                conf_class = 3
+            joint_edges = edge_index[1, :] == joint_idx
+            src_idx = edge_index[0, joint_edges]
+            edge_scores = preds_edges[joint_edges]
+            for t in range(17):
+                tmp_idx = src_idx[joint_det[src_idx, 2] == t]
+                tmp_scores = edge_scores[joint_det[src_idx, 2] == t]
+                if len(tmp_scores) == 0:
+                    continue
+                idx_to_viz = np.argmax(tmp_scores)
+                score_to_viz = tmp_scores[idx_to_viz]
+                point_to_viz = joint_det[tmp_idx[idx_to_viz]]
+
+                # draw
+                x, y = int(focus_point[0] * scale), int(focus_point[1] * scale)
+                x_t, y_t = int(point_to_viz[0] * scale), int(point_to_viz[1] * scale)
+                if score_to_viz< 0.33:
+                    conf_class = 0
+                elif 0.33 <= score_to_viz < 0.5:
+                    conf_class = 1
+                elif 0.5 <= score_to_viz< 0.66:
+                    conf_class = 2
+                elif score_to_viz> 0.66:
+                    conf_class = 3
+                else:
+                    raise NotImplementedError
+                color = (colors_edges[conf_class], 255, 255)
+                cv2.line(tmp_img, (x, y), (x_t, y_t), color)
+
+            tmp_img = cv2.cvtColor(tmp_img, cv2.COLOR_HSV2RGB)
+
+            fig = plt.figure()
+            plt.imshow(tmp_img)
+            if fname is not None:
+                plt.savefig(fig=fig, fname=fname + f"_{i}_{joint_type}.png")
+                plt.close(fig)
             else:
                 raise NotImplementedError
-            color = (colors_edges[conf_class], 255, 255)
-            cv2.line(img, (x, y), (x_t, y_t), color)
 
-    img = cv2.cvtColor(img, cv2.COLOR_HSV2RGB)
-
-    fig = plt.figure()
-    plt.imshow(img)
-    if fname is not None:
-        plt.savefig(fig=fig, fname=fname)
-        plt.close(fig)
-    else:
-        raise NotImplementedError
-
-
+# """
 
 
 def draw_clusters(img: [torch.tensor, np.array], joints, joint_classes, joint_connections, fname=None,
@@ -1039,3 +1059,221 @@ def refine_tag(scoremaps, tag, keypoints):
                     keypoints[p, i, 2] = ans[i, 2]
 
     return keypoints
+
+
+def add_joints(image, joints, color, dataset):
+    crowd_pose_part_labels = [
+        'left_shoulder', 'right_shoulder', 'left_elbow', 'right_elbow',
+        'left_wrist', 'right_wrist', 'left_hip', 'right_hip',
+        'left_knee', 'right_knee', 'left_ankle', 'right_ankle',
+        'head', 'neck'
+    ]
+    crowd_pose_part_idx = {
+        b: a for a, b in enumerate(crowd_pose_part_labels)
+    }
+    crowd_pose_part_orders = [
+        ('head', 'neck'), ('neck', 'left_shoulder'), ('neck', 'right_shoulder'),
+        ('left_shoulder', 'right_shoulder'), ('left_shoulder', 'left_hip'),
+        ('right_shoulder', 'right_hip'), ('left_hip', 'right_hip'), ('left_shoulder', 'left_elbow'),
+        ('left_elbow', 'left_wrist'), ('right_shoulder', 'right_elbow'), ('right_elbow', 'right_wrist'),
+        ('left_hip', 'left_knee'), ('left_knee', 'left_ankle'), ('right_hip', 'right_knee'),
+        ('right_knee', 'right_ankle')
+    ]
+    coco_part_labels = [
+        'nose', 'eye_l', 'eye_r', 'ear_l', 'ear_r',
+        'sho_l', 'sho_r', 'elb_l', 'elb_r', 'wri_l', 'wri_r',
+        'hip_l', 'hip_r', 'kne_l', 'kne_r', 'ank_l', 'ank_r'
+    ]
+    coco_part_idx = {
+        b: a for a, b in enumerate(coco_part_labels)
+    }
+    coco_part_orders = [
+        ('nose', 'eye_l'), ('eye_l', 'eye_r'), ('eye_r', 'nose'),
+        ('eye_l', 'ear_l'), ('eye_r', 'ear_r'), ('ear_l', 'sho_l'),
+        ('ear_r', 'sho_r'), ('sho_l', 'sho_r'), ('sho_l', 'hip_l'),
+        ('sho_r', 'hip_r'), ('hip_l', 'hip_r'), ('sho_l', 'elb_l'),
+        ('elb_l', 'wri_l'), ('sho_r', 'elb_r'), ('elb_r', 'wri_r'),
+        ('hip_l', 'kne_l'), ('kne_l', 'ank_l'), ('hip_r', 'kne_r'),
+        ('kne_r', 'ank_r')
+    ]
+
+    VIS_CONFIG = {
+        'COCO': {
+        'part_labels': coco_part_labels,
+        'part_idx': coco_part_idx,
+        'part_orders': coco_part_orders
+        },
+        'CROWDPOSE': {
+            'part_labels': crowd_pose_part_labels,
+            'part_idx': crowd_pose_part_idx,
+            'part_orders': crowd_pose_part_orders
+        }
+    }
+    data = "CROWDPOSE" if dataset == "crowd_pose" else "COCO"
+    part_idx = VIS_CONFIG[data]['part_idx']
+    part_orders = VIS_CONFIG[data]['part_orders']
+
+    def link(a, b, color):
+        if part_idx[a] < joints.shape[0] and part_idx[b] < joints.shape[0]:
+            jointa = joints[part_idx[a]]
+            jointb = joints[part_idx[b]]
+            if jointa[2] > 0 and jointb[2] > 0:
+                cv2.line(
+                    image,
+                    (int(jointa[0]), int(jointa[1])),
+                    (int(jointb[0]), int(jointb[1])),
+                    color,
+                    2
+                )
+
+    # add joints
+    for joint in joints:
+        if joint[2] > 0:
+            cv2.circle(image, (int(joint[0]), int(joint[1])), 1, color, 2)
+
+    # add link
+    for pair in part_orders:
+        link(pair[0], pair[1], color)
+
+    return image
+
+
+def save_valid_image(image, joints, file_name, dataset):
+    if isinstance(image, torch.Tensor):
+        image = image.cpu().squeeze().permute(1, 2, 0).numpy() * 255
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+
+    for person in joints:
+        color = np.random.randint(0, 255, size=3)
+        color = [int(i) for i in color]
+        add_joints(image, person, color, dataset)
+
+    cv2.imwrite(file_name, image)
+
+
+def draw_edges_conf(img, joint_det, person_labels, preds_nodes, edge_index, preds_edges, fname=None):
+    import cv2
+    # filter nodes using the node labels -> subgraph
+    # for node in nodes
+    # draw node in color of cluster
+    # get all connections and draw them in color of confidence
+    preds_nodes = preds_nodes
+    edge_index = edge_index
+    joint_det = joint_det
+    person_labels = person_labels
+    preds_edges = preds_edges
+    num_persons = person_labels.max() + 1
+    types_to_draw = [0]
+
+    if isinstance(img, torch.Tensor):
+        img = img.cpu().squeeze().permute(1, 2, 0).numpy()
+    if img.dtype != np.uint8:
+        img = img * 255.0
+        img = img.astype(np.uint8)
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+    # colors_joints = np.linspace(0, 179, person_labels.max() + 1, dtype=np.float)
+    colors_edges = [0, 20, int(234/2), 50] #np.linspace(0, 179, 3, dtype=np.float)
+
+    for i in range(num_persons):
+        person = person_labels == i
+        num_nodes_in_cluster = len(joint_det[person])
+        if num_nodes_in_cluster < 2:
+            # skipp cluster with less than two joints
+            continue
+    for joint_type in types_to_draw:
+        # select the highest scoring joint for this type for this person
+        all_img = img.copy()
+        for i in range(num_persons):
+            person = person_labels == i
+            num_nodes_in_cluster = len(joint_det[person])
+            if num_nodes_in_cluster < 2:
+                # skipp cluster with less than two joints
+                continue
+            tmp_img = img.copy()
+            type_joints =joint_det[:, 2] == joint_type
+            tmp_scores = preds_nodes.copy()
+            tmp_scores[np.logical_not(type_joints & person)] = -1.0
+            if np.max(tmp_scores) == -1.0:
+                continue
+            joint_idx = np.argmax(tmp_scores)
+            focus_point = joint_det[joint_idx]
+
+            joint_edges = edge_index[1, :] == joint_idx
+            src_idx = edge_index[0, joint_edges]
+            edge_scores = preds_edges[joint_edges]
+            for t in range(17):
+                tmp_idx = src_idx[joint_det[src_idx, 2] == t]
+                tmp_scores = edge_scores[joint_det[src_idx, 2] == t]
+                if len(tmp_scores) == 0:
+                    continue
+                idx_to_viz = np.argmax(tmp_scores)
+                score_to_viz = tmp_scores[idx_to_viz]
+                point_to_viz = joint_det[tmp_idx[idx_to_viz]]
+
+                # draw
+                x, y = int(focus_point[0]), int(focus_point[1])
+                x_t, y_t = int(point_to_viz[0]), int(point_to_viz[1])
+                if score_to_viz< 0.33:
+                    conf_class = 0
+                elif 0.33 <= score_to_viz < 0.5:
+                    conf_class = 1
+                elif 0.5 <= score_to_viz< 0.66:
+                    conf_class = 2
+                elif score_to_viz> 0.66:
+                    conf_class = 3
+                else:
+                    raise NotImplementedError
+                color = (colors_edges[conf_class], 255, 255)
+                cv2.line(tmp_img, (x, y), (x_t, y_t), color)
+                cv2.line(all_img, (x, y), (x_t, y_t), color)
+
+            tmp_img = cv2.cvtColor(tmp_img, cv2.COLOR_HSV2BGR)
+
+            cv2.imwrite(fname + f"_{i}_{joint_type}.png", tmp_img)
+        all_img= cv2.cvtColor(all_img, cv2.COLOR_HSV2BGR)
+        cv2.imwrite(fname + f"_all_{joint_type}.png", all_img)
+
+
+def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_shape, input_size, img_id, cc_method,
+                scaling_type, min_scale, adjustment, th, preds_classes, with_refine, score_map_scores, with_filter,
+                scoring_method="default"):
+    if (score_map_scores > 0.1).sum() < 1:
+        return None
+    true_positive_idx = joint_scores > th
+    edge_index, pred = subgraph(true_positive_idx, edge_index, pred)
+    if edge_index.shape[1] != 0:
+        pred[joint_det[edge_index[0, :], 2] == joint_det[
+            edge_index[1, :], 2]] = 0.0  # set edge predictions of same types to zero
+        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, preds_classes, cc_method, 17)
+    else:
+        return None
+    # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
+    if len(persons_pred.shape) == 1:  # this means none persons were detected
+        return None
+        # persons_pred = np.zeros([1, 17, 3])
+
+    if with_filter:
+        max_scores = persons_pred[:, :, 2].max(axis=1)
+        keep = max_scores > 0.25
+        persons_pred = persons_pred[keep]
+        if persons_pred.shape[0] == 0:
+            return None
+
+    if with_refine and persons_pred[0, :, 2].sum() != 0:
+        tags = tags.cpu().numpy()
+        scoremaps = scoremaps.cpu().numpy()
+        persons_pred = refine(scoremaps, tags, persons_pred)
+    if adjustment:
+        persons_pred = adjust(persons_pred, scoremaps)
+    persons_pred_orig = reverse_affine_map(persons_pred.copy(), img_shape, input_size, scaling_type=scaling_type,
+                                           min_scale=min_scale)
+
+    if scoring_method == "default":
+        ann = gen_ann_format(persons_pred_orig, img_id)
+    elif scoring_method == "mean":
+        ann = gen_ann_format_mean(persons_pred_orig, img_id)
+    elif scoring_method == "correct":
+        ann = gen_ann_format_correct(persons_pred_orig, img_id)
+    else:
+        raise NotImplementedError
+    return ann

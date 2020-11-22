@@ -146,7 +146,7 @@ MODEL:
     MATCHING_RADIUS: 0.5
     INCLUSION_RADIUS: 0.75
     GRAPH_TYPE: knn
-    CC_METHOD: MUT
+    CC_METHOD: GAEC
     NORM_NODE_DISTANCE: True
   LOSS:
     NAME: node_edge_loss
