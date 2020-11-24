@@ -512,14 +512,126 @@ def draw_clusters(img: [torch.tensor, np.array], joints, joint_classes, joint_co
 def pred_to_person(joint_det, joint_scores, edge_index, pred, class_pred, cc_method, num_joints, score_for_poses=None,
                    allow_single_joint_persons=False):
     test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=pred)
-    if cc_method != "threshold":
+    if cc_method in ["GAEC", "MUT", "KL"]:
         sol = cluster_graph(test_graph, cc_method, complete=False)
         sparse_sol, _ = dense_to_sparse(torch.from_numpy(sol))
-    else:
+    elif cc_method == "greedy":
+        persons_pred, person_labels = greedy_person_construction(joint_det, joint_scores, pred, class_pred, edge_index, num_joints)
+        return persons_pred, False, person_labels
+    elif cc_method =="threshold":
         sparse_sol = edge_index[:, pred > 0.8]
+    else:
+        raise NotImplementedError
     persons_pred, mutants, person_labels = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol, class_pred,
                                                                     num_joints, score_for_poses, allow_single_joint_persons)  # might crash
     return persons_pred, mutants, person_labels
+
+def greedy_person_construction(joint_det, preds_nodes, preds_edges, preds_classes, edge_index, num_joints):
+
+    # is this just clustering? or is it person construction?
+    joint_det = joint_det.cpu().numpy()
+    preds_nodes = preds_nodes.cpu().numpy()
+    preds_edges = preds_edges.cpu().numpy()
+    preds_classes = preds_classes.cpu().numpy() if preds_classes is not None else None
+    edge_index = edge_index.cpu().numpy()
+
+    # reclassify predictions
+    if preds_classes is not None:
+        joint_det[:, 2] = preds_classes.argmax(axis=1)
+    adj_mat = np.zeros((len(joint_det), len(joint_det)), dtype=np.float)
+    adj_mat[edge_index[0], edge_index[1]] = preds_edges
+    adj_mat = (adj_mat.T + adj_mat) / 2.0   # make it symetric by averaging
+    adj_mat[np.diag_indices(len(adj_mat))] = 1.0
+
+    # structure similar to ae grouping
+    # iterate through types
+    # remove assinged nodes?
+    # assuming an eye is always detected
+    # -- threshold and for each type select maximum edges
+    # -- one node two clusters -> both high score edge -> assign to both
+    # -- one high one low
+
+    # stores index of core node of cluster
+    taken_joints = np.zeros_like(preds_nodes, dtype=np.int32) - 1
+
+    out = []
+    for type in range(num_joints):
+        # todo rearange types just like ae group
+        type_joints = joint_det[:, 2] == type
+        for i in range(len(joint_det)):
+            if not type_joints[i] or taken_joints[i] != -1:
+                continue
+            """
+            person = np.zeros(num_joints, 3)
+            person[type, :2] = joint_det[i]
+            person[type, 2] = preds_nodes[i]
+            """
+            taken_joints[i] = i
+
+            for j in range(num_joints):
+                target_joint_type = joint_det[:, 2] != j
+                tmp_mat = adj_mat[i, :].copy()
+                tmp_mat[target_joint_type] = 0.0
+                target_edge_score = np.max(tmp_mat)
+                target_joint_idx = np.argmax(tmp_mat)
+                if target_edge_score == 0.0 or target_joint_idx == i:
+                    continue
+                # if joint is taken compare scores
+                if taken_joints[target_joint_idx] != -1:
+                    first_score = adj_mat[taken_joints[target_joint_idx], target_joint_idx]
+                    current_score = target_edge_score
+                    if first_score > current_score:
+                        continue
+                    else:
+                        taken_joints[target_joint_idx] = i
+                else:
+                    taken_joints[target_joint_idx] = i
+
+    # construct persons based on clusters
+    n_cluster = taken_joints.max() + 1
+    persons = []
+    for i in range(n_cluster):
+        # check if cc has more than one node
+        select = taken_joints == i
+        person_joints = joint_det[select]
+        person_scores = preds_nodes[select]
+
+        if len(person_joints) > 1:  # isolated joints also form a cluster -> ignore them
+            # rearrange person joints
+            keypoints = np.zeros([num_joints, 3])
+            for joint_type in range(num_joints):  # 17 different joint types
+                # take the detected joints of a certain type
+                select = person_joints[:, 2] == joint_type
+                person_joint_for_type = person_joints[select]
+                person_scores_for_type = person_scores[select]
+                if len(person_joint_for_type) != 0:
+                    # keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
+                    joint_idx = np.argmax(person_scores_for_type, axis=0)
+                    keypoints[joint_type] = person_joint_for_type[
+                        joint_idx]  # np.mean(person_joint_for_type, axis=0)
+                    keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
+
+            # keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
+            if (keypoints[:, 2] > 0).sum() > 0:
+                keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
+                # keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
+                persons.append(keypoints)
+        elif len(person_joints) == 1 and False:
+
+            keypoints = np.zeros([num_joints, 3])
+            joint_type = person_joints[:, 2]
+            person_score = person_scores[0]
+            if person_score < 0.1:
+                continue
+
+            keypoints[joint_type, 2] = person_score
+            keypoints[:, :2] = person_joints[0, :2]
+
+            persons.append(keypoints)
+
+    persons = np.array(persons)
+    return persons, taken_joints
+
 
 def pred_to_person_ae(joint_det, joint_scores, edge_index, pred, class_pred, cc_method, num_joints, score_for_poses=None,
                    allow_single_joint_persons=False):
@@ -1234,7 +1346,7 @@ def draw_edges_conf(img, joint_det, person_labels, preds_nodes, edge_index, pred
         cv2.imwrite(fname + f"_all_{joint_type}.png", all_img)
 
 
-def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_shape, input_size, img_id, cc_method,
+def pred_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_shape, input_size, img_id, cc_method,
                 scaling_type, min_scale, adjustment, th, preds_classes, with_refine, score_map_scores, with_filter,
                 scoring_method="default"):
     if (score_map_scores > 0.1).sum() < 1:
