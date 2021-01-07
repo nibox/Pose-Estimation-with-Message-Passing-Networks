@@ -91,7 +91,7 @@ def main():
             img = eval_set[i][0]
             img = img.to(device)[None]
 
-            scoremaps, output = model.multi_scale_inference(img, device, config, None, None)
+            scoremaps, output = model.multi_scale_inference(img, device, config)
             preds_nodes, preds_edges, preds_classes = output["preds"]["node"], output["preds"]["edge"], output["preds"]["class"]
             joint_det, edge_index = output["graph"]["nodes"], output["graph"]["edge_index"]
             joint_scores = output["graph"]["detector_scores"]

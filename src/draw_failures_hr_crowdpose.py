@@ -51,7 +51,7 @@ def main():
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
-            heatmaps, tags = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, device, config)
+            heatmaps, tags = model.multi_scale_inference(img, device, config)
 
             grouped, scores = parser.parse(heatmaps, tags, adjust=True, refine=True)
 

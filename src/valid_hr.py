@@ -1,13 +1,14 @@
 import torch
 import numpy as np
 from tqdm import tqdm
+import argparse
 
-from config import update_config, get_hrnet_config
-from data import CocoKeypoints_hr, HeatmapGenerator
-from Utils import to_tensor
+from Utils.hr_utils.group import cluster_cc
+from config import update_config, get_hrnet_config, update_config_command
+from data import CocoKeypoints_hr, HeatmapGenerator, JointsGenerator, CrowdPoseKeypoints, OCHumans
 from Models.PoseEstimation import get_hr_model
 from Utils.transformations import reverse_affine_map
-from Utils.transforms import transforms_hr_eval, transforms_minimal, transforms_to_tensor
+from Utils.transforms import transforms_to_tensor
 from Utils.hr_utils import HeatmapParser
 
 
@@ -51,12 +52,6 @@ def gen_ann_format(pred, scores, image_id=0):
     return ans
 
 
-def eval_single_img(coco, dt, image_id, tmp_dir="tmp"):
-    ann = [gen_ann_format(dt, image_id)]
-    stats = coco_eval(coco, ann, [image_id], log=False)
-    return stats[:2]
-
-
 def coco_eval(coco, dt, image_ids, tmp_dir="tmp", log=True):
     """
     from https://github.com/princeton-vl/pose-ae-train
@@ -79,30 +74,72 @@ def coco_eval(coco, dt, image_ids, tmp_dir="tmp", log=True):
     coco_eval.summarize()
     return coco_eval.stats
 
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Evaluate HigherHRNet.")
+    parser.add_argument("--config", help="Config file name for the experiment.", required=True, type=str)
+    parser.add_argument("--out_file", help="Name of the output log file containing the results.", required=True, type=str)
+    parser.add_argument("options", help="Modifications to config file through the command line. "
+                                        "Can be use to specify the evaluation setting (flip test, multi-scale etc.)"
+                        , default=None, nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    return args
+
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     ######################################
 
+    # config = get_hrnet_config()
+    # config = update_config(config, f"../experiments/hrnet/w32_512_adam_lr1e-3.yaml")
+    # eval_writer = EvalWriter(config, fname="w32_512_adam_lr1e-3.yaml")
+    args = parse_args()
     config = get_hrnet_config()
-    config = update_config(config, f"../experiments/hrnet/w32_512_adam_lr1e-3.yaml")
-    eval_writer = EvalWriter(config, fname="w32_512_adam_lr1e-3.yaml")
+    config = update_config(config, f"../experiments/{args.config}")
+    config = update_config_command(config, args.options)
+    eval_writer = EvalWriter(config, fname=args.out_file)
+
+    scaling_type = "short_with_resize" if config.TEST.PROJECT2IMAGE else "short"
+    output_sizes = config.DATASET.OUTPUT_SIZE
+    max_num_people = config.DATASET.MAX_NUM_PEOPLE
+    num_joints = config.DATASET.NUM_JOINTS
+    transforms, _ = transforms_to_tensor(config)
 
     parser = HeatmapParser(config)
-    heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
-    transforms, _ = transforms_hr_eval(config)
-    eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=False, seed=0, mode="val", img_ids=None, year=17,
-                                transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
-                                filter_empty=False)
+    heatmap_generator = [HeatmapGenerator(output_sizes[0], num_joints),
+                         HeatmapGenerator(output_sizes[1], num_joints)]
+    joint_generator = [JointsGenerator(max_num_people, num_joints, output_sizes[0], True),
+                       JointsGenerator(max_num_people, num_joints, output_sizes[1], True)]
+    if config.TEST.SPLIT == "coco_17_full":
+        assert config.DATASET.NUM_JOINTS == 17
+        eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=False, seed=0, mode="val", img_ids=None, year=17,
+                                    transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
+                                    filter_empty=False, joint_generator=joint_generator)
+    elif config.TEST.SPLIT == "test-dev2017":
+        raise NotImplementedError
+    elif config.TEST.SPLIT == "crowd_pose_test":
+        assert config.DATASET.NUM_JOINTS == 14
+        eval_set = CrowdPoseKeypoints(config.DATASET.ROOT, mini=False, seed=0, mode="test",
+                                      transforms=transforms, heatmap_generator=heatmap_generator,
+                                      filter_empty=False, joint_generator=joint_generator)
+    elif config.TEST.SPLIT == "ochuman_valid":
+        assert config.DATASET.NUM_JOINTS == 17
+        eval_set = OCHumans('../../storage/user/kistern/OCHuman', seed=0, mode="val",
+                            transforms=transforms, mask_crowds=False)
+    elif config.TEST.SPLIT == "ochuman_test":
+        assert config.DATASET.NUM_JOINTS == 17
+        eval_set = OCHumans('../../storage/user/kistern/OCHuman', seed=0, mode="test",
+                            transforms=transforms, mask_crowds=False)
+    else:
+        raise NotImplementedError
 
     model = get_hr_model(config, device)
     model.to(device)
     model.eval()
 
-    anns = []
-    anns_with_people = []
-    imgs_with_people = []
+    anns_ae = []
+    anns_cc = []
 
     eval_ids = []
     num_iter = len(eval_set)
@@ -110,34 +147,33 @@ def main():
         for i in tqdm(range(num_iter)):
             eval_ids.append(eval_set.img_ids[i])
 
-            img, _, masks, keypoints, factors = eval_set[i]
+            img = eval_set[i][0]
             img = img.to(device)[None]
-            masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
-            heatmaps, tags = model(img)
+            heatmaps, tags = model.multi_scale_inference(img, device, config)
 
-            grouped, scores = parser.parse(heatmaps[0], tags[0], adjust=True, refine=True)
-
-            img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
+            grouped_heu, scores_heu = parser.parse(heatmaps, tags, adjust=config.TEST.ADJUST, refine=config.TEST.REFINE)
+            grouped_cc, scores_cc = cluster_cc(heatmaps[0], tags[0], config)
 
 
-            if len(grouped[0]) != 0:
-                ann = perd_to_ann(grouped[0], scores, img_info, int(eval_set.img_ids[i]), "short_with_resize")
-                anns.append(ann)
-                if keypoints.sum() != 0:
-                    anns_with_people.append(ann)
+            img_shape = (img.shape[3], img.shape[2])
+            if len(grouped_heu[0]) != 0:
+                ann = perd_to_ann(grouped_heu[0], scores_heu, img_shape, int(eval_set.img_ids[i]), config.DATASET.INPUT_SIZE, scaling_type,
+                                  min(config.TEST.SCALE_FACTOR))
+                anns_ae.append(ann)
+            if len(grouped_cc) != 0:
+                ann = perd_to_ann(grouped_cc, scores_cc, img_shape, int(eval_set.img_ids[i]), config.DATASET.INPUT_SIZE, scaling_type,
+                                  min(config.TEST.SCALE_FACTOR))
+                anns_cc.append(ann)
 
-            if keypoints.sum() != 0:
-                imgs_with_people.append(int(eval_set.img_ids[i]))
 
-
-        eval_writer.eval_coco(eval_set.coco, anns, np.array(eval_ids), "General Evaluation")
-        # eval_writer.eval_coco(eval_set.coco, anns_with_people, np.array(imgs_with_people), f"General Evaluation on not empty images {len(anns_with_people)}")
+        eval_writer.eval_coco(eval_set.coco, anns_ae, np.array(eval_ids), "General Evaluation with heuristic grouping")
+        eval_writer.eval_coco(eval_set.coco, anns_cc, np.array(eval_ids), "General Evaluation with correlation clustering")
         eval_writer.close()
 
 
-def perd_to_ann(grouped, scores, img_info, img_id, scaling_type):
-    persons_pred_orig = reverse_affine_map(grouped.copy(), (img_info["width"], img_info["height"]), scaling_type=scaling_type)
+def perd_to_ann(grouped, scores, img_shape, img_id, input_size, scaling_type, min_scale):
+    persons_pred_orig = reverse_affine_map(grouped.copy(), img_shape, input_size, scaling_type, min_scale)
 
     ann = gen_ann_format(persons_pred_orig, scores, img_id)
     return ann

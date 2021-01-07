@@ -209,7 +209,7 @@ class OCHumanTransform(object):
 
         return image, mask, joints, factors
 
-
+# todo REMOVE
 class HRNetEvalTransform(object):
     def __init__(self,
                  input_size,

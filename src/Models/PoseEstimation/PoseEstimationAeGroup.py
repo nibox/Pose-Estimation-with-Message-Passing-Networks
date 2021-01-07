@@ -104,7 +104,7 @@ class PoseEstimationAeGroup(nn.Module):
         return heatmaps, tags
 
 
-    def multi_scale_inference(self, img, scales, device, config):
+    def multi_scale_inference(self, img, device, config):
         # need: scales
         assert img.shape[0] == 1  # batch size of 1
         transforms = torchvision.transforms.Compose(
@@ -119,14 +119,14 @@ class PoseEstimationAeGroup(nn.Module):
         image = img[0].cpu().permute(1, 2, 0).numpy()  # prepair for transformation
 
         base_size, center, scale = get_multi_scale_size(
-            image, config.DATASET.INPUT_SIZE, 1.0, min(scales)
+            image, config.DATASET.INPUT_SIZE, 1.0, min(config.TEST.SCALE_FACTOR)
         )
         final_heatmaps = None
         tags_list = []
-        for idx, s in enumerate(sorted(scales, reverse=True)):
+        for idx, s in enumerate(sorted(config.TEST.SCALE_FACTOR, reverse=True)):
             input_size = config.DATASET.INPUT_SIZE
             image_resized, center, scale = resize_align_multi_scale(
-                image, input_size, s, min(scales)
+                image, input_size, s, min(config.TEST.SCALE_FACTOR)
             )
             image_resized = transforms(image_resized)
             image_resized = image_resized[None].to(device)
@@ -139,7 +139,7 @@ class PoseEstimationAeGroup(nn.Module):
             final_heatmaps, tags_list = aggregate_results(
                 config, s, final_heatmaps, tags_list, heatmaps, tags
             )
-        final_heatmaps = final_heatmaps / float(len(scales))
+        final_heatmaps = final_heatmaps / float(len(config.TEST.SCALE_FACTOR))
         tags = torch.cat(tags_list, dim=4)
 
         return final_heatmaps, tags

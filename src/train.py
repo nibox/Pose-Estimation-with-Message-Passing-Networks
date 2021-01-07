@@ -129,6 +129,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
         output["masks"]["heatmap"] = masks
         output["labels"]["heatmap"] = heatmaps
         output["labels"]["tag"] = ae_targets
+        output["labels"]["keypoints"] = keypoints
 
         if isinstance(loss_func, (MultiLossFactory, MPNLossFactory)):
             output["masks"]["edge"] = [output["masks"]["edge"] for _ in range(len(output["preds"]["edge"]))]
@@ -140,7 +141,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             edge_masks = []
             edge_labels = []
             # first the graph reduction
-            for i in range(len(output["preds"]["node"])): # not sure if this is correct?
+            for i in range(len(output["preds"]["node"])):  # not sure if this is correct?
                 include_bordering_nodes = kwargs["config"].MODEL.LOSS.INCLUDE_BORDERING_NODES
                 mask = mask_node_connections(output["preds"]["node"][i].sigmoid().detach(), output["graph"]["edge_index"],
                                              kwargs["config"].MODEL.MPN.NODE_THRESHOLD, output["labels"]["node"],
@@ -150,7 +151,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
             output["labels"]["edge"] = edge_labels
             output["masks"]["edge"] = edge_masks
 
-            loss, logging = loss_func(output["preds"], output["labels"], output["masks"])
+            loss, logging = loss_func(output["preds"], output["labels"], output["masks"], output["graph"])
         elif isinstance(loss_func, BackgroundClassMultiLossFactory):
             edge_masks = []
             edge_labels = []
@@ -194,7 +195,7 @@ def main():
 
     ##########################################################
     config_name = sys.argv[1]
-    # config_name = "hybrid_class_agnostic_end2end_crowd_pose/model_80_2"  # sys.argv[1]
+    # config_name = "hybrid_class_agnostic_end2end/model_63_2_3"  # sys.argv[1]
     config = get_config()
     config = update_config(config, f"../experiments/{config_name}.yaml")
 
@@ -223,29 +224,11 @@ def main():
         else:
             raise NotImplementedError
 
-        if config.MODEL.LOSS.NAME == "edge_loss":
-            loss_func = MultiLossFactory(config)
-        elif config.MODEL.LOSS.NAME == "node_edge_loss":
-            loss_func = ClassMultiLossFactory(config)
-        elif config.MODEL.LOSS.NAME == "node_with_background_edge_loss":
-            loss_func = BackgroundClassMultiLossFactory(config)
-        elif config.MODEL.LOSS.NAME == "tag_loss":
-            loss_func = TagMultiLossFactory(config)
-        elif config.MODEL.LOSS.NAME == "pure_tag_loss":
-            loss_func = PureTagMultiLossFactory(config)
-        else:
-            raise NotImplementedError
+        loss_func = ClassMultiLossFactory(config)
     else:
         model.freeze_backbone(mode="complete")
         optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR, weight_decay=config.TRAIN.W_DECAY)
-        if config.MODEL.LOSS.NAME == "edge_loss":
-            loss_func = MPNLossFactory(config)
-        elif config.MODEL.LOSS.NAME == "node_edge_loss":
-            loss_func = ClassMPNLossFactory(config)
-        elif config.MODEL.LOSS.NAME == "pure_tag_loss":
-            loss_func = PureTagMultiLossFactory(config)
-        else:
-            raise NotImplementedError
+        loss_func = ClassMultiLossFactory(config)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, config.TRAIN.LR_STEP, config.TRAIN.LR_FACTOR)
     model.to(device)
 
@@ -372,6 +355,7 @@ def main():
                 output["masks"]["heatmap"] = masks
                 output["labels"]["heatmap"] = heatmaps
                 output["labels"]["tag"] = ae_targets
+                output["labels"]["keypoints"] = keypoints
 
                 preds, labels, masks = output["preds"], output["labels"], output["masks"]
                 if isinstance(loss_func, (MultiLossFactory, MPNLossFactory, TagMultiLossFactory)):
@@ -396,7 +380,7 @@ def main():
                     labels["edge"] = edge_labels
                     masks["edge"] = edge_masks
 
-                    loss, logging = loss_func(preds, labels, masks)
+                    loss, logging = loss_func(preds, labels, masks, output["graph"])
                     #
                     default_pred = torch.zeros(output["graph"]["edge_index"].shape[1], dtype=torch.float,
                                                device=output["graph"]["edge_index"].device) - 1.0

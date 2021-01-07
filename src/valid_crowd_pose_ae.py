@@ -153,7 +153,7 @@ def main():
                 keypoints = None
                 factors = None
 
-            scoremaps, output = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, config, keypoints, factors)
+            scoremaps, output = model.multi_scale_inference(img, config, keypoints)
             preds_nodes, preds_tags, preds_classes = output["preds"]["node"], output["preds"]["tag"], output["preds"]["class"]
             node_labels, class_labels = output["labels"]["node"],  output["labels"]["class"]
             joint_det = output["graph"]["nodes"]

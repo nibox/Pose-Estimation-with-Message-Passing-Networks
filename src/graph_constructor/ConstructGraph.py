@@ -204,7 +204,7 @@ class NaiveGraphConstructor:
                                                                                          edge_index.detach())
 
             x_list.append(x)
-            batch_index.append(torch.ones(joint_det.shape[0], dtype=torch.long) * batch)
+            batch_index.append(torch.ones(joint_det.shape[0], dtype=torch.long, device=self.device) * batch)
             num_node_list.append(x.shape[0] + num_node_list[-1])
             edge_attr_list.append(edge_attr)
             edge_index_list.append(edge_index)
@@ -323,6 +323,11 @@ class NaiveGraphConstructor:
         if {"position", "connection_type"} == set(edge_features_to_use):
             edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1), connection_label_2.float()],
                                   dim=1)
+        elif {"connection_type"} == set(edge_features_to_use):
+                edge_attr = torch.cat([connection_label_2.float()],
+                                      dim=1)
+        elif {"nothing"} == set(edge_features_to_use):
+            edge_attr = torch.zeros_like(edge_attr_x).to(self.device).float().unsqueeze(1)
         elif {"position"} == set(edge_features_to_use):
             edge_attr = torch.cat([edge_attr_x.unsqueeze(1), edge_attr_y.unsqueeze(1)], dim=1)
         elif {"position", "angle", "connection_type"} == set(edge_features_to_use):
@@ -778,6 +783,9 @@ class NaiveGraphConstructor:
 
         different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))
         method = 2
+        # 2 semi agnostic
+        # 3 pure agnostic
+        # 1 do not use it
         # """
         if method == 1:
             # different_type = torch.logical_not(torch.eq(joint_idx_gt.unsqueeze(1), joint_det[:, 2]))

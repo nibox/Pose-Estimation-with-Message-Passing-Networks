@@ -8,7 +8,7 @@ from tqdm import tqdm
 
 from config import get_config, update_config
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, JointsGenerator
-from Utils import pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics, subgraph_mask, one_hot_encode, refine, adjust_joints
+from Utils import pred_to_person, pred_to_person_ae, adjust, to_tensor, calc_metrics, subgraph_mask, one_hot_encode, refine, adjust_joints
 from Models.PoseEstimation import get_pose_model
 from Utils.transformations import reverse_affine_map
 from Utils.transforms import transforms_to_tensor
@@ -28,8 +28,7 @@ def main():
     ######################################
 
     config_dir = "hybrid_class_agnostic_end2end"
-    # config_dir = "train"
-    # config_name = "model_56_1_0_6_0"
+    # config_name = "model_58_4"
     # file_name = "t"
     config_name = sys.argv[1]
     file_name = sys.argv[2]
@@ -47,8 +46,11 @@ def main():
                                 filter_empty=False, joint_generator=joint_generator)
 
     model = get_pose_model(config, device)
-    state_dict = torch.load(config.MODEL.PRETRAINED)
-    model.load_state_dict(state_dict["model_state_dict"])
+    if config.MODEL.PRETRAINED != "":
+        state_dict = torch.load(config.MODEL.PRETRAINED, map_location=device)
+        model.load_state_dict(state_dict["model_state_dict"])
+    else:
+        assert config_name == "model_63"
     model.to(device)
     model.eval()
 
@@ -58,6 +60,7 @@ def main():
     # eval model
     anns = []
     anns_w_correct_scores = []
+    anns_w_single = []
     anns_w_mean_scores = []
     anns_full = []
     anns_back = []
@@ -92,7 +95,7 @@ def main():
                 keypoints = None
                 factors = None
 
-            scoremaps, output = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, config, keypoints, factors)
+            scoremaps, output = model.multi_scale_inference(img, config, keypoints)
             preds_nodes, preds_edges, preds_classes = output["preds"]["node"], output["preds"]["edge"], output["preds"]["class"]
             node_labels, edge_labels, class_labels = output["labels"]["node"], output["labels"]["edge"], output["labels"]["class"]
             joint_det, edge_index = output["graph"]["nodes"], output["graph"]["edge_index"]
@@ -136,6 +139,7 @@ def main():
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
+            """
             ann = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
                               config.DATASET.INPUT_SIZE, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
                               scaling_type, min(config.TEST.SCALE_FACTOR), config.TEST.ADJUST,
@@ -182,36 +186,38 @@ def main():
                                               config.MODEL.GC.CC_METHOD, scaling_type, min(config.TEST.SCALE_FACTOR),
                                               True, config.MODEL.MPN.NODE_THRESHOLD, preds_classes, True, joint_scores,
                                               False)
+            # """
+            ann = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+                              config.DATASET.INPUT_SIZE, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+                              scaling_type, min(config.TEST.SCALE_FACTOR), config.TEST.ADJUST,
+                              config.MODEL.MPN.NODE_THRESHOLD, preds_classes, config.TEST.WITH_REFINE, joint_scores,
+                              False, scoring_method="mean")
+            ann_w_adjust = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+                                       config.DATASET.INPUT_SIZE, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+                                       scaling_type, min(config.TEST.SCALE_FACTOR), True,
+                                       config.MODEL.MPN.NODE_THRESHOLD, preds_classes, False, joint_scores, False, scoring_method="mean")
+            ann_w_correct_scores = perd_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+                                       config.DATASET.INPUT_SIZE, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+                                       scaling_type, min(config.TEST.SCALE_FACTOR), True,
+                                       config.MODEL.MPN.NODE_THRESHOLD, preds_classes, False, joint_scores, False, scoring_method="correct")
+            ann_w_single = perd_to_ann_single_joint(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_info,
+                                       config.DATASET.INPUT_SIZE, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+                                       scaling_type, min(config.TEST.SCALE_FACTOR), True,
+                                       config.MODEL.MPN.NODE_THRESHOLD, preds_classes, False, joint_scores, False, scoring_method="mean")
 
             if ann is not None:
                 anns.append(ann)
-                anns_w_correct_scores.append(ann_w_correct_scores)
-                anns_w_mean_scores.append(ann_w_mean_scores)
-                anns_full.append(ann_full)
-                anns_back.append(ann_bone)
                 anns_w_adjust.append(ann_w_adjust)
-                anns_w_adjust_refine.append(ann_w_adjust_refine)
-                anns_w_refine.append(ann_w_refine)
-                anns_w_correct_adj.append(ann_w_correct_adj)
-                if ann_filter is not None:
-                    anns_filter.append(ann_filter)
-            if keypoints is not None and ann is not None:
-                imgs_with_people.append(int(eval_set.img_ids[i]))
-                anns_with_people.append(ann)
+                anns_w_correct_scores.append(ann_w_correct_scores)
+            if ann_w_single is not None:
+                anns_w_single.append(ann_w_single)
+
 
 
         eval_writer.eval_coco(eval_set.coco, anns, np.array(eval_ids), "General Evaluation", "kpt_det_full_set_multi_scale.json")
-        eval_writer.eval_coco(eval_set.coco, anns_w_correct_scores, np.array(eval_ids), "General Correct scores")
-        eval_writer.eval_coco(eval_set.coco, anns_w_mean_scores, np.array(eval_ids), "General mean scores ")
-        eval_writer.eval_coco(eval_set.coco, anns_full, np.array(eval_ids), "Using everything + correct adjustment")
-        eval_writer.eval_coco(eval_set.coco, anns_filter, np.array(eval_ids), "Using pose proposal filter")
-        eval_writer.eval_coco(eval_set.coco, anns_back, np.array(eval_ids), "Using keypoint detector classes")
-        eval_writer.eval_coco(eval_set.coco, anns_w_refine, np.array(eval_ids), "With refinment", "full_dt.json")
-        eval_writer.eval_coco(eval_set.coco, anns_w_adjust, np.array(eval_ids), "With adjustment", "full_dt.json")
-        eval_writer.eval_coco(eval_set.coco, anns_w_correct_adj, np.array(eval_ids), "With correct adjustment", "full_dt.json")
-        eval_writer.eval_coco(eval_set.coco, anns_w_adjust_refine, np.array(eval_ids), "Wtih refinement + adjustment", "full_dt.json")
-        eval_writer.eval_coco(eval_set.coco, anns_with_people, np.array(imgs_with_people), f"General Evaluation on not empty images {len(anns_with_people)}")
-
+        eval_writer.eval_coco(eval_set.coco, anns_w_adjust, np.array(eval_ids), "With adjustment and mean scores", "full_dt.json")
+        eval_writer.eval_coco(eval_set.coco, anns_w_correct_scores, np.array(eval_ids), "With adjustment and correct scores", "full_dt.json")
+        eval_writer.eval_coco(eval_set.coco, anns_w_single, np.array(eval_ids), "With single joint persons", "full_dt.json")
 
         eval_writer.eval_metrics(eval_node, "Node metrics")
         eval_writer.eval_metrics(eval_edge, "Edge metrics")
@@ -234,7 +240,7 @@ def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_
             edge_index[1, :], 2]] = 0.0  # set edge predictions of same types to zero
         persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, preds_classes, cc_method, 17)
     else:
-        persons_pred = np.zeros([1, 17, 3])
+        return None
     # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
     if len(persons_pred.shape) == 1:  # this means none persons were detected
         return None
@@ -246,6 +252,43 @@ def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_
         persons_pred = persons_pred[keep]
         if persons_pred.shape[0] == 0:
             return None
+
+    if with_refine and persons_pred[0, :, 2].sum() != 0:
+        tags = tags.cpu().numpy()
+        scoremaps = scoremaps.cpu().numpy()
+        persons_pred = refine(scoremaps, tags, persons_pred)
+    if adjustment:
+        persons_pred = adjust(persons_pred, scoremaps)
+    persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]), input_size, scaling_type=scaling_type,
+                                           min_scale=min_scale)
+
+    if scoring_method is None:
+        ann = gen_ann_format(persons_pred_orig, img_id)
+    elif scoring_method == "mean":
+        ann = gen_ann_format_mean(persons_pred_orig, img_id)
+    elif scoring_method == "correct":
+        ann = gen_ann_format_correct(persons_pred_orig, img_id)
+    else:
+        raise NotImplementedError
+    return ann
+
+
+def perd_to_ann_single_joint(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_info, input_size, img_id, cc_method,
+                scaling_type, min_scale, adjustment, th, preds_classes, with_refine, score_map_scores, with_filter,
+                scoring_method=None):
+    if (score_map_scores > 0.1).sum() < 1:
+        return None
+    true_positive_idx = joint_scores > th
+    edge_index, pred = subgraph(true_positive_idx, edge_index, pred)
+
+    pred[joint_det[edge_index[0, :], 2] == joint_det[
+        edge_index[1, :], 2]] = 0.0  # set edge predictions of same types to zero
+    persons_pred, _, _ = pred_to_person_ae(joint_det, joint_scores, edge_index, pred, preds_classes, cc_method, 17,
+                                           allow_single_joint_persons=True)
+
+    if len(persons_pred.shape) == 1:  # this means none persons were detected
+        return None
+        # persons_pred = np.zeros([1, 17, 3])
 
     if with_refine and persons_pred[0, :, 2].sum() != 0:
         tags = tags.cpu().numpy()

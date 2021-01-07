@@ -80,14 +80,14 @@ def coco_eval(coco, dt, image_ids, tmp_dir="tmp", log=True):
     return coco_eval.stats
 
 def main():
-    device = torch.device("cuda") if torch.cuda.is_available() and False else torch.device("cpu")
+    device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     ######################################
 
     config = get_hrnet_config()
     config = update_config(config, f"../experiments/hrnet/w32_512_adam_lr1e-3.yaml")
-    eval_writer = EvalWriter(config, fname="test.txt")
+    eval_writer = EvalWriter(config, fname="test")
 
     parser = HeatmapParser(config)
     heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
@@ -108,7 +108,7 @@ def main():
     imgs_with_people = []
 
     eval_ids = []
-    num_iter = 3#len(eval_set)
+    num_iter = len(eval_set)
     with torch.no_grad():
         for i in tqdm(range(num_iter)):
             eval_ids.append(eval_set.img_ids[i])
@@ -117,7 +117,7 @@ def main():
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
-            heatmaps, tags = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, device,config)
+            heatmaps, tags = model.multi_scale_inference(img, device, config)
 
             grouped, scores = parser.parse(heatmaps, tags, adjust=True, refine=True)
 

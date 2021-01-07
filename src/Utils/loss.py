@@ -542,23 +542,57 @@ class ClassMultiLossFactory(nn.Module):
     def __init__(self, config):
         super().__init__()
         # init check
+        if isinstance(config.MODEL.LOSS.NAME, str):
+            print("the use of names for indicating the used loss is not possible anymore."
+                  " Instead, use a list of the used losses.")
+            raise NotImplementedError
 
         self.num_joints = config.MODEL.HRNET.NUM_JOINTS
         self.num_stages = config.MODEL.HRNET.LOSS.NUM_STAGES
-        self.loss_weights = config.MODEL.LOSS.LOSS_WEIGHTS
-        assert len(self.loss_weights) in [2,3]
+        # self.loss_weights = config.MODEL.LOSS.LOSS_WEIGHTS
+        self.edge_weight = config.MODEL.LOSS.EDGE_WEIGHT
+        self.node_weight = config.MODEL.LOSS.NODE_WEIGHT
+        self.class_weight = config.MODEL.LOSS.CLASS_WEIGHT
+        self.tag_weight = config.MODEL.LOSS.TAG_WEIGHT
 
+        self.sync_tags = config.MODEL.LOSS.SYNC_TAGS
+        self.sync_gt_tags = config.MODEL.LOSS.SYNC_GT_TAGS
 
-        if config.MODEL.KP in ["hrnet", "mmpose_hrnet"]:
-            self.heatmaps_loss = \
-                nn.ModuleList(
-                    [
-                        HeatmapLoss()
-                        if with_heatmaps_loss else None
-                        for with_heatmaps_loss in config.MODEL.HRNET.LOSS.WITH_HEATMAPS_LOSS
-                    ]
-                )
-            self.heatmaps_loss_factor = config.MODEL.HRNET.LOSS.HEATMAPS_LOSS_FACTOR
+        self.heatmaps_loss = None
+        self.ae_loss = None
+        self.edge_loss = None
+        self.node_loss = None
+        self.class_loss = None
+        self.tag_loss = None
+
+        losses_to_use = config.MODEL.LOSS.NAME
+        if "heatmap" in losses_to_use:
+            if config.MODEL.KP in ["hrnet", "mmpose_hrnet"]:
+                self.heatmaps_loss = \
+                    nn.ModuleList(
+                        [
+                            HeatmapLoss()
+                            if with_heatmaps_loss else None
+                            for with_heatmaps_loss in config.MODEL.HRNET.LOSS.WITH_HEATMAPS_LOSS
+                        ]
+                    )
+                self.heatmaps_loss_factor = config.MODEL.HRNET.LOSS.HEATMAPS_LOSS_FACTOR
+
+            elif config.MODEL.KP == "hourglass":
+                self.heatmaps_loss = \
+                    nn.ModuleList(
+                        [HeatmapLoss() for _ in range(config.MODEL.HG.NSTACK)]
+                    )
+                self.ae_loss = [None for _ in range(config.MODEL.HG.NSTACK)]
+                self.heatmaps_loss_factor = [1.0, 1.0, 1.0, 1.0]
+        if "tagmap" in losses_to_use:
+            assert config.MODEL.KP != "hourglass"
+            # ensure that ae losses are actually set
+            num_ae_loss = 0
+            for with_ae_loss in config.TRAIN.WITH_AE_LOSS:
+                if with_ae_loss:
+                    num_ae_loss += 1
+            assert num_ae_loss > 0
 
             self.ae_loss = \
                 nn.ModuleList(
@@ -569,33 +603,27 @@ class ClassMultiLossFactory(nn.Module):
                 )
             self.push_loss_factor = config.MODEL.HRNET.LOSS.PUSH_LOSS_FACTOR
             self.pull_loss_factor = config.MODEL.HRNET.LOSS.PULL_LOSS_FACTOR
-        elif config.MODEL.KP == "hourglass":
-            self.heatmaps_loss = \
-                nn.ModuleList(
-                    [HeatmapLoss() for _ in range(config.MODEL.HG.NSTACK)]
-                )
-            self.ae_loss = [None for _ in range(config.MODEL.HG.NSTACK)]
-            self.heatmaps_loss_factor = [1.0, 1.0, 1.0, 1.0]
 
-        if config.MODEL.LOSS.USE_FOCAL:
-            self.edge_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA, logits=True)
-        else:
-            if config.MODEL.LOSS.EDGE_WITH_LOGITS:
-                self.edge_loss = BCELossWtihLogits(pos_weight=config.MODEL.LOSS.EDGE_BCE_POS_WEIGHT)
+        if "edge" in losses_to_use:
+            if config.MODEL.LOSS.USE_FOCAL:
+                self.edge_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA, logits=True)
             else:
-                self.edge_loss = BCELoss(pos_weight=config.MODEL.LOSS.EDGE_BCE_POS_WEIGHT)
-        if config.MODEL.LOSS.NODE_USE_FOCAL:
-            self.node_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA,
-                                       logits=True)
-        else:
-            raise NotImplementedError
-        self.class_loss = CrossEntropyLossWithLogits()
-        self.reg_loss = nn.SmoothL1Loss()
-        self.score_loss = nn.BCELoss()
-        # removed ae loss
+                if config.MODEL.LOSS.EDGE_WITH_LOGITS:
+                    self.edge_loss = BCELossWtihLogits(pos_weight=config.MODEL.LOSS.EDGE_BCE_POS_WEIGHT)
+                else:
+                    self.edge_loss = BCELoss(pos_weight=config.MODEL.LOSS.EDGE_BCE_POS_WEIGHT)
+        if "node" in losses_to_use:
+            if config.MODEL.LOSS.NODE_USE_FOCAL:
+                self.node_loss = FocalLoss(config.MODEL.LOSS.FOCAL_ALPHA, config.MODEL.LOSS.FOCAL_GAMMA,
+                                           logits=True)
+            else:
+                raise NotImplementedError
+        if "class" in losses_to_use:
+            self.class_loss = CrossEntropyLossWithLogits()
+        if "tag_loss" in losses_to_use:
+            self.tag_loss = NodeAELoss(config.MODEL.HRNET.LOSS.AE_LOSS_TYPE)
 
-
-    def forward(self, outputs, labels, masks):
+    def forward(self, outputs, labels, masks, graph):
 
         preds_heatmaps, heatmap_labels, heatmap_masks = outputs["heatmap"], labels["heatmap"], masks["heatmap"]
         tag_labels = labels["tag"]
@@ -603,88 +631,130 @@ class ClassMultiLossFactory(nn.Module):
         preds_nodes, node_labels, node_masks = outputs["node"], labels["node"], masks["node"]
         preds_classes, class_labels, class_masks = outputs["class"], labels["class"], masks["class"]  # classes use
 
-        """
-        if "refine" in outputs.keys():
-            preds_pos, node_targets = outputs["refine"], labels["refine"]
-        else:
-            preds_pos = None
-        """
+        preds_tags = outputs["tag"]
+        batch_index = labels["batch_index"]
+        node_person = labels["person"]
+        keypoints = labels["keypoints"]
+        joint_det = graph["nodes"]
 
         heatmap_loss = 0.0
         ae_loss = 0.0
-        for idx in range(len(preds_heatmaps)):
-            if self.heatmaps_loss[idx]:
-                heatmaps_pred = preds_heatmaps[idx][:, :self.num_joints]
+        if self.heatmaps_loss is not None:
+            for idx in range(len(preds_heatmaps)):
+                if self.heatmaps_loss[idx]:
+                    heatmaps_pred = preds_heatmaps[idx][:, :self.num_joints]
 
-                heatmaps_loss = self.heatmaps_loss[idx](
-                    heatmaps_pred, heatmap_labels[idx], heatmap_masks[idx]
-                )
-                heatmaps_loss = heatmaps_loss * self.heatmaps_loss_factor[idx]
-                heatmap_loss += heatmaps_loss.mean()  # average over batch
+                    heatmaps_loss = self.heatmaps_loss[idx](
+                        heatmaps_pred, heatmap_labels[idx], heatmap_masks[idx]
+                    )
+                    heatmaps_loss = heatmaps_loss * self.heatmaps_loss_factor[idx]
+                    heatmap_loss += heatmaps_loss.mean()  # average over batch
 
-            if self.ae_loss[idx]:
-                tags_pred = preds_heatmaps[idx][:, 17:]
-                batch_size = tags_pred.size()[0]
-                tags_pred = tags_pred.contiguous().view(batch_size, -1, 1)
+        if self.ae_loss is not None:
+            for idx in range(len(preds_heatmaps)):
+                if self.ae_loss[idx]:
+                    tags_pred = preds_heatmaps[idx][:, self.num_joints:]
+                    batch_size = tags_pred.size()[0]
+                    tags_pred = tags_pred.contiguous().view(batch_size, -1, 1)
 
-                push_loss, pull_loss = self.ae_loss[idx](
-                    tags_pred, tag_labels[idx]
-                )
-                push_loss = push_loss * self.push_loss_factor[idx]
-                pull_loss = pull_loss * self.pull_loss_factor[idx]
+                    push_loss, pull_loss = self.ae_loss[idx](
+                        tags_pred, tag_labels[idx]
+                    )
+                    push_loss = push_loss * self.push_loss_factor[idx]
+                    pull_loss = pull_loss * self.pull_loss_factor[idx]
 
-                ae_loss += push_loss.mean() + pull_loss.mean()
+                    ae_loss += push_loss.mean() + pull_loss.mean()
 
-
-        """
-        reg_l = 0.0
-        if preds_pos is not None:
-            node_person = preds_pos[:, 4].long()
-            node_types = preds_pos[:, 2].long()
-            targets_reg = node_targets[node_person, node_types, :2]
-            targets_score = (node_targets[node_person, node_types, 2] != 0).float()
-            positions = preds_pos[:, :2].reshape(-1)
-            scores = preds_pos[:, 3]
-
-            reg_l += self.reg_loss(positions, targets_reg.view(-1))
-            if scores.sum() != 0.0:
-                reg_l += self.score_loss(scores, targets_score)
-
-            if torch.isnan(reg_l):
-                reg_loss = 0.0
-        """
 
         node_loss = 0.0
-        for i in range(len(preds_nodes)):
-            node_loss += self.node_loss(preds_nodes[i], node_labels, "mean", node_masks)
-        node_loss = node_loss / len(preds_nodes)
+        if self.node_loss is not None:
+            for i in range(len(preds_nodes)):
+                node_loss += self.node_loss(preds_nodes[i], node_labels, "mean", node_masks)
+            node_loss = node_loss / len(preds_nodes)
+        node_loss *= self.node_weight
 
         edge_loss = 0.0
-        for i in range(len(preds_edges)):
-            if preds_edges[i] is None:
-                continue
-            edge_loss += self.edge_loss(preds_edges[i], edge_labels[i], "mean", edge_masks[i])
-        edge_loss = edge_loss / len(preds_edges)
-        if torch.isnan(edge_loss):
-            edge_loss = 0.0
+        if self.edge_loss is not None:
+            for i in range(len(preds_edges)):
+                edge_loss += self.edge_loss(preds_edges[i], edge_labels[i], "mean", edge_masks[i])
+            edge_loss = edge_loss / len(preds_edges)
+            if torch.isnan(edge_loss):
+                edge_loss = 0.0
+        edge_loss *= self.edge_weight
 
         class_loss = 0.0
-        if preds_classes is not None:
+        if self.class_loss is not None:
             for i in range(len(preds_classes)):
                 class_loss += self.class_loss(preds_classes[i], class_labels, "mean", node_labels)
             class_loss = class_loss / len(preds_classes)
+        class_loss *= self.class_weight
 
-        logging = {"heatmap": heatmap_loss.cpu().item(),
+        tag_loss = 0.0
+        if self.tag_loss is not None:
+            pred_tags = preds_tags[-1]
+            heatmap_tags = preds_heatmaps[0][:, self.num_joints:]
+            heatmap_tags = torch.nn.functional.interpolate(
+                heatmap_tags,
+                size=(preds_heatmaps[1].shape[2], preds_heatmaps[1].shape[3]),
+                mode='bilinear',
+                align_corners=False
+            )
+            if pred_tags is None:
+                pred_tags = heatmap_tags[batch_index, joint_det[:, 2], joint_det[:, 1], joint_det[:, 0]]
+
+            if self.sync_gt_tags:
+                print(keypoints.shape)
+                batch_size, num_persons, num_joints = keypoints.shape[:3]
+                gt_types = torch.arange(0, num_joints, dtype=keypoints.dtype, device=keypoints.device).repeat(num_persons*batch_size).reshape(-1, 1)
+                keypoints = keypoints.reshape(-1, 3)
+                keypoints = torch.cat([keypoints, gt_types], dim=1).long().clamp(0, max(heatmap_tags.shape[2], heatmap_tags.shape[3])-1)
+                valid_keypoints = keypoints[:, 2] > 0.0
+                print(f"num_valid_kpt:{valid_keypoints.sum()}")
+                if valid_keypoints.sum() > 0.0:
+                    keypoints = keypoints[valid_keypoints]
+                    gt_node_person = torch.arange(0, num_persons, dtype=torch.long, device=keypoints.device).repeat_interleave(num_joints).repeat(batch_size, 1).reshape(-1)
+                    gt_batch_index = torch.arange(0, batch_size, dtype=torch.long, device=keypoints.device).repeat_interleave(num_persons*num_joints)
+                    gt_node_labels = torch.ones_like(gt_batch_index, dtype=torch.float32, device=keypoints.device)
+                    gt_node_person = gt_node_person[valid_keypoints]
+                    gt_batch_index = gt_batch_index[valid_keypoints]
+                    gt_node_labels = gt_node_labels[valid_keypoints]
+                    batch_index = torch.cat([batch_index, gt_batch_index])
+                    node_person = torch.cat([node_person, gt_node_person])
+                    node_labels = torch.cat([node_labels, gt_node_labels])
+
+                    print(f"num_valid_kpt:{valid_keypoints.sum()}")
+                    print(f"heatmaptags shape:{heatmap_tags.shape}")
+                    print(f"max/min :{keypoints[:, 1].max()} {keypoints[:, 1].min()}")
+                    print(f"max/min x:{keypoints[:, 0].max()} {keypoints[:, 0].min()}")
+                    print(f"max/min t:{keypoints[:, 3].max()} {keypoints[:, 3].min()}")
+
+                    gt_pred_tags = heatmap_tags[gt_batch_index, keypoints[:, 3], keypoints[:, 1], keypoints[:, 0]]
+                    pred_tags = torch.cat([pred_tags, gt_pred_tags])
+
+            if self.sync_tags:
+                assert len(preds_tags) == 1
+                print("wtf")
+
+                heatmap_tags = heatmap_tags[batch_index, joint_det[:, 2], joint_det[:, 1], joint_det[:, 0]]
+                batch_index = torch.cat([batch_index, batch_index])
+                node_person = torch.cat([node_person, node_person])
+                node_labels = torch.cat([node_labels, node_labels])
+                pred_tags = torch.cat([pred_tags, heatmap_tags])
+
+            if (node_labels == 1.0).sum() > 0.0:
+                push, pull = self.tag_loss(pred_tags[node_labels == 1.0], node_person[node_labels == 1.0],
+                                           batch_index[node_labels == 1.0])
+                tag_loss += push.mean() + pull.mean()
+        tag_loss *= self.tag_weight
+
+        loss = node_loss + edge_loss + class_loss + heatmap_loss + ae_loss + tag_loss
+
+        logging = {"heatmap": heatmap_loss.cpu().item() if isinstance(heatmap_loss, torch.Tensor) else heatmap_loss,
                    "tag_loss": ae_loss.cpu().item() if isinstance(ae_loss, torch.Tensor) else ae_loss,
                    "edge": edge_loss.cpu().item() if isinstance(edge_loss, torch.Tensor) else edge_loss,
-                   "node": node_loss.cpu().item(),
+                   "node": node_loss.cpu().item() if isinstance(node_loss, torch.Tensor) else node_loss,
                    "class_loss": class_loss.cpu().item() if isinstance(class_loss, torch.Tensor) else class_loss,
-                   }
-        if len(self.loss_weights) == 3:
-            class_loss *= self.loss_weights[2]
-
-        loss = self.loss_weights[0] * node_loss + edge_loss * self.loss_weights[1] + heatmap_loss + ae_loss + class_loss
-        logging["loss"] = loss.cpu().item()
+                   "loss": loss.cpu().item()}
 
         return loss, logging
 

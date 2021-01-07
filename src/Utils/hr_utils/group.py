@@ -13,6 +13,10 @@ from __future__ import print_function
 from munkres import Munkres
 import numpy as np
 import torch
+from torch_geometric import utils as gutils
+
+from Utils import Graph, adjust, refine
+from Utils.correlation_clustering.correlation_clustering_utils import cluster_graph
 
 
 def cat_unique(tensor_1, tensor_2):
@@ -186,55 +190,6 @@ class HeatmapParser(object):
 
         return ans
 
-    def threshold_with_topk(self, det, tag):
-        #
-        det = self.nms(det)
-        num_images = det.size(0)
-        num_joints = det.size(1)
-        h = det.size(2)
-        w = det.size(3)
-        det = det.view(num_images, num_joints, -1)
-        val_k, ind = det.topk(5, dim=2)
-
-        tag = tag.view(tag.size(0), tag.size(1), w*h, -1)
-        if not self.tag_per_joint:
-            tag = tag.expand(-1, self.params.num_joints, -1, -1)
-
-        tag_k = torch.stack(
-            [
-                torch.gather(tag[:, :, :, i], 2, ind)
-                for i in range(tag.size(3))
-            ],
-            dim=3
-        )
-
-        x = ind % w
-        y = (ind / w).long()
-
-        ind_k = torch.stack((x, y), dim=3)
-
-        k = 5
-        shape = det.shape
-        scores, indices = det.view(17, -1).topk(k=k, dim=1)
-        container = torch.zeros_like(det, device=det.device, dtype=torch.float).reshape(17, -1)
-        container[np.arange(0, 17).reshape(17, 1), indices] = scores
-        container = container.reshape(shape)
-        top_joint_idx_det, top_joint_y, top_joint_x = container.nonzero(as_tuple=True)
-        # top_joint_scores = container[top_joint_idx_det, top_joint_y, top_joint_x]
-
-        scoremap_zero = torch.where(det < 0.1, torch.zeros_like(det), det)
-        joint_idx_det, joint_y, joint_x = scoremap_zero.nonzero()
-
-        top_joint_pos = torch.stack([top_joint_x, top_joint_y, top_joint_idx_det], 1)
-        thresh_joint_pos = torch.stack([joint_x, joint_y, joint_idx_det], 1)
-        joint_positions_det = cat_unique(top_joint_pos, thresh_joint_pos)
-        joint_scores = det[joint_positions_det[:, 2], joint_positions_det[:, 1], joint_positions_det[:, 0]]
-        ans = {
-            'tag_k': tag_k.cpu().numpy(),
-            'loc_k': ind_k.cpu().numpy(),
-            'val_k': val_k.cpu().numpy()
-        }
-
     def adjust(self, ans, det):
         for batch_id, people in enumerate(ans):
             for people_id, i in enumerate(people):
@@ -345,3 +300,94 @@ class HeatmapParser(object):
             ans = [ans]
 
         return ans, scores
+
+
+def cluster_cc(heatmaps, tagmaps, config):
+    # heatmap shape: (joints, h, w)
+    # tags: (joints, h, w, tag_dim)
+    # extract detections
+    from Utils import non_maximum_suppression
+    heatmaps = non_maximum_suppression(heatmaps, threshold=0.1, pool_kernel=config.TEST.NMS_KERNEL) * heatmaps
+    num_joints = heatmaps.shape[0]
+
+    k = 50
+    scoremap_shape = heatmaps.shape
+    scores, indices = heatmaps.view(num_joints, -1).topk(k=k, dim=1)
+    container = torch.zeros_like(heatmaps, device=heatmaps.device, dtype=torch.float).reshape(num_joints, -1)
+    container[np.arange(0, num_joints).reshape(num_joints, 1), indices] = scores + 1e-10  #
+    container = container.reshape(scoremap_shape)
+    joint_idx_det, joint_y, joint_x = container.nonzero(as_tuple=True)
+
+    scores = container[joint_idx_det, joint_y, joint_x]
+    det = torch.stack([joint_x, joint_y, joint_idx_det], 1)
+    valid = scores > 0.1
+    scores = scores[valid]
+    det = det[valid]
+    tags = tagmaps[det[:, 2], det[:, 1], det[:, 0]]
+    # scores (N)
+    # det (N, 3)
+
+    # construct graph
+    num_joints_det = len(det)
+    if num_joints_det == 0:
+        return [], []
+    elif num_joints_det > 1:
+        edge_index, _ = gutils.dense_to_sparse(torch.ones([num_joints_det, num_joints_det], dtype=torch.long))
+        edge_index = gutils.to_undirected(edge_index, len(det))
+        edge_index, _ = gutils.remove_self_loops(edge_index)
+
+        t_a = 1 # 1.8425  # based on "features for multi-target multi-camera tracking and re-identification"
+        distance = (tags[edge_index[1]] - tags[edge_index[0]]).norm(p=None, dim=1,
+                                                                                keepdim=True)
+        edge_attr = torch.div(t_a - distance, t_a)
+        # edge_attr = (edge_attr < 1.0).float()
+        edge_attr[det[edge_index[0, :], 2] == det[edge_index[1, :], 2]] = 0.0  # set edge predictions of same types to zero
+
+        # cluster graph
+        test_graph = Graph(x=det, edge_index=edge_index, edge_attr=edge_attr)
+        sol = cluster_graph(test_graph, "GAEC", complete=False)
+    else:
+        sol = np.array([[1]])
+    #sparse_sol, _ = gutils.dense_to_sparse(torch.from_numpy(sol))
+    # construct people
+    joints = det.cpu().numpy()
+    scores = scores.cpu().numpy()
+    from scipy.sparse import csr_matrix
+    from scipy.sparse.csgraph import connected_components
+    graph = csr_matrix(sol)
+    n_components, person_labels = connected_components(graph, directed=False, return_labels=True)
+    persons = []
+    for i in range(n_components):
+        # check if cc has more than one node
+        person_joints = joints[person_labels == i]
+        person_scores = scores[person_labels == i]
+
+        keypoints = np.zeros([num_joints, 3])
+        for joint_type in range(num_joints):  # 17 different joint types
+            # take the detected joints of a certain type
+            select = person_joints[:, 2] == joint_type
+            person_joint_for_type = person_joints[select]
+            person_scores_for_type = person_scores[select]
+            if len(person_joint_for_type) != 0:
+                joint_idx = np.argmax(person_scores_for_type, axis=0)
+                keypoints[joint_type, :2] = person_joint_for_type[joint_idx, :2]
+                keypoints[joint_type, 2] = np.max(person_scores_for_type, axis=0)
+
+        if (keypoints[:, 2] > 0).sum() > 0:
+            # this step is actually really important for performance without refine !!
+            keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
+            # keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
+            persons.append(keypoints)
+
+    persons = np.array(persons)
+
+    heatmaps = heatmaps.cpu().numpy()
+    tagmaps = tagmaps.cpu().numpy()
+
+    persons_scores = [i[:, 2].mean() for i in persons]
+
+    if config.TEST.ADJUST:
+        persons = adjust(persons, heatmaps)
+    if config.TEST.REFINE:
+        persons = refine(heatmaps, tagmaps, persons)
+    return persons, persons_scores

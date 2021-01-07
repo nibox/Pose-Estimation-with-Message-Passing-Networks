@@ -117,7 +117,7 @@ def main():
             img = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
 
-            heatmaps, tags = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, config)
+            heatmaps, tags = model.multi_scale_inference(img, config, )
             # heatmaps, tags = model(img, config)
 
             grouped, scores = parser.parse(heatmaps, tags, adjust=config.TEST.ADJUST)

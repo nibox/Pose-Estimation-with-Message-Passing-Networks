@@ -29,8 +29,8 @@ def main():
     ######################################
 
     config_dir = "hourglass"
-    config_name = "model_70"
-    file_name = "ochuman_single_scale_flip_confirmation"
+    config_name = "model_70_3"
+    file_name = "ochuman_single_scale_flip"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
     eval_writer = EvalWriter(config, fname=f"{file_name}.txt")
@@ -68,7 +68,7 @@ def main():
             img, masks = eval_set[i]
             img = img.to(device)[None]
 
-            scoremaps, output = multi_scale_inference_hourglass(model, img, config.TEST.SCALE_FACTOR, device, config, None, None)
+            scoremaps, output = multi_scale_inference_hourglass(model, img, device, config, None, None)
             preds_nodes, preds_edges, preds_classes = output["preds"]["node"], output["preds"]["edge"], output["preds"]["class"]
             node_labels, edge_labels, class_labels = output["labels"]["node"], output["labels"]["edge"], output["labels"]["class"]
             joint_det, edge_index = output["graph"]["nodes"], output["graph"]["edge_index"]

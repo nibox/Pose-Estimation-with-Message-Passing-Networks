@@ -152,10 +152,10 @@ class CocoKeypoints(Dataset):
             rows_to_keep = np.logical_not(empty_row)
             keypoint_list[-1] = pack_for_batch(kpts[rows_to_keep].astype(np.float32), 30)
             factors = pack_for_batch(factors[rows_to_keep],
-                                     30)  # assuming the visible keypoints are the same for all scales
+                                     30)
         else:
             keypoint_list[-1] = pack_for_batch(kpts, 30)
-            factors = pack_for_batch(factors, 30)  # assuming the visible keypoints are the same for all scales
+            factors = pack_for_batch(factors, 30)
 
         return img, heatmaps, mask, keypoint_list[-1], factors, ae_targets
 

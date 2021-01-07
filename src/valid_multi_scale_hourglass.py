@@ -23,14 +23,14 @@ def merge_dicts(dict_1, dict_2):
 
 
 def main():
-    device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
+    device = torch.device("cuda") if torch.cuda.is_available() and False else torch.device("cpu")
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     ######################################
 
     config_dir = "hourglass"
     # config_dir = "train"
-    config_name = "model_70"
+    config_name = "model_70_3"
     # file_name = "t"
     # config_name = sys.argv[1]
     file_name = "eval_single_scale_flip"
@@ -44,10 +44,10 @@ def main():
     eval_set = CocoKeypoints_hg(config.DATASET.ROOT, mini=False, seed=0, mode="train", img_ids=valid_ids, year=17,
                              transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False, filter_empty=False)
     # scaling_type = "long_with" if config.TEST.PROJECT2IMAGE else "long"
-    scaling_type = "long"
+    scaling_type = "long_with_multiscale"
 
     model = get_pose_model(config, device)
-    state_dict = torch.load(config.MODEL.PRETRAINED)
+    state_dict = torch.load(config.MODEL.PRETRAINED, map_location=device)
     model.load_state_dict(state_dict["model_state_dict"])
     model.to(device)
     model.eval()
@@ -89,7 +89,7 @@ def main():
                 keypoints = None
                 factors = None
 
-            scoremaps, output = multi_scale_inference_hourglass(model, img, config.TEST.SCALE_FACTOR, device, config, keypoints, factors)
+            scoremaps, output = multi_scale_inference_hourglass(model, img, device, config, keypoints, factors)
             preds_nodes, preds_edges, preds_classes = output["preds"]["node"], output["preds"]["edge"], output["preds"]["class"]
             node_labels, edge_labels, class_labels = output["labels"]["node"], output["labels"]["edge"], output["labels"]["class"]
             joint_det, edge_index = output["graph"]["nodes"], output["graph"]["edge_index"]

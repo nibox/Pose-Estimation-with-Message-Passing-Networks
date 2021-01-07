@@ -82,7 +82,7 @@ def main():
     config = get_hrnet_config()
     config = update_config(config, f"../experiments/hrnet/w32_512_adam_lr1e-3_crowdpose.yaml")
     print(f"test: {config.LOG_DIR}")
-    eval_writer = EvalWriter(config, fname="hrnet_32_crowdpose_multi_scale.txt")
+    eval_writer = EvalWriter(config, fname="crowd_pose_w32_multi_scale_diff_factors.txt")
 
     parser = HeatmapParser(config)
     heatmap_generator = [HeatmapGenerator(160, 14), HeatmapGenerator(320, 14)]
@@ -108,9 +108,9 @@ def main():
             img, _, masks, keypoints, factors, _ = eval_set[i]
             img = img.to(device)[None]
 
-            heatmaps, tags = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, device, config)
+            heatmaps, tags = model.multi_scale_inference(img, device, config)
 
-            grouped, scores = parser.parse(heatmaps, tags, adjust=True, refine=False)
+            grouped, scores = parser.parse(heatmaps, tags, adjust=True, refine=True)
 
             if len(grouped[0]) != 0:
                 ann, debug_tmp = perd_to_ann(grouped[0], scores, (img.shape[2], img.shape[3]), int(eval_set.img_ids[i]), config.DATASET.INPUT_SIZE, "short_with_resize",

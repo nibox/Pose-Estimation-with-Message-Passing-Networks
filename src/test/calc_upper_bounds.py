@@ -107,7 +107,7 @@ def main():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     ######################################
-    config_name = "mmpose_hrnet"
+    config_name = "hrnet"
     config = get_config()
     config = update_config(config, f"../experiments/upper_bound/{config_name}.yaml")
 
@@ -200,8 +200,8 @@ def main():
                 test_graph = Graph(x=joint_det, edge_index=edge_index, edge_attr=preds_edges)
                 sol = cluster_graph(test_graph, str(config.MODEL.GC.CC_METHOD), complete=False)
                 sparse_sol_cc, _ = dense_to_sparse(torch.from_numpy(sol))
-                persons_pred_cc, _, _ = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol_cc,
-                                                                 preds_classes, config.DATASET.NUM_JOINTS)  # might crash
+                persons_pred_cc, _, _ = graph_cluster_to_persons(joint_det, joint_scores, sparse_sol_cc, preds_classes,
+                                                                 config.DATASET.NUM_JOINTS)  # might crash
             else:
                 persons_pred_cc = np.zeros([1, 17, 3])
 
@@ -216,7 +216,10 @@ def main():
                 persons_pred_cc = np.zeros([1, 17, 3])
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
-            persons_pred_orig_cc = reverse_affine_map(persons_pred_cc.copy(), (img_info["height"], img_info["width"]),
+            height, width = img_info["height"], img_info["width"]
+            if config.UB.SPLIT == "crowd_pose_test":
+                height, width = width, height  # annotations are switched in the test set ???
+            persons_pred_orig_cc = reverse_affine_map(persons_pred_cc.copy(), (width, height),
                                                       config.DATASET.INPUT_SIZE, scaling_type=config.DATASET.SCALING_TYPE)
 
             ann_cc = gen_ann_format(persons_pred_orig_cc, eval_set.img_ids[i])
