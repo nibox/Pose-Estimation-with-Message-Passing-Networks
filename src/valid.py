@@ -104,10 +104,10 @@ def main():
 
             img_shape = (img.shape[3], img.shape[2])
             ann = pred_to_ann(scoremaps[0], tags[0], joint_det, preds_nodes, edge_index, preds_edges, img_shape,
-                                 config.DATASET.INPUT_SIZE, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
-                                 scaling_type, min(config.TEST.SCALE_FACTOR), config.TEST.ADJUST,
-                                 config.MODEL.MPN.NODE_THRESHOLD, preds_classes, config.TEST.WITH_REFINE, joint_scores,
-                                 False, scoring_method=config.TEST.SCORING)
+                              config.DATASET.INPUT_SIZE, int(eval_set.img_ids[i]), config.MODEL.GC.CC_METHOD,
+                              scaling_type, min(config.TEST.SCALE_FACTOR), config.TEST.ADJUST,
+                              config.MODEL.MPN.NODE_THRESHOLD, preds_classes, config.TEST.WITH_REFINE, joint_scores,
+                              False, scoring_method=config.TEST.SCORING, fill_mean=config.TEST.FILL_MEAN)
 
             if ann is not None:
                 anns.append(ann)

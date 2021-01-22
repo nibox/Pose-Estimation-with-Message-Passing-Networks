@@ -203,6 +203,7 @@ _C.TEST.NUM_EVAL = 500
 _C.TEST.ADJUST = True
 _C.TEST.WITH_REFINE = False
 _C.TEST.REFINE_COMP = False
+_C.TEST.FILL_MEAN = True  # in case refine is not active this estimates missing keypoint by computing the average kpt
 
 # TEST stuff for hrnet
 _C.TEST.WITH_HEATMAPS = [True, True]

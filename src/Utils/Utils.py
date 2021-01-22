@@ -556,9 +556,10 @@ def greedy_person_construction(joint_det, preds_nodes, preds_edges, preds_classe
 
     out = []
     for type in range(num_joints):
-        # todo rearange types just like ae group
+       # todo rearange types just like ae group
         type_joints = joint_det[:, 2] == type
         for i in range(len(joint_det)):
+            # look at joint with type: type and joints that do not belong to a cluster
             if not type_joints[i] or taken_joints[i] != -1:
                 continue
             """
@@ -583,6 +584,7 @@ def greedy_person_construction(joint_det, preds_nodes, preds_edges, preds_classe
                     if first_score > current_score:
                         continue
                     else:
+                        # if new score is larger than old one -> reassign
                         taken_joints[target_joint_idx] = i
                 else:
                     taken_joints[target_joint_idx] = i
@@ -731,7 +733,6 @@ def graph_cluster_to_persons(joints, joint_scores, joint_connections, class_pred
 
             #keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
             if (keypoints[:, 2] > 0).sum() > 0:
-                keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
                 # keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
                 persons.append(keypoints)
         elif len(person_joints) == 1 and allow_single_joint_persons:
@@ -1053,9 +1054,21 @@ def refine(scoremaps, tag, keypoints):
                 person_tags.append(tag[i, y, x])
         tags.append(np.array(person_tags))
 
+    """
+    small experiment whether filtering outlier tags helps -> it does not
+    def estimate_mean_tag(data, m=2):
+        mean_tag = []
+        for d in range(data.shape[1]):
+            tmp = data[:, d]
+            mean_tag.append(tmp[abs(tmp - np.mean(tmp, axis=0)) < m * np.std(tmp)].mean())
+
+        return np.array(mean_tag)
+    """
+
     # mean tag of current detected people
     for p in range(keypoints.shape[0]):
         prev_tag = np.mean(tags[p], axis=0)
+        # prev_tag = estimate_mean_tag(tags[p])  -> the mentioned filtering step -> does not help!!
         ans = []
 
         for i in range(keypoints.shape[1]):
@@ -1348,7 +1361,7 @@ def draw_edges_conf(img, joint_det, person_labels, preds_nodes, edge_index, pred
 
 def pred_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_shape, input_size, img_id, cc_method,
                 scaling_type, min_scale, adjustment, th, preds_classes, with_refine, score_map_scores, with_filter,
-                scoring_method="default"):
+                scoring_method="default", fill_mean=True):
     if (score_map_scores > 0.1).sum() < 1:
         return None
     true_positive_idx = joint_scores > th
@@ -1370,6 +1383,9 @@ def pred_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_
         persons_pred = persons_pred[keep]
         if persons_pred.shape[0] == 0:
             return None
+    if fill_mean:
+        for i in range(len(persons_pred)):
+            persons_pred[i, persons_pred[i, :, 2] == 0, :2] = persons_pred[i, persons_pred[i, :, 2] != 0, :2].mean(axis=0)
 
     if with_refine and persons_pred[0, :, 2].sum() != 0:
         tags = tags.cpu().numpy()
