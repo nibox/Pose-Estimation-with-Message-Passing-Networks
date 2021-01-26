@@ -13,7 +13,7 @@ class CocoKeypoints_test(Dataset):
         torch.manual_seed(seed)
 
         self.root_path = path
-        self.transforms = torchvision.transforms.ToTensor
+        self.transforms = torchvision.transforms.ToTensor()
         # todo deal with different setups and with the different splits
         ann_path = f"{self.root_path}/annotations/image_info_test-dev20{year}.json"
         self.coco = COCO(ann_path)
@@ -30,7 +30,7 @@ class CocoKeypoints_test(Dataset):
         with open(f"{self.root_path}/test2017/{img_info['file_name']}", "rb") as f:
             img = np.array(Image.open(f).convert("RGB"))
 
-        return self.transforms(img)
+        return self.transforms(img)[None]
 
     def __len__(self):
         return len(self.img_ids)

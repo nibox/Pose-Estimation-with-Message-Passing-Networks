@@ -6,7 +6,7 @@ from data import CocoKeypoints_hr, HeatmapGenerator, JointsGenerator, CrowdPoseK
 from Utils import *
 from Models.PoseEstimation import get_pose_model
 from Utils.transforms import transforms_to_tensor
-from Utils.eval import EvalWriter
+from Utils.eval import EvalWriter, create_results_json
 
 
 def parse_args():
@@ -113,8 +113,11 @@ def main():
                 anns.append(ann)
 
 
-        eval_writer.eval_coco(eval_set.coco, anns, np.array(eval_ids), "General Evaluation", f"person_keypoints_{config.TEST.SPLIT}_mpn_results.json")
-        eval_writer.close()
+        if config.TEST.SPLIT == "test-dev2017":
+            create_results_json(anns, config.LOG_DIR, "person_keypoints_test-dev2017_mpn_results.json")
+        else:
+            eval_writer.eval_coco(eval_set.coco, anns, np.array(eval_ids), "General Evaluation", f"person_keypoints_{config.TEST.SPLIT}_mpn_results.json")
+            eval_writer.close()
 
 
 if __name__ == "__main__":
