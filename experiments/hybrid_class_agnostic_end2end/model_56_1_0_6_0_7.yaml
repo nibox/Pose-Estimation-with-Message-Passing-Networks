@@ -151,11 +151,16 @@ MODEL:
     CC_METHOD: GAEC
     NORM_NODE_DISTANCE: True
   LOSS:
-    NAME: node_edge_loss
-    LOSS_WEIGHTS:
-      - 1.0
-      - 1.0
-      - 1.0
+    # NAME: node_edge_loss
+    # LOSS_WEIGHTS:
+    #   - 1.0
+    #   - 1.0
+    #   - 1.0
+    NAME:
+      - edge
+      - node
+      - class
+      - heatmap
     USE_FOCAL: True
     FOCAL_GAMMA: 2.0
     FOCAL_ALPHA: 1.0

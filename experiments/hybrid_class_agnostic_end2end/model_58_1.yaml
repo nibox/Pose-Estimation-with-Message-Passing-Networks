@@ -128,9 +128,9 @@ MODEL:
     CHEAT: False
     USE_GT: False
     USE_NEIGHBOURS: False
-    POOL_KERNEL_SIZE: 5 # 3
+    POOL_KERNEL_SIZE: 3
     EDGE_LABEL_METHOD: 3
-    MASK_CROWDS: False # True
+    MASK_CROWDS: True
     DETECT_THRESHOLD: 0.1
     MATCHING_RADIUS: 0.5
     INCLUSION_RADIUS: 0.75
@@ -138,9 +138,12 @@ MODEL:
     CC_METHOD: GAEC
     NORM_NODE_DISTANCE: True
   LOSS:
-    NAME: edge_loss
-    LOSS_WEIGHTS:
-      - 1.0
+    #NAME: edge_loss
+    #LOSS_WEIGHTS:
+    #  - 1.0
+    NAME:
+      - edge
+      - heatmap
     USE_FOCAL: True
     FOCAL_GAMMA: 2.0
     FOCAL_ALPHA: 1.0

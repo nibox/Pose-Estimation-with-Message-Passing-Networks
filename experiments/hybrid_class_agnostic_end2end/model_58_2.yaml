@@ -92,6 +92,7 @@ MODEL:
     NAME: ClassificationMPNSimple
     NUM_JOINTS: 17
     STEPS: 10
+    NODE_STEPS: 0
     NODE_INPUT_DIM: 128
     EDGE_INPUT_DIM: 17 + 2
     NODE_FEATURE_DIM: 64
@@ -143,10 +144,14 @@ MODEL:
     CC_METHOD: GAEC
     NORM_NODE_DISTANCE: True
   LOSS:
-    NAME: node_edge_loss
-    LOSS_WEIGHTS:
-      - 1.0
-      - 1.0
+#    NAME: node_edge_loss
+#    LOSS_WEIGHTS:
+#      - 1.0
+#      - 1.0
+    NAME:
+      - edge
+      - node
+      - heatmap
     USE_FOCAL: True
     FOCAL_GAMMA: 2.0
     FOCAL_ALPHA: 1.0

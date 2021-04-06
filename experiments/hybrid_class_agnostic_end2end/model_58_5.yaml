@@ -136,10 +136,13 @@ MODEL:
     CC_METHOD: GEAC
     NORM_NODE_DISTANCE: True
   LOSS:
-    NAME: pure_tag_loss
+    # NAME: pure_tag_loss
+    # LOSS_WEIGHTS:
+    #   - 1.0
+    NAME:
+      - tag
+      - heatmap
     SYNC_TAGS: True
-    LOSS_WEIGHTS:
-      - 1.0
 TEST:
   NUM_EVAL: 500
   SPLIT: coco_17_full

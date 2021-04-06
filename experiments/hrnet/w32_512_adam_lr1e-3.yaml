@@ -103,10 +103,11 @@ MODEL:
     TAG_PER_JOINT: True
     FEATURE_FUSION: small
 TEST:
+  SPLIT: coco_17_full
   FLIP_TEST: True
   IMAGES_PER_GPU: 1
   MODEL_FILE: '' 
-  SCALE_FACTOR: [0.5, 1.0, 2.0]
+  SCALE_FACTOR: [1.0]
   DETECTION_THRESHOLD: 0.1
   WITH_HEATMAPS: (True, True)
   WITH_AE: (True, False)

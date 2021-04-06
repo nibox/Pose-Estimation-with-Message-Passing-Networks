@@ -1,7 +1,7 @@
 DATASET:
   ROOT: '../../storage/user/kistern/coco'
   MAX_NUM_PEOPLE: 30
-  SCALING_TYPE: long  # short for training
+  SCALING_TYPE: long
   # training data augmentation
   MAX_ROTATION : 30
   MIN_SCALE : 0.75
@@ -9,6 +9,7 @@ DATASET:
   MAX_TRANSLATE : 40
   FLIP : 0.5
   OUTPUT_SIZE: [128, 128, 128, 128]
+  NUM_JOINTS: 17
 
 LOG_DIR: "../log/PoseEstimationBaseline/Real_node/70_4"
 
@@ -153,11 +154,16 @@ MODEL:
     CC_METHOD: GAEC
     NORM_NODE_DISTANCE: True
   LOSS:
-    NAME: node_edge_loss
-    LOSS_WEIGHTS:
-      - 1.0
-      - 1.0
-      - 1.0
+    # NAME: node_edge_loss
+    #LOSS_WEIGHTS:
+    #   - 1.0
+    #   - 1.0
+    #   - 1.0
+    NAME:
+      - edge
+      - node
+      - class
+      - heatmap
     USE_FOCAL: True
     FOCAL_GAMMA: 2.0
     FOCAL_ALPHA: 1.0
@@ -167,7 +173,7 @@ TEST:
   ADJUST: True
   FLIP_TEST: True
   WITH_REFINE: True
-  SCALE_FACTOR: [2.0, 1.0, 0.5]
+  SCALE_FACTOR: [1.0]
   PROJECT2IMAGE: False
 
 TRAIN:

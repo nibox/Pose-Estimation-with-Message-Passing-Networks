@@ -45,6 +45,8 @@ def main():
 
     os.makedirs(f"tmp/{args.out_dir}", exist_ok=True)
 
+    img_ids = [111371]
+    img_ids = [112075, 103797, 116839, 104374, 119717, 119160, 112240, 119036, 108664, 113719, 111371, 108768, 116195, 106428, 115641, 103858]
     scaling_type = "short_with_resize" if config.TEST.PROJECT2IMAGE else "short"
     output_sizes = config.DATASET.OUTPUT_SIZE
     max_num_people = config.DATASET.MAX_NUM_PEOPLE
@@ -89,11 +91,13 @@ def main():
     model.eval()
 
 
-    num_iter = 50
+    num_iter = 8000
     with torch.no_grad():
         for i in tqdm(range(num_iter)):
-
             img_id = eval_set.img_ids[i]
+            if img_id not in img_ids:
+                continue
+
             img, _, masks, keypoints, factors, _ = eval_set[i]
             img = img.to(device)[None]
 

@@ -1,4 +1,3 @@
-from .ConstructGraphClasses import ClassAgnosticGraphConstructor
 from .ConstructGraph import NaiveGraphConstructor
 
 

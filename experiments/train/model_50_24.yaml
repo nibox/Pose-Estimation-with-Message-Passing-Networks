@@ -126,7 +126,7 @@ MODEL:
     BN: False
     AGGR: max
     SKIP: True
-    NODE_THRESHOLD: 1.0
+    NODE_THRESHOLD: 0.1
   GC:
     NAME: naive_graph_constructor
     CHEAT: False
@@ -152,7 +152,7 @@ TEST:
   NUM_EVAL: 500
   SPLIT: coco_17_mini
   ADJUST: True
-  PROJECT_TO_IMAGE: False
+  WITH_REFINE: True
 
 TRAIN:
   SPLIT: coco_17_full

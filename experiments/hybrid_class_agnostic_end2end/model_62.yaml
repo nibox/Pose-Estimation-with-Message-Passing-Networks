@@ -99,15 +99,15 @@ MODEL:
       OUTPUT_SIZES:
         - 1
     BN: False
-    NODE_THRESHOLD: 1.0
+    NODE_THRESHOLD: 0.1
   GC:
     NAME: naive_graph_constructor
     CHEAT: False
-    USE_GT: True # Trained with true
+    USE_GT: False # Trained with true
     USE_NEIGHBOURS: False
-    POOL_KERNEL_SIZE: 3 # 3
-    EDGE_LABEL_METHOD: 1
-    MASK_CROWDS: True # True
+    POOL_KERNEL_SIZE: 5 # 3
+    EDGE_LABEL_METHOD: 4
+    MASK_CROWDS: False # True
     DETECT_THRESHOLD: 0.1
     MATCHING_RADIUS: 0.5
     INCLUSION_RADIUS: 0.75

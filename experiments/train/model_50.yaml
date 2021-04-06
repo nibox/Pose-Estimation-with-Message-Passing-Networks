@@ -124,7 +124,7 @@ MODEL:
     BN: False
     AGGR: max
     SKIP: True
-    NODE_THRESHOLD: 0.5
+    NODE_THRESHOLD: 0.1
   GC:
     NAME: naive_graph_constructor
     CHEAT: False

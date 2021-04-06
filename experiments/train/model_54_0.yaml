@@ -125,14 +125,15 @@ MODEL:
     BN: False
     AGGR: max
     SKIP: True
-    NODE_THRESHOLD: 1.0
+    NODE_THRESHOLD: 0.1
   GC:
     NAME: naive_graph_constructor
     CHEAT: False
     USE_GT: False
     USE_NEIGHBOURS: True
+    POOL_KERNEL_SIZE: 3 # 3
     EDGE_LABEL_METHOD: 4
-    MASK_CROWDS: True
+    MASK_CROWDS: False # True
     DETECT_THRESHOLD: 0.1
     MATCHING_RADIUS: 0.1
     INCLUSION_RADIUS: 0.75
@@ -151,6 +152,7 @@ TEST:
   NUM_EVAL: 500
   SPLIT: coco_17_mini
   ADJUST: True
+  FLIP_TEST: False
 
 TRAIN:
   SPLIT: coco_17_full
