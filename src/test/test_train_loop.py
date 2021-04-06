@@ -53,9 +53,15 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
 
         _, output = model(imgs, keypoints, masks, factors)
 
+        output["masks"]["heatmap"] = masks
+        output["labels"]["heatmap"] = []
+        output["labels"]["tag"] = []
+        output["labels"]["keypoints"] = []
+        output["preds"]["heatmap"] = None
+
         if isinstance(loss_func, (MultiLossFactory, MPNLossFactory, TagMultiLossFactory)):
             loss, _ = loss_func(output["preds"], output["labels"], output["masks"])
-        elif isinstance(loss_func, ClassMPNLossFactory):
+        elif isinstance(loss_func, ClassMultiLossFactory):
             # adapt labels and mask to reduced graph
             loss_masks = []
             loss_edge_labels = []
@@ -68,7 +74,7 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
 
             output["labels"]["edge"] = loss_edge_labels
             output["masks"]["edge"] = loss_masks
-            loss, logging = loss_func(output["preds"], output["labels"], output["masks"])
+            loss, logging = loss_func(output["preds"], output["labels"], output["masks"], output["graph"])
 
             #
             default_pred = torch.zeros(output["graph"]["edge_index"].shape[1],
@@ -122,7 +128,9 @@ def main():
 
     ##########################################################
     config_dir = "hybrid_class_agnostic_end2end"
-    config_name = "model_56_1_0_6_0_7_4_2"
+    config_name = "model_58_4_4"
+    # config_dir = "feature_importance"
+    # config_name = "model_nothing"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
 
@@ -135,6 +143,8 @@ def main():
 
     model.freeze_backbone(mode="complete")
     optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR)
+    loss_func = ClassMultiLossFactory(config)
+    """
     if config.MODEL.LOSS.NAME == "edge_loss":
         loss_func = MPNLossFactory(config)
     elif config.MODEL.LOSS.NAME == "node_edge_loss":
@@ -145,6 +155,7 @@ def main():
         loss_func = TagMultiLossFactory(config)
     else:
         raise NotImplementedError
+    # """
     model.to(device)
 
     update_model = make_train_func(model, optimizer, loss_func, use_batch_index=config.TRAIN.USE_BATCH_INDEX,
