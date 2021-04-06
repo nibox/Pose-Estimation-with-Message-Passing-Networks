@@ -29,10 +29,10 @@ def main():
     # config_dir = "regression_mini"
     # config_dir = "train"
     # config_dir = "node_classification_from_scratch"
-    config_name = "model_56_1_0_6_0_7_3"
+    config_name = "model_56_1_0_6_0_7_6"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
-    eval_writer = EvalWriter(config, fname="eval_10_mini.txt")
+    eval_writer = EvalWriter(config, fname="performance_test_mut.txt")
 
     if config.TEST.SPLIT == "mini":
         train_ids, valid_ids = pickle.load(open("tmp/mini_train_valid_split_4.p", "rb"))
@@ -147,10 +147,12 @@ def main():
 
             eval_node = merge_dicts(eval_node, calc_metrics(result_nodes, node_labels))
             eval_edge = merge_dicts(eval_edge, calc_metrics(result_edges, edge_labels))
+            """
             if preds_classes is not None:
                 eval_classes_baseline_acc.append(calc_metrics(preds_baseline_class, class_labels, node_labels, 17)["acc"])
                 eval_classes_acc.append(calc_metrics(preds_classes.argmax(dim=1), class_labels, node_labels, 17)["acc"])
                 eval_classes_top2_acc.append(topk_accuracy(preds_classes, class_labels, 2, node_labels))
+            """
 
             """
             if node_labels.sum() > 1.0:

@@ -4,6 +4,7 @@ from ..Hourglass import PoseNet, hg_process_output
 from graph_constructor import get_graph_constructor
 from ..MessagePassingNetwork import get_mpn_model
 from Utils.hr_utils.multi_scales_testing import *
+import time
 
 import torch
 import torch.nn as nn
@@ -202,6 +203,7 @@ class PoseEstimationBaseline(nn.Module):
             image_resized = transforms(image_resized)
             image_resized = image_resized[None].to(device)
 
+            start_kpt = time.clock()
             if use_hrnet:
                 outputs, heatmaps, tags, features = _get_multi_stage_outputs(config, self.backbone, image_resized,
                                                                              self.feature_gather,
@@ -217,6 +219,7 @@ class PoseEstimationBaseline(nn.Module):
                                                                                        project2image=config.TEST.PROJECT2IMAGE,
                                                                                        size_projected=base_size
                                                                                        )
+            end_kpt = time.clock()
 
             final_heatmaps, tags_list, final_features = aggregate_results_mpn(
                 config, s, final_heatmaps, tags_list, final_features, heatmaps, tags, features
@@ -233,16 +236,19 @@ class PoseEstimationBaseline(nn.Module):
 
         x, edge_attr, edge_index, edge_labels, node_labels, class_labels, node_targets, joint_det, label_mask, label_mask_node, class_mask, joint_scores, batch_index, node_persons, _ = graph_constructor.construct_graph()
 
+        start_mpn = time.clock()
         edge_pred, node_pred, class_pred, tag_pred = self.mpn(x, edge_attr, edge_index, node_labels=node_labels,
                                                     edge_labels=edge_labels
                                                     , batch_index=batch_index, node_mask=label_mask_node,
                                                     node_types=joint_det[:, 2])
+        end_mpn = time.clock()
 
         output = {}
         output["preds"] = {"edge": edge_pred, "node": node_pred, "class": class_pred, "tag": tag_pred}
         output["graph"] = {"nodes": joint_det, "detector_scores": joint_scores, "edge_index": edge_index,
                            "tags": tags}
         output["labels"] = {"edge": edge_labels, "node": node_labels, "class": class_labels}
+        output["debug"] = {"kpt": end_kpt - start_kpt, "mpn": end_mpn - start_mpn}
 
         return scoremaps, output
 

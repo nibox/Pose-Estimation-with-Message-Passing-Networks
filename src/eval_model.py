@@ -250,7 +250,7 @@ def main():
 
 
 def perd_to_ann(scoremaps, joint_det, joint_scores, edge_index, pred, img_info, img_id, cc_method, scaling_type, adjustment):
-    persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, None, cc_method)
+    persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, None, cc_method, )
 
     if len(persons_pred.shape) == 1:  # this means none persons were detected
         persons_pred = np.zeros([1, 17, 3])

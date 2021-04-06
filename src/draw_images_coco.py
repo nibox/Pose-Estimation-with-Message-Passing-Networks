@@ -5,9 +5,10 @@ from torch_geometric.utils import subgraph
 from tqdm import tqdm
 
 from config import get_config, update_config, update_config_command
-from data import CocoKeypoints_hr, HeatmapGenerator, JointsGenerator
+from data import CocoKeypoints_hr, HeatmapGenerator, JointsGenerator, OCHumans, CrowdPoseKeypoints
 from Utils import pred_to_person, save_valid_image, adjust, to_tensor, one_hot_encode, \
-    refine, draw_edges_conf
+    refine, draw_edges_conf, draw_inter_person_edge_conf, draw_clusters, draw_detection_with_cluster, draw_detection, \
+    draw_detection_classification_result
 from Models.PoseEstimation import get_pose_model
 from Utils.transformations import reverse_affine_map, reverse_affine_map_points
 from Utils.transforms import transforms_to_tensor
@@ -40,16 +41,51 @@ def main():
     config = update_config(config, f"../experiments/{args.config}")
     config = update_config_command(config, args.options)
 
+    img_ids = [112075, 103797, 116839, 104374, 119717, 119160, 112240, 119036, 108664, 113719, 111371, 108768, 116195, 106428, 115641, 103858]
+    # img_ids = [116839, 111371]
+    img_ids = [112240]
+    # img_ids = [111371]
+
     os.makedirs(f"tmp/{args.out_dir}", exist_ok=True)
 
-    heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
-    joint_generator = [JointsGenerator(30, 17, 128, True),
-                       JointsGenerator(30, 17, 256, True)]
-    transforms, _ = transforms_to_tensor(config)
+
     scaling_type = "short_with_resize" if config.TEST.PROJECT2IMAGE else "short"
-    eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=False, seed=0, mode="val", img_ids=None, year=17,
-                                transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
-                                filter_empty=False, joint_generator=joint_generator)
+    output_sizes = config.DATASET.OUTPUT_SIZE
+    max_num_people = config.DATASET.MAX_NUM_PEOPLE
+    num_joints = config.DATASET.NUM_JOINTS
+    transforms, _ = transforms_to_tensor(config)
+
+    heatmap_generator = [HeatmapGenerator(output_sizes[0], num_joints),
+                         HeatmapGenerator(output_sizes[1], num_joints)]
+    joint_generator = [JointsGenerator(max_num_people, num_joints, output_sizes[0], True),
+                       JointsGenerator(max_num_people, num_joints, output_sizes[1], True)]
+    body_type = None
+    if config.TEST.SPLIT == "coco_17_full":
+        assert config.DATASET.NUM_JOINTS == 17
+        body_type = "coco"
+        eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=False, seed=0, mode="val", img_ids=None, year=17,
+                                    transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
+                                    filter_empty=False, joint_generator=joint_generator)
+    elif config.TEST.SPLIT == "test-dev2017":
+        raise NotImplementedError
+    elif config.TEST.SPLIT == "crowd_pose_test":
+        assert config.DATASET.NUM_JOINTS == 14
+        body_type = "crowd_pose"
+        eval_set = CrowdPoseKeypoints(config.DATASET.ROOT, mini=False, seed=0, mode="test",
+                                      transforms=transforms, heatmap_generator=heatmap_generator,
+                                      filter_empty=False, joint_generator=joint_generator)
+    elif config.TEST.SPLIT == "ochuman_valid":
+        assert config.DATASET.NUM_JOINTS == 17
+        body_type = "coco"
+        eval_set = OCHumans('../../storage/user/kistern/OCHuman', seed=0, mode="val",
+                            transforms=transforms, mask_crowds=False)
+    elif config.TEST.SPLIT == "ochuman_test":
+        assert config.DATASET.NUM_JOINTS == 17
+        body_type = "coco"
+        eval_set = OCHumans('../../storage/user/kistern/OCHuman', seed=0, mode="test",
+                            transforms=transforms, mask_crowds=False)
+    else:
+        raise NotImplementedError
 
     model = get_pose_model(config, device)
     state_dict = torch.load(config.MODEL.PRETRAINED, map_location=device)
@@ -65,6 +101,8 @@ def main():
 
         for i in tqdm(range(num_iter)):
             img_id = eval_set.img_ids[i]
+            if img_id not in img_ids:
+                continue
 
             img, _, masks, keypoints, factors, _ = eval_set[i]
             img = img.to(device)[None]
@@ -73,7 +111,7 @@ def main():
             if keypoints.sum() == 0.0:
                 continue
 
-            scoremaps, output = model.multi_scale_inference(img, config, keypoints)
+            scoremaps, output = model.multi_scale_inference(img, device, config, keypoints, factors)
             preds_nodes, preds_edges, preds_classes = output["preds"]["node"], output["preds"]["edge"], output["preds"]["class"]
             node_labels, edge_labels, class_labels = output["labels"]["node"], output["labels"]["edge"], output["labels"]["class"]
             joint_det, edge_index = output["graph"]["nodes"], output["graph"]["edge_index"]
@@ -99,10 +137,14 @@ def main():
 
             if ann is None:
                 continue
-            save_valid_image(img, ann, f"tmp/{args.out_dir}/{img_id}_pred.png", "coco")
-            save_valid_image(img, keypoints[0], f"tmp/{args.out_dir}/{img_id}_gt.png", "coco")
+            save_valid_image(img, ann, f"tmp/{args.out_dir}/{img_id}_pred.png", body_type)
+            save_valid_image(img, keypoints[0], f"tmp/{args.out_dir}/{img_id}_gt.png", body_type)
 
+            # assign new classes before drawing
+            joint_det[:, 2] = preds_classes.argmax(dim=1) if preds_classes is not None else joint_det[:, 2]
             joint_det = joint_det.cpu().numpy()
+            node_labels = node_labels.cpu().int().numpy()
+            keypoints = keypoints[0].numpy()
             joint_det = reverse_affine_map_points(joint_det.copy(), img_shape,
                                                    scaling_type=scaling_type,
                                                    min_scale=min(config.TEST.SCALE_FACTOR))
@@ -110,7 +152,27 @@ def main():
             preds_nodes = preds_nodes.cpu().numpy()
             preds_edges = preds_edges.cpu().numpy()
             draw_edges_conf(img, joint_det, person_labels, preds_nodes, edge_index, preds_edges,
-                            fname=f"tmp/{args.out_dir}/{img_id}")
+                            fname=f"tmp/{args.out_dir}/{img_id}_edge_conf")
+            draw_inter_person_edge_conf(img, joint_det, person_labels, preds_nodes, edge_index, preds_edges, type_to_draw=0,
+                                        fname=f"tmp/{args.out_dir}/{img_id}_inter_per_edge_conf", num_joints=17)
+            # right elbow
+            draw_inter_person_edge_conf(img, joint_det, person_labels, preds_nodes, edge_index, preds_edges, type_to_draw=3,
+                                        fname=f"tmp/{args.out_dir}/{img_id}_inter_per_edge_conf", num_joints=17)
+            # left ankle
+            draw_inter_person_edge_conf(img, joint_det, person_labels, preds_nodes, edge_index, preds_edges, type_to_draw=10,
+                                        fname=f"tmp/{args.out_dir}/{img_id}_inter_per_edge_conf", num_joints=17)
+            # head
+            draw_inter_person_edge_conf(img, joint_det, person_labels, preds_nodes, edge_index, preds_edges, type_to_draw=12,
+                                        fname=f"tmp/{args.out_dir}/{img_id}_inter_per_edge_conf", num_joints=17)
+            # wrist
+            draw_inter_person_edge_conf(img, joint_det, person_labels, preds_nodes, edge_index, preds_edges, type_to_draw=4,
+                                        fname=f"tmp/{args.out_dir}/{img_id}_inter_per_edge_conf", num_joints=17)
+            draw_detection_with_cluster(img, joint_det, person_labels, fname=f"tmp/{args.out_dir}/{img_id}", num_joints=17)
+
+            draw_detection_classification_result(img, joint_det, node_labels, fname=f"tmp/{args.out_dir}/{img_id}")
+            filter = preds_nodes > config.MODEL.MPN.NODE_THRESHOLD
+            draw_detection_classification_result(img, joint_det, node_labels, fname=f"tmp/{args.out_dir}/{img_id}")
+            draw_detection_classification_result(img, joint_det[filter], node_labels[filter], fname=f"tmp/{args.out_dir}/{img_id}_filtered")
 
 
 def perd_to_ann(scoremaps, tags, joint_det, joint_scores, edge_index, pred, img_shape, input_size, img_id, cc_method,

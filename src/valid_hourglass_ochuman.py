@@ -86,11 +86,11 @@ def main():
 
     config = get_config()
     config = update_config(config, f"../experiments/hourglass/hg.yaml")
-    eval_writer = EvalWriter(config, fname=f"ochuman_multi_scale_flip.txt")
+    eval_writer = EvalWriter(config, fname=f"ochuman_multi_scale_flip_test.txt")
 
     parser = HeatmapParserHG2(config)
     transforms, _ = transforms_to_tensor(config)
-    eval_set = OCHumans('../../storage/user/kistern/OCHuman', seed=0, mode="val",
+    eval_set = OCHumans('../../storage/user/kistern/OCHuman', seed=0, mode="test",
                         transforms=transforms, mask_crowds=False)
 
     model = get_hg_model(config, device)
@@ -113,14 +113,14 @@ def main():
             img, masks = eval_set[i]
             img = img.to(device)[None]
 
-            heatmaps, tags = model.multi_scale_inference(img, config, )
+            heatmaps, tags = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, config)
             # heatmaps, tags = model(img, config)
 
             grouped, scores = parser.parse(heatmaps, tags, adjust=config.TEST.ADJUST)
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
 
             if len(grouped[0]) != 0:
-                ann = perd_to_ann(grouped[0], scores, img_info, int(eval_set.img_ids[i]), "long_with_multiscale",
+                ann = perd_to_ann(grouped[0], scores, img_info, int(eval_set.img_ids[i]), config.DATASET.INPUT_SIZE, "long_with_multiscale",
                                   min(config.TEST.SCALE_FACTOR))
                 anns.append(ann)
 
@@ -129,8 +129,9 @@ def main():
         eval_writer.close()
 
 
-def perd_to_ann(grouped, scores, img_info, img_id, scaling_type, min_scale):
-    persons_pred_orig = reverse_affine_map(grouped.copy(), (img_info["width"], img_info["height"]), scaling_type=scaling_type,
+def perd_to_ann(grouped, scores, img_info, img_id, input_size, scaling_type, min_scale):
+    persons_pred_orig = reverse_affine_map(grouped.copy(), (img_info["width"], img_info["height"]), input_size=input_size,
+                                           scaling_type=scaling_type,
                                            min_scale=min_scale)
 
     ann = gen_ann_format(persons_pred_orig, scores, img_id)

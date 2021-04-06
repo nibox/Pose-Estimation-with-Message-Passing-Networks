@@ -55,6 +55,18 @@ class EvalWriter(object):
         self.f.write(description + "\n")
         self.f.write(str(value) + "\n")
 
+    def eval_speed(self, *args):
+        # 0, 2, 4, 6 ... are names
+        # 1, 3, 5, 7 ... are values
+        assert len(args) % 2 == 0
+        print(f"Runtime measurement")
+        self.f.write("Runtime measurement")
+        for i in range(0, len(args), 2):
+            print(f"{args[i]}: {np.mean(args[i+1])}")
+            self.f.write(f"{args[i]}: {np.mean(args[i+1])} \n")
+
+
+
     def eval_part_metrics(self, eval_dict, description):
         if self.dataset == "coco":
             part_labels = ['nose','eye_l','eye_r','ear_l','ear_r',

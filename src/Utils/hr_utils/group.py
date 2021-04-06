@@ -164,7 +164,6 @@ class HeatmapParser(object):
         val_k, ind = det.topk(self.params.max_num_people, dim=2)
 
         scoremap_zero = torch.where(det < 0.1, torch.zeros_like(det), det)
-        t = scoremap_zero.nonzero()
         tag = tag.view(tag.size(0), tag.size(1), w*h, -1)
         if not self.tag_per_joint:
             tag = tag.expand(-1, self.params.num_joints, -1, -1)
@@ -375,7 +374,7 @@ def cluster_cc(heatmaps, tagmaps, config):
 
         if (keypoints[:, 2] > 0).sum() > 0:
             # this step is actually really important for performance without refine !!
-            keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
+            # keypoints[keypoints[:, 2] == 0, :2] = keypoints[keypoints[:, 2] != 0, :2].mean(axis=0)
             # keypoints[np.sum(keypoints, axis=1) != 0, 2] = 1
             persons.append(keypoints)
 

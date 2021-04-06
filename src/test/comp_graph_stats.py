@@ -1,6 +1,6 @@
 import torch
 import torchvision
-from data import CocoKeypoints_hr, HeatmapGenerator
+from data import CocoKeypoints_hr, HeatmapGenerator, JointsGenerator
 import numpy as np
 import pickle
 from config import get_config, update_config
@@ -78,10 +78,13 @@ def main():
 
     _, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))
 
+
     heatmap_generator = [HeatmapGenerator(128, 17, 2), HeatmapGenerator(256, 17, 2)]
+    joint_generator = [JointsGenerator(30, 17, 128, True), JointsGenerator(30, 17, 256, True)]
     transforms, _ = transforms_hr_eval(config)
     img_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
-                                transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False)
+                                transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
+                               joint_generator=joint_generator)
 
     num_detections = []
     num_edges = []
@@ -102,7 +105,7 @@ def main():
     with torch.no_grad():
         for i in tqdm(range(500)):  # just test the first 100 images
             # split batch
-            img, _, masks, keypoints, factors = img_set[i]
+            img, _, masks, keypoints, factors, _ = img_set[i]
             img_transformed = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
             # scoremaps, pred_edge, pred_node, pred_class, joint_det, joint_scores, edge_index, edge_labels, node_labels, class_labels, _, _, _ = model(img_transformed, keypoints, masks, factors)
@@ -120,9 +123,9 @@ def main():
             scores_all += list(scores)
             scores_all_visible += list(scores_visible)
             scores_all_occluded += list(scores_occluded)
-            joint_refined = output["preds"]["refine"]
-            reg_distances += list(regression_target_distribution(output["graph"]["nodes"], output["labels"]["node"], output["labels"]["refine"],
-                                                            joint_refined[:, :2], output["preds"]["class"]))
+            # joint_refined = output["preds"]["refine"]
+            # reg_distances += list(regression_target_distribution(output["graph"]["nodes"], output["labels"]["node"], output["labels"]["refine"],
+            #                                                 joint_refined[:, :2], output["preds"]["class"]))
 
 
         print(f"Average number of detections:{np.mean(num_detections)}")

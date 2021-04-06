@@ -25,7 +25,7 @@ def main():
     ######################################
     config_dir = "hybrid_class_agnostic_end2end"
     # config_dir = "train"
-    config_name = "model_56_1_0_6_0"
+    config_name = "model_56_1_0_6_0_7_6"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
     # img_ids_to_use = [84015, 84381, 117772, 237976, 281133, 286645, 505421]
@@ -92,7 +92,7 @@ def main():
 
     image_to_draw = []
     with torch.no_grad():
-        for i in tqdm(range(100)):
+        for i in tqdm(range(50)):
             img_id = eval_set.img_ids[i]
             """
             if img_id not in img_ids_to_use:
@@ -123,6 +123,7 @@ def main():
 
             persons_pred, person_labels, debug_fp = fp_persons(joint_det, preds_nodes, edge_index, sub_preds_edges,
                                                                preds_classes, config.MODEL.GC.CC_METHOD, node_labels)
+            joint_det[:, 2] = preds_classes.argmax(dim=1)
             """
             persons_pred, mutants, person_labels = pred_to_person(joint_det, preds_nodes, edge_index, sub_preds_edges,
                                                                   preds_classes, config.MODEL.GC.CC_METHOD)
@@ -164,7 +165,7 @@ def main():
             draw_detection_with_conf(img.copy(), joint_det.copy(), joint_scores, keypoints, fname=f"{output_dir}/{i}_{img_id}_conf_det.png", output_size=output_size)
             draw_detection(img.copy(), joint_det.copy(), keypoints, fname=f"{output_dir}/{i}_{img_id}_det.png", output_size=output_size)
             draw_detection_with_cluster(img.copy(), joint_det.copy(), person_labels, keypoints, fname=f"{output_dir}/{i}_{img_id}_clust_det.png", output_size=output_size)
-            draw_edges_conf(img.copy(), joint_det, person_labels, node_labels, edge_index, preds_edges, fname=f"{output_dir}/{i}_{img_id}_edges.png", output_size=output_size)
+            draw_edges_conf(img.copy(), joint_det, person_labels, joint_scores, edge_index, preds_edges, fname=f"{output_dir}/{i}_{img_id}_edges", output_size=output_size)
 
 
 

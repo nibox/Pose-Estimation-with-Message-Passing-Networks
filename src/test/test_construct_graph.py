@@ -19,6 +19,7 @@ def main():
     torch.manual_seed(seed)
 
     dataset = "coco"
+    dir_name = "images_type_agnostic_labels_valid"
     use_subset = False
 
     if dataset == "crowd_pose":
@@ -43,10 +44,10 @@ def main():
 
 
     if dataset == "coco":
-        train_ids, _ = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
+        train_ids, valid_ids = pickle.load(open("tmp/coco_17_mini_split.p", "rb"))  # mini_train_valid_split_4 old one
         heatmap_generator = [HeatmapGenerator(128, 17, 2), HeatmapGenerator(256, 17, 2)]
-        joint_generator = [JointsGenerator(30, 14, 128, True), JointsGenerator(30, 14, 256, True)]
-        img_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="train", img_ids=train_ids, year=17,
+        joint_generator = [JointsGenerator(30, 17, 128, True), JointsGenerator(30, 17, 256, True)]
+        img_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
                                    transforms=transforms, heatmap_generator=heatmap_generator, joint_generator=joint_generator)
     elif dataset == "crowd_pose":
         heatmap_generator = [HeatmapGenerator(128, 14, 2), HeatmapGenerator(256, 14, 2)]
@@ -56,7 +57,7 @@ def main():
 
     imgs_without_det = 0
     with torch.no_grad():
-        for i in range(100):  # just test the first 100 images
+        for i in range(200):  # just test the first 100 images
             # split batch
             img_id = img_set.img_ids[i]
             if use_subset:
@@ -97,6 +98,7 @@ def main():
             draw_detection(img.copy(), joint_det, np.copy(keypoints),
                            fname=f"tmp/test_construct_graph_img_{dataset}/{img_set.img_ids[i]}_det.png",
                            output_size=256)
+            # draw scoremaps
             """
             draw_detection_scoremap(heatmaps, joint_det[preds_nodes==1.0], keypoints, 0,
                            fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_nose.png",
@@ -116,23 +118,26 @@ def main():
             draw_detection_scoremap(heatmaps, joint_det[preds_nodes==1.0], keypoints, 11,
                                     fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_hip.png",
                                     output_size=256)
-            # """
             draw_detection_scoremap(heatmaps, joint_det[preds_nodes==1.0], keypoints, None,
                                     fname=f"tmp/test_construct_graph_img_crowd_pose/{img_set.img_ids[i]}_nose.png",
                                     output_size=256)
             # """
+            # """
             draw_detection(img.copy(), clean_joint_det, np.copy(keypoints),
-                           fname=f"tmp/test_construct_graph_img_{dataset}/{img_set.img_ids[i]}_clean.png",
+                           fname=f"tmp/{dir_name}/{img_set.img_ids[i]}_clean.png",
                            output_size=256)
-            draw_poses(img.copy(), np.copy(keypoints), fname=f"tmp/test_construct_graph_img_{dataset}/{img_set.img_ids[i]}_pose_gt.png",
+            draw_detection(img.copy(), joint_det, np.copy(keypoints),
+                           fname=f"tmp/{dir_name}/{img_set.img_ids[i]}_det.png",
+                           output_size=256)
+            draw_poses(img.copy(), np.copy(keypoints), fname=f"tmp/{dir_name}/{img_set.img_ids[i]}_pose_gt.png",
                        output_size=256)
             if (preds_edges==1).sum() == 0:
                 imgs_without_det += 1
                 continue
-            draw_clusters(img.copy(), joint_det, joint_classes, sparse_sol_gt,
-                          fname=f"tmp/test_construct_graph_img_{dataset}/{img_set.img_ids[i]}_pose_gt_full.png", output_size=256)
+            # draw_clusters(img.copy(), joint_det, joint_classes, sparse_sol_gt,
+            #              fname=f"tmp/{dir_name}/{img_set.img_ids[i]}_pose_gt_full.png", output_size=256)
             # draw_poses(imgs, persons_pred_cc, fname=f"../tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_cc.png")
-            draw_poses(img.copy(), persons_pred_gt, fname=f"tmp/test_construct_graph_img_{dataset}/{img_set.img_ids[i]}_pose_gt_from_labels.png",
+            draw_poses(img.copy(), persons_pred_gt, fname=f"tmp/{dir_name}/{img_set.img_ids[i]}_pose_gt_from_labels.png",
                        output_size=256)
             # draw_poses(img.copy(), persons_pred_refine, fname=f"tmp/test_construct_graph_img/{img_set.img_ids[i]}_pose_gt_refined.png",
             #            output_size=256)

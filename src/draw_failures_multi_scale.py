@@ -122,7 +122,7 @@ def compute_poses(edge_index, joint_det, preds_classes, preds_edges, preds_nodes
     true_positive_idx = preds_nodes > 0.1
     edge_index, pred = subgraph(true_positive_idx, edge_index, preds_edges)
     if edge_index.shape[1] != 0:
-        persons_pred, _, _ = pred_to_person(joint_det, preds_nodes, edge_index, pred, preds_classes, "GAEC")
+        persons_pred, _, _ = pred_to_person(joint_det, preds_nodes, edge_index, pred, preds_classes, "GAEC", 17)
     else:
         persons_pred = np.zeros([1, 17, 3])
     # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))
@@ -134,7 +134,7 @@ def perd_to_person(scoremaps, joint_det, joint_scores, edge_index, pred, cc_meth
     true_positive_idx = joint_scores > th
     edge_index, pred = subgraph(true_positive_idx, edge_index, pred)
     if edge_index.shape[1] != 0:
-        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, preds_classes, cc_method)
+        persons_pred, _, _ = pred_to_person(joint_det, joint_scores, edge_index, pred, preds_classes, cc_method, 17)
     else:
         persons_pred = np.zeros([1, 17, 3])
     # persons_pred_orig = reverse_affine_map(persons_pred.copy(), (img_info["width"], img_info["height"]))

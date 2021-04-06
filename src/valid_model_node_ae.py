@@ -1,108 +1,16 @@
-import pickle, time
+import time
 import torch
-import sys
 import numpy as np
-from torch_geometric.utils import subgraph
-from torch_scatter import scatter_mean
 from tqdm import tqdm
-from Utils.hr_utils import match_by_tag
 
-from Utils.Utils import refine, refine_tag
 from Utils.eval import EvalWriter, gen_ann_format
 from config import get_config, update_config
-from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator, JointsGenerator
-from Utils import pred_to_person_debug, pred_to_person, num_non_detected_points, adjust, to_tensor, calc_metrics, subgraph_mask, one_hot_encode, topk_accuracy
+from data import CocoKeypoints_hr, HeatmapGenerator, JointsGenerator
+from Utils import to_tensor, mpn_match_by_tag
 from Models.PoseEstimation import get_pose_model  #, get_pose_with_ref_model
 from Utils.transformations import reverse_affine_map
 from Utils.transforms import transforms_to_tensor
 
-
-def mpn_match_by_tag(joint_det, tag_k, scores, params):
-    """
-
-    :param joint_det: (N, 3)
-    :param tags: (N, D)
-    :param scores: (N)
-    :param params:
-    :return:
-    """
-    from munkres import Munkres
-    def py_max_match(scores):
-        m = Munkres()
-        tmp = m.compute(scores)
-        tmp = np.array(tmp).astype(np.int32)
-        return tmp
-
-    tag_k, loc_k, val_k = tag_k, joint_det[:, :2], scores
-    default_ = np.zeros((params.num_joints, 3 + tag_k.shape[1]))
-
-    joint_dict = {}
-    tag_dict = {}
-    for i in range(params.num_joints):
-        idx = params.joint_order[i]
-        select = joint_det[:, 2] == idx
-
-        tags = tag_k[select]
-        joints = np.concatenate(
-            (loc_k[select], val_k[select, None], tags), 1
-        )
-        mask = joints[:, 2] > params.detection_threshold
-        tags = tags[mask]
-        joints = joints[mask]
-
-        if joints.shape[0] == 0:
-            continue
-
-        if i == 0 or len(joint_dict) == 0:
-            for tag, joint in zip(tags, joints):
-                key = tag[0]
-                joint_dict.setdefault(key, np.copy(default_))[idx] = joint
-                tag_dict[key] = [tag]
-        else:
-            grouped_keys = list(joint_dict.keys())[:params.max_num_people]
-            grouped_tags = [np.mean(tag_dict[i], axis=0) for i in grouped_keys]
-
-            if params.ignore_too_much \
-                    and len(grouped_keys) == params.max_num_people:
-                continue
-
-            diff = joints[:, None, 3:] - np.array(grouped_tags)[None, :, :]
-            diff_normed = np.linalg.norm(diff, ord=2, axis=2)
-            diff_saved = np.copy(diff_normed)
-
-            if params.use_detection_val:
-                diff_normed = np.round(diff_normed) * 100 - joints[:, 2:3]
-
-            num_added = diff.shape[0]
-            num_grouped = diff.shape[1]
-
-            if num_added > num_grouped:
-                diff_normed = np.concatenate(
-                    (
-                        diff_normed,
-                        np.zeros((num_added, num_added-num_grouped))+1e10
-                    ),
-                    axis=1
-                )
-
-            pairs = py_max_match(diff_normed)
-            for row, col in pairs:
-                if (
-                        row < num_added
-                        and col < num_grouped
-                        and diff_saved[row][col] < params.tag_threshold
-                ):
-                    key = grouped_keys[col]
-                    joint_dict[key][idx] = joints[row]
-                    tag_dict[key].append(tags[row])
-                else:
-                    key = tags[row][0]
-                    joint_dict.setdefault(key, np.copy(default_))[idx] = \
-                        joints[row]
-                    tag_dict[key] = [tags[row]]
-
-    ans = np.array([joint_dict[i] for i in joint_dict]).astype(np.float32)
-    return ans
 
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
@@ -111,10 +19,10 @@ def main():
     ######################################
 
     config_dir = "hybrid_class_agnostic_end2end"
-    config_name = "model_56_1_0_6_0_16_1"
+    config_name = "model_56_1_0_6_0_16_3"
     config = get_config()
     config = update_config(config, f"../experiments/{config_dir}/{config_name}.yaml")
-    eval_writer = EvalWriter(config, fname="eval_single_scale.txt")
+    eval_writer = EvalWriter(config, fname="eval_single_scale_flip.txt")
 
 
     heatmap_generator = [HeatmapGenerator(128, 17), HeatmapGenerator(256, 17)]
@@ -153,20 +61,20 @@ def main():
                 keypoints = None
                 factors = None
 
-            scoremaps, output = model.multi_scale_inference(img, config.TEST.SCALE_FACTOR, config, keypoints, factors)
+            scoremaps, output = model.multi_scale_inference(img, config, keypoints)
             preds_nodes, preds_tags, preds_classes = output["preds"]["node"], output["preds"]["tag"], output["preds"]["class"]
             node_labels, class_labels = output["labels"]["node"],  output["labels"]["class"]
             joint_det = output["graph"]["nodes"]
             tags = output["graph"]["tags"]
             joint_scores = output["graph"]["detector_scores"]
 
-            preds_classes = preds_classes[-1].softmax(dim=1) if preds_classes is not None else None
-            preds_nodes = preds_nodes[-1].sigmoid().squeeze()
+            # preds_classes = preds_classes[-1].softmax(dim=1) if preds_classes is not None else None
+            # preds_nodes = preds_nodes[-1].sigmoid().squeeze()
             preds_tags = preds_tags[-1]
 
             img_info = eval_set.coco.loadImgs(int(eval_set.img_ids[i]))[0]
             t1 = time.time()
-            ann = perd_to_ann(scoremaps[0], preds_tags, joint_det, joint_scores, img_info, int(eval_set.img_ids[i]), scaling_type, preds_classes,
+            ann = perd_to_ann(scoremaps[0], preds_tags, joint_det, joint_scores, img_info, int(eval_set.img_ids[i]), scaling_type,
                               tags[0])
             t2 = time.time()
             avg_time.append(t2-t1)
@@ -183,7 +91,7 @@ def main():
 
 
 def perd_to_ann(scoremaps, tags, joint_det, joint_scores, img_info, img_id,
-                scaling_type, preds_classes, tagmap):
+                scaling_type, tagmap, refine, adjust, input_size):
     class Params(object):
         def __init__(self):
             self.num_joints = 17
@@ -201,18 +109,17 @@ def perd_to_ann(scoremaps, tags, joint_det, joint_scores, img_info, img_id,
     joint_det = joint_det.cpu().numpy()
     joint_scores = joint_scores.cpu().numpy()
     tags = tags.cpu().numpy()[:, None]
-    joint_det[:, 2] = preds_classes.cpu().numpy().argmax(axis=1)
     ans = mpn_match_by_tag(joint_det, tags, joint_scores, Params())
 
-    if True:
+    if refine:
         tagmap= tagmap.cpu().numpy()
         scoremaps = scoremaps.cpu().numpy()
         ans = refine(scoremaps, tagmap, ans)
-    if True:
+    if adjust:
         ans = adjust(ans, scoremaps)
     if len(ans) == 0:
         return None
-    persons_pred_orig = reverse_affine_map(ans.copy(), (img_info["width"], img_info["height"]), 512, scaling_type=scaling_type,
+    persons_pred_orig = reverse_affine_map(ans.copy(), (img_info["width"], img_info["height"]), input_size, scaling_type=scaling_type,
                                            min_scale=1)
 
     ann = gen_ann_format(persons_pred_orig, img_id)

@@ -147,6 +147,7 @@ def main():
         eval_set = CocoKeypoints_hr(config.DATASET.ROOT, mini=True, seed=0, mode="val", img_ids=valid_ids, year=17,
                                     transforms=transforms, heatmap_generator=heatmap_generator, mask_crowds=False,
                                     joint_generator=joint_generator)
+
     else:
         raise NotImplementedError
 

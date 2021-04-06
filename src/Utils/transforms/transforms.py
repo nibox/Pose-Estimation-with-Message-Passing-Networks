@@ -88,7 +88,7 @@ class RandomHorizontalFlip(object):
     def __call__(self, image, mask, joints, factors):
         assert isinstance(mask, list)
         assert len(mask) == len(self.output_size)
-        assert np.argmax(self.output_size) == len(self.output_size) - 1  # the largest output size should the last item
+        # assert np.argmax(self.output_size) == len(self.output_size) - 1  # the largest output size should the last item
         # todo adapt to factors
 
         if random.random() < self.prob:

@@ -6,6 +6,7 @@ import torchvision
 from torch_geometric.utils import f1_score
 from tqdm import tqdm
 from config import get_config, update_config
+from torch.utils.tensorboard import SummaryWriter
 
 from data import CocoKeypoints_hg, CocoKeypoints_hr, HeatmapGenerator
 from Utils.transforms import transforms_hr_eval
@@ -20,10 +21,12 @@ def main():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     ######################################
-    config_name = "model_32"
+    config_name = "model_37_3"
     config = get_config()
     config = update_config(config, f"../experiments/train/{config_name}.yaml")
     # img_ids_to_use = [84015, 84381, 117772, 237976, 281133, 286645, 505421]
+
+    writer = SummaryWriter(f"tmp/output_{config_name}")
 
     ######################################
     # set is used, "train" means validation set corresponding to the mini train set is used )
@@ -76,16 +79,16 @@ def main():
             img_transformed = img.to(device)[None]
             masks, keypoints, factors = to_tensor(device, masks[-1], keypoints, factors)
             num_persons_gt = np.count_nonzero(keypoints[0, :, :, 2].sum(axis=1).cpu().numpy())
-            _, pred, joint_det, joint_scores, edge_index, edge_labels, _, _ , _, node_features = model(img_transformed, keypoints, masks, factors, with_logits=False)
+            _, pred, joint_det, joint_scores, edge_index, edge_labels, _, _, _, node_features = model(img_transformed, keypoints, masks, factors, with_logits=False)
 
             result = pred[-1].squeeze()
             result = torch.where(result < 0.5, torch.zeros_like(result), torch.ones_like(result))
             f1_s = f1_score(result, edge_labels, 2)[1]
             # draw images that have low f1 score, that could not detect all persons or to many persons, or mutants
             persons_pred, mutants, person_labels = pred_to_person(joint_det, joint_scores, edge_index, result, None,
-                                                                  config.MODEL.GC.CC_METHOD)
+                                                                  config.MODEL.GC.CC_METHOD, )
             persons_pred_label, _, _ = pred_to_person(joint_det, joint_scores, edge_index, edge_labels, None,
-                                                      config.MODEL.GC.CC_METHOD)
+                                                      config.MODEL.GC.CC_METHOD, )
             num_persons_det = len(persons_pred)
 
 
@@ -98,22 +101,23 @@ def main():
                 saving_cause = SavingCause(f1=f1_s, additional_p=num_persons_det > num_persons_gt,
                                            missing_p=num_persons_det < num_persons_gt, mutants=mutants)
                 image_to_draw.append(
-                    (eval_set.img_ids[i], img, persons_pred, persons_pred_label, joint_det, keypoints, saving_cause))
+                    (eval_set.img_ids[i], img, persons_pred, persons_pred_label, joint_det, keypoints, saving_cause, node_features, person_labels))
 
         # draw images
         # best image
         output_dir = f"tmp/output_{config_name}"
         os.makedirs(output_dir, exist_ok=True)
         for i, samples in enumerate(image_to_draw):
-            img_id, img, persons, person_label, joint_det, keypoints, saving_cause = samples
+            img_id, img, persons, person_label, joint_det, keypoints, saving_cause, node_features, person_labels = samples
+            writer.add_embedding(node_features, metadata=person_labels, global_step=i)
             failures = filter(lambda x: x is not None,
                               [cause if getattr(saving_cause, cause) and cause != "f1" else None for cause in
                                saving_cause.__dict__.keys()])
             failures = "|".join(failures)
-            draw_poses(img, persons, f"{output_dir}/{img_id}_{int(saving_cause.f1 * 100)}_{failures}.png", output_size=output_size)
-            draw_poses(img, person_label, f"{output_dir}/{img_id}_gt_labels.png", output_size=output_size)
-            draw_poses(img, keypoints, f"{output_dir}/{img_id}_gt.png", output_size=output_size)
-            draw_detection(img, joint_det, keypoints, fname=f"{output_dir}/{img_id}_det.png", output_size=output_size)
+            draw_poses(img, persons, f"{output_dir}/{i}_{img_id}_{int(saving_cause.f1 * 100)}_{failures}.png", output_size=output_size)
+            draw_poses(img, person_label, f"{output_dir}/{i}_{img_id}_gt_labels.png", output_size=output_size)
+            draw_poses(img, keypoints, f"{output_dir}/{i}_{img_id}_gt.png", output_size=output_size)
+            draw_detection(img, joint_det, keypoints, fname=f"{output_dir}/{i}_{img_id}_det.png", output_size=output_size)
 
 
 if __name__ == "__main__":
