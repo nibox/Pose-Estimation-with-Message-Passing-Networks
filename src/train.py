@@ -183,6 +183,25 @@ def make_train_func(model, optimizer, loss_func, **kwargs):
 
     return func
 
+def dispatch_loss_func(config):
+    """
+    This function returns the appproriate loss function object give the config.
+    This is a workaround, because i want to avoid larger refactoring to unify all loss functions.
+    I unified them partially in ClassMultiLossFactory, but it requries that node loss is chosen. This means that i cant
+    train a pure edge loss model with it (without larger refactorings).
+    There is also no guratantee that this function covers all use cases!!!
+    :param config:
+    :return:
+    """
+    losses = config.MODEL.LOSS.NAME
+    if "node" in config.MODEL.LOSS.NAME:
+        return ClassMultiLossFactory(config)
+    elif {"heatmap", "tag"} == set(losses):
+        return PureTagMultiLossFactory(config)
+    elif {"edge", "heatmap"} == set(losses):
+        return MultiLossFactory(config)
+    else:
+        raise NotImplementedError
 
 def main():
     device = torch.device("cuda") if torch.cuda.is_available() and True else torch.device("cpu")
@@ -224,11 +243,13 @@ def main():
         else:
             raise NotImplementedError
 
-        loss_func = ClassMultiLossFactory(config)
+        # loss_func = ClassMultiLossFactory(config)
+        loss_func = dispatch_loss_func(config)
     else:
         model.freeze_backbone(mode="complete")
         optimizer = torch.optim.Adam(model.parameters(), lr=config.TRAIN.LR, weight_decay=config.TRAIN.W_DECAY)
-        loss_func = ClassMultiLossFactory(config)
+        # loss_func = ClassMultiLossFactory(config)
+        loss_func = dispatch_loss_func(config)
     scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, config.TRAIN.LR_STEP, config.TRAIN.LR_FACTOR)
     model.to(device)
 

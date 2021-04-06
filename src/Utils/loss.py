@@ -439,9 +439,8 @@ class PureTagMultiLossFactory(nn.Module):
 
         self.num_joints = config.MODEL.HRNET.NUM_JOINTS
         self.num_stages = config.MODEL.HRNET.LOSS.NUM_STAGES
-        self.loss_weights = config.MODEL.LOSS.LOSS_WEIGHTS
         self.sync_tags = config.MODEL.LOSS.SYNC_TAGS
-        assert len(self.loss_weights) == 1
+        self.loss_weight = config.MODEL.LOSS.TAG_WEIGHT
 
         self.heatmaps_loss = \
             nn.ModuleList(
@@ -529,9 +528,9 @@ class PureTagMultiLossFactory(nn.Module):
                    "tag_loss": ae_loss.cpu().item() if isinstance(ae_loss, torch.Tensor) else ae_loss,
                    "tag": tag_loss.cpu().item() if isinstance(tag_loss, torch.Tensor) else tag_loss,
                    }
-        tag_loss *= self.loss_weights[0]
+        # tag_loss *= self.loss_weights[0]
 
-        loss = tag_loss * self.loss_weights[0] + heatmap_loss + ae_loss
+        loss = tag_loss * self.loss_weight + heatmap_loss + ae_loss
         logging["loss"] = loss.cpu().item()
 
         return loss, logging
@@ -685,7 +684,7 @@ class ClassMultiLossFactory(nn.Module):
         class_loss = 0.0
         if self.class_loss is not None:
             for i in range(len(preds_classes)):
-                class_loss += self.class_loss(preds_classes[i], class_labels, "mean", node_labels)
+                class_loss += self.class_loss(preds_classes[i], class_labels, "mean", node_labels, joint_det[:, 2])
             class_loss = class_loss / len(preds_classes)
         class_loss *= self.class_weight
 
