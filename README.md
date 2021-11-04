@@ -3,6 +3,20 @@
 This repository contains the code for my master's thesis Pose Estimation with Graph Neural Networks.
 Follow-up work lead to his publication: [[Paper]](https://arxiv.org/abs/2110.05132)
 
+This thesis considers the task of human pose estimation in images which can contain
+multiple people. We propose a simple graph network based framework which follows
+the bottom-up pose estimation scheme. Previous work either relied on convolutional
+neural networks to model relations between keypoints or involved complex hierarchical
+grouping schemes. After the initial keypoint detection step, we apply a message passing
+network, which models the relations between the keypoints directly. On top of the
+resulting output, we use a set of three classifiers. One learns to associate pairs of
+keypoints, one identifies false positive keypoint detections, and the last one assigns
+each detection its correct type. This allows us to recover initially missed keypoints and
+correct misclassifications commited by the keypoint detector. We evaluate our model
+on the COCO and CrowdPose datasets. Our model improves the state-of-the-art by 0.5
+AP on the COCO test split and 1.5AP on CrowdPose test split, achieving 71.0 AP and
+69.0 AP respectively.
+
 ## Main Results
 ### Results on COCO test-dev2017 with multi-scale test
 | Method             | Backbone | Input size  |    AP | Ap .5 | AP .75 | AP (M) | AP (L) |
@@ -28,7 +42,7 @@ Follow-up work lead to his publication: [[Paper]](https://arxiv.org/abs/2110.051
 *Note: + indicates using multi-scale test.*
 ## Start
 ### Installation
-Most of the steps are similar to the steps described in [HigherHRNet](https://github.com/HRNet/HigherHRNet-Human-Pose-Estimation)
+Most of the steps are similar to the steps described in (and borrowed from) [HigherHRNet](https://github.com/HRNet/HigherHRNet-Human-Pose-Estimation)
 1. Install pytorch >= v1.4.0 following [official instruction](https://pytorch.org/).  
    - **Tested with pytorch v1.4.0**
 2. Clone this repo, and we'll call the directory that you cloned as ${POSE_ROOT}.
